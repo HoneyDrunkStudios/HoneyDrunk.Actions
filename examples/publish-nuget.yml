@@ -1,0 +1,60 @@
+name: Publish to NuGet
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to NuGet.org'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  # Option 1: Use the full release stage workflow
+  release:
+    name: Release Package
+    uses: ./.github/workflows/templates/stages/dotnet-library-release.yml
+    with:
+      dotnet-version: '10.0.x'
+      configuration: 'Release'
+      runs-on: 'ubuntu-latest'
+      nuget-source: 'https://api.nuget.org/v3/index.json'
+      skip-duplicate: true
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+  
+  # Option 2: Manually compose jobs for more control
+  # build-and-test:
+  #   name: Build and Test
+  #   uses: ./.github/workflows/templates/jobs/build-and-test.yml
+  #   with:
+  #     dotnet-version: '10.0.x'
+  #     configuration: 'Release'
+  #     runs-on: 'ubuntu-latest'
+  #     enable-cache: true
+  #     collect-coverage: true
+  # 
+  # code-quality:
+  #   name: Code Quality Check
+  #   uses: ./.github/workflows/templates/jobs/code-quality.yml
+  #   with:
+  #     dotnet-version: '10.0.x'
+  #     runs-on: 'ubuntu-latest'
+  #     fail-on-severity: 'high'
+  # 
+  # publish:
+  #   name: Publish Package
+  #   needs: [build-and-test, code-quality]
+  #   if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
+  #   uses: ./.github/workflows/templates/jobs/publish-nuget.yml
+  #   with:
+  #     dotnet-version: '10.0.x'
+  #     configuration: 'Release'
+  #     runs-on: 'ubuntu-latest'
+  #     nuget-source: 'https://api.nuget.org/v3/index.json'
+  #     skip-duplicate: true
+  #   secrets:
+  #     nuget-api-key: ${{ secrets.NUGET_API_KEY }}

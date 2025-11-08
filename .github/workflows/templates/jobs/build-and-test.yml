@@ -1,0 +1,97 @@
+name: Build and Test
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      configuration:
+        description: 'Build configuration'
+        required: false
+        type: string
+        default: 'Release'
+      runs-on:
+        description: 'The runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: 'Working directory for build operations'
+        required: false
+        type: string
+        default: '.'
+      enable-cache:
+        description: 'Enable NuGet package caching'
+        required: false
+        type: boolean
+        default: true
+      collect-coverage:
+        description: 'Collect code coverage during tests'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Setup NuGet cache
+        if: ${{ inputs.enable-cache }}
+        uses: ./.github/actions/nuget/setup-cache
+        with:
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Build solution
+        uses: ./.github/actions/dotnet/build
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Run tests
+        uses: ./.github/actions/dotnet/test
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-build: 'true'
+          collect-coverage: ${{ inputs.collect-coverage }}
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Publish test results
+        if: always()
+        uses: ./.github/actions/diagnostics/publish-test-results
+        with:
+          test-results-directory: TestResults
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.runs-on }}
+          path: TestResults/**/*
+          retention-days: 30
+      
+      - name: Upload coverage reports
+        if: ${{ inputs.collect-coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ inputs.runs-on }}
+          path: TestResults/**/coverage.cobertura.xml
+          retention-days: 30

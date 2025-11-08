@@ -1,0 +1,33 @@
+name: 'Generate PR Summary'
+description: 'Generate a summary of build and test results for PRs'
+inputs:
+  include-coverage:
+    description: 'Include code coverage in summary'
+    required: false
+    default: 'true'
+  test-results-directory:
+    description: 'Directory containing test results'
+    required: false
+    default: 'TestResults'
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate PR summary
+      shell: bash
+      run: |
+        echo "## ?? Build & Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ? Build Status" >> $GITHUB_STEP_SUMMARY
+        echo "Build completed successfully" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -d "${{ inputs.test-results-directory }}" ]; then
+          echo "### ?? Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "Test results available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "### ?? Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,22 @@
+name: 'Debug Build Identity'
+description: 'Display build environment information for debugging'
+runs:
+  using: 'composite'
+  steps:
+    - name: Display environment information
+      shell: bash
+      run: |
+        echo "=== GitHub Actions Environment ==="
+        echo "Runner OS: ${{ runner.os }}"
+        echo "Runner Architecture: ${{ runner.arch }}"
+        echo "Workflow: ${{ github.workflow }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Branch: ${{ github.ref }}"
+        echo "Commit SHA: ${{ github.sha }}"
+        echo "Event: ${{ github.event_name }}"
+        echo ""
+        echo "=== .NET Information ==="
+        dotnet --info
+        echo ""
+        echo "=== Environment Variables ==="
+        env | sort

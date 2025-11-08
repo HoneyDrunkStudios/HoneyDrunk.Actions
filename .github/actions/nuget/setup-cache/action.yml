@@ -1,0 +1,21 @@
+name: 'Setup NuGet Cache'
+description: 'Configure caching for NuGet packages to speed up builds'
+inputs:
+  cache-key-prefix:
+    description: 'Prefix for the cache key'
+    required: false
+    default: 'nuget'
+  working-directory:
+    description: 'Working directory containing project files'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ hashFiles(format('{0}/**/*.csproj', inputs.working-directory)) }}
+        restore-keys: |
+          ${{ inputs.cache-key-prefix }}-${{ runner.os }}-

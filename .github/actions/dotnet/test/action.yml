@@ -1,0 +1,41 @@
+name: 'Test .NET Project'
+description: 'Run tests for a .NET project with coverage and result reporting'
+inputs:
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  no-build:
+    description: 'Skip build during test'
+    required: false
+    default: 'false'
+  test-results-directory:
+    description: 'Directory to store test results'
+    required: false
+    default: 'TestResults'
+  collect-coverage:
+    description: 'Collect code coverage'
+    required: false
+    default: 'true'
+  working-directory:
+    description: 'Working directory for tests'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Run tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        ARGS="--configuration ${{ inputs.configuration }} --logger trx --results-directory ${{ inputs.test-results-directory }}"
+        
+        if [ "${{ inputs.no-build }}" == "true" ]; then
+          ARGS="$ARGS --no-build"
+        fi
+        
+        if [ "${{ inputs.collect-coverage }}" == "true" ]; then
+          ARGS="$ARGS --collect:'XPlat Code Coverage'"
+        fi
+        
+        dotnet test $ARGS
