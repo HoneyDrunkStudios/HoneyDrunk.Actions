@@ -28,6 +28,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # Check if there are any test projects
+        if ! find . -name "*.csproj" -exec grep -l "Microsoft.NET.Test.Sdk\|MSTest.TestAdapter\|xunit\|nunit" {} \; | grep -q .; then
+          echo "No test projects found - skipping tests"
+          exit 0
+        fi
+        
         ARGS="--configuration ${{ inputs.configuration }} --logger trx --results-directory ${{ inputs.test-results-directory }}"
         
         if [ "${{ inputs.no-build }}" == "true" ]; then
@@ -35,7 +41,7 @@ runs:
         fi
         
         if [ "${{ inputs.collect-coverage }}" == "true" ]; then
-          ARGS="$ARGS --collect:'XPlat Code Coverage'"
+          ARGS="$ARGS --collect \"XPlat Code Coverage\""
         fi
         
-        dotnet test $ARGS
+        eval "dotnet test $ARGS"

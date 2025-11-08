@@ -9,13 +9,29 @@ inputs:
     description: 'Name for the test report'
     required: false
     default: 'Test Results'
+  github-token:
+    description: 'GitHub token for creating check runs'
+    required: false
+    default: ${{ github.token }}
 runs:
   using: 'composite'
   steps:
+    - name: Check if test results exist
+      id: check-results
+      shell: bash
+      run: |
+        if [ -d "${{ inputs.test-results-directory }}" ] && [ -n "$(find ${{ inputs.test-results-directory }} -name '*.trx' 2>/dev/null)" ]; then
+          echo "results-exist=true" >> $GITHUB_OUTPUT
+        else
+          echo "results-exist=false" >> $GITHUB_OUTPUT
+          echo "No test results found in ${{ inputs.test-results-directory }} - skipping publish"
+        fi
+    
     - name: Publish test results
+      if: always() && steps.check-results.outputs.results-exist == 'true'
       uses: EnricoMi/publish-unit-test-result-action@v2
-      if: always()
       with:
         files: ${{ inputs.test-results-directory }}/**/*.trx
         check_name: ${{ inputs.report-name }}
         comment_mode: off
+        github_token: ${{ inputs.github-token }}
