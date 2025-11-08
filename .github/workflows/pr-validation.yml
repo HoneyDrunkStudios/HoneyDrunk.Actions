@@ -1,0 +1,53 @@
+name: PR Validation (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      configuration:
+        description: 'Build configuration'
+        required: false
+        type: string
+        default: 'Release'
+      runs-on:
+        description: 'The runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: 'Working directory for operations'
+        required: false
+        type: string
+        default: '.'
+      enable-code-quality:
+        description: 'Run code quality checks'
+        required: false
+        type: boolean
+        default: true
+      post-pr-comment:
+        description: 'Post results as PR comment'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      github-token:
+        description: 'GitHub token for posting comments'
+        required: false
+
+jobs:
+  validate:
+    name: Validate PR
+    uses: ./.github/workflows/templates/stages/pr-validation.yml
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      configuration: ${{ inputs.configuration }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      enable-code-quality: ${{ inputs.enable-code-quality }}
+      post-pr-comment: ${{ inputs.post-pr-comment }}
+    secrets:
+      github-token: ${{ secrets.github-token }}

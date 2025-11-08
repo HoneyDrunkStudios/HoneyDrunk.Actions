@@ -1,0 +1,47 @@
+name: Build and Test (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      configuration:
+        description: 'Build configuration'
+        required: false
+        type: string
+        default: 'Release'
+      runs-on:
+        description: 'The runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: 'Working directory for operations'
+        required: false
+        type: string
+        default: '.'
+      enable-cache:
+        description: 'Enable dependency caching'
+        required: false
+        type: boolean
+        default: true
+      collect-coverage:
+        description: 'Collect test coverage'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    uses: ./.github/workflows/templates/jobs/build-and-test.yml
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      configuration: ${{ inputs.configuration }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      enable-cache: ${{ inputs.enable-cache }}
+      collect-coverage: ${{ inputs.collect-coverage }}
