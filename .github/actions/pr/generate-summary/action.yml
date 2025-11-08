@@ -15,19 +15,19 @@ runs:
     - name: Generate PR summary
       shell: bash
       run: |
-        echo "## ?? Build & Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## :white_check_mark: Build & Test Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### ? Build Status" >> $GITHUB_STEP_SUMMARY
+        echo "### :hammer: Build Status" >> $GITHUB_STEP_SUMMARY
         echo "Build completed successfully" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         if [ -d "${{ inputs.test-results-directory }}" ]; then
-          echo "### ?? Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "### :test_tube: Test Results" >> $GITHUB_STEP_SUMMARY
           echo "Test results available in artifacts" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
         
-        echo "### ?? Details" >> $GITHUB_STEP_SUMMARY
-        echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "### :information_source: Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

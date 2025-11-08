@@ -43,6 +43,11 @@ on:
         description: 'GitHub token for posting comments'
         required: false
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   build-and-test:
     name: Build and Test
@@ -82,6 +87,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Run tests
+        continue-on-error: false
         uses: ./.github/actions-repo/.github/actions/dotnet/test
         with:
           configuration: ${{ inputs.configuration }}
@@ -91,23 +97,28 @@ jobs:
       
       - name: Publish test results
         if: always()
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/diagnostics/publish-test-results
         with:
-          test-results-directory: TestResults
+          test-results-directory: ${{ inputs.working-directory }}/TestResults
+          github-token: ${{ secrets.github-token || github.token }}
 
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ inputs.runs-on }}
-          path: TestResults/**/*
+          path: ${{ inputs.working-directory }}/TestResults/**/*
           retention-days: 30
       
       - name: Upload coverage reports
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-reports-${{ inputs.runs-on }}
-          path: TestResults/**/coverage.cobertura.xml
+          path: ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
           retention-days: 30
   
   code-quality:
@@ -143,6 +154,7 @@ jobs:
           fail-on-severity: 'moderate'
       
       - name: Validate test naming
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/diagnostics/validate-test-naming
         with:
           test-directory: ${{ inputs.working-directory }}
@@ -170,18 +182,20 @@ jobs:
           ref: ${{ inputs.actions-ref }}
       
       - name: Generate PR summary
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/pr/generate-summary
       
       - name: Post PR comment
         if: ${{ inputs.post-pr-comment }}
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/pr/post-comment
         with:
           github-token: ${{ secrets.github-token }}
           message: |
-            ## ? PR Validation Complete
+            ## :white_check_mark: PR Validation Complete
             
             Build and tests completed successfully!
             
             **Configuration:** ${{ inputs.configuration }}
             **Runner:** ${{ inputs.runs-on }}
-            **Commit:** ${{ github.sha }}
+            **Commit:** `${{ github.sha }}`

@@ -39,6 +39,10 @@ on:
         type: string
         default: 'main'
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   build-and-test:
     name: Build and Test
@@ -79,6 +83,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Run tests
+        continue-on-error: false
         uses: ./.github/actions-repo/.github/actions/dotnet/test
         with:
           configuration: ${{ inputs.configuration }}
@@ -88,22 +93,26 @@ jobs:
       
       - name: Publish test results
         if: always()
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/diagnostics/publish-test-results
         with:
-          test-results-directory: TestResults
+          test-results-directory: ${{ inputs.working-directory }}/TestResults
+          github-token: ${{ github.token }}
       
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ inputs.runs-on }}
-          path: TestResults/**/*
+          path: ${{ inputs.working-directory }}/TestResults/**/*
           retention-days: 30
       
       - name: Upload coverage reports
         if: ${{ inputs.collect-coverage }}
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-reports-${{ inputs.runs-on }}
-          path: TestResults/**/coverage.cobertura.xml
+          path: ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
           retention-days: 30
