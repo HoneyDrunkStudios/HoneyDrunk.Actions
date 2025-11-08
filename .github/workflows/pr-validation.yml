@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      actions-ref:
+        description: 'Git ref (branch/tag/commit) of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
     secrets:
       github-token:
         description: 'GitHub token for posting comments'
@@ -47,30 +52,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
       - name: Setup .NET
-        uses: ./.github/actions/dotnet/setup
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
       
       - name: Setup NuGet cache
-        uses: ./.github/actions/nuget/setup-cache
+        uses: ./.github/actions-repo/.github/actions/nuget/setup-cache
         with:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Restore dependencies
-        uses: ./.github/actions/dotnet/restore
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Build solution
-        uses: ./.github/actions/dotnet/build
+        uses: ./.github/actions-repo/.github/actions/dotnet/build
         with:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
           working-directory: ${{ inputs.working-directory }}
       
       - name: Run tests
-        uses: ./.github/actions/dotnet/test
+        uses: ./.github/actions-repo/.github/actions/dotnet/test
         with:
           configuration: ${{ inputs.configuration }}
           no-build: 'true'
@@ -79,7 +91,7 @@ jobs:
       
       - name: Publish test results
         if: always()
-        uses: ./.github/actions/diagnostics/publish-test-results
+        uses: ./.github/actions-repo/.github/actions/diagnostics/publish-test-results
         with:
           test-results-directory: TestResults
 
@@ -107,24 +119,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
       - name: Setup .NET
-        uses: ./.github/actions/dotnet/setup
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
       
       - name: Restore dependencies
-        uses: ./.github/actions/dotnet/restore
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Security vulnerability scan
-        uses: ./.github/actions/security/vulnerability-scan
+        uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
         with:
           working-directory: ${{ inputs.working-directory }}
           fail-on-severity: 'moderate'
       
       - name: Validate test naming
-        uses: ./.github/actions/diagnostics/validate-test-naming
+        uses: ./.github/actions-repo/.github/actions/diagnostics/validate-test-naming
         with:
           test-directory: ${{ inputs.working-directory }}
       
@@ -143,12 +162,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
       - name: Generate PR summary
-        uses: ./.github/actions/pr/generate-summary
+        uses: ./.github/actions-repo/.github/actions/pr/generate-summary
       
       - name: Post PR comment
         if: ${{ inputs.post-pr-comment }}
-        uses: ./.github/actions/pr/post-comment
+        uses: ./.github/actions-repo/.github/actions/pr/post-comment
         with:
           github-token: ${{ secrets.github-token }}
           message: |
