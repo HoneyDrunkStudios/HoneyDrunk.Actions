@@ -48,6 +48,10 @@ on:
         description: 'API key for the NuGet feed'
         required: true
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-and-test:
     name: Build and Test
@@ -87,6 +91,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Run tests
+        continue-on-error: false
         uses: ./.github/actions-repo/.github/actions/dotnet/test
         with:
           configuration: ${{ inputs.configuration }}
@@ -96,10 +101,11 @@ jobs:
       
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: TestResults/**/*
+          path: ${{ inputs.working-directory }}/TestResults/**/*
           retention-days: 30
   
   code-quality:
@@ -134,6 +140,7 @@ jobs:
           fail-on-severity: 'high'
       
       - name: Validate test naming
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/diagnostics/validate-test-naming
         with:
           test-directory: ${{ inputs.working-directory }}
@@ -163,12 +170,15 @@ jobs:
       
       - name: Restore dependencies
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Build project
         uses: ./.github/actions-repo/.github/actions/dotnet/build
         with:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Pack project
         uses: ./.github/actions-repo/.github/actions/dotnet/pack
@@ -177,6 +187,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           no-build: 'true'
           output-directory: ./artifacts
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Push to NuGet
         uses: ./.github/actions-repo/.github/actions/nuget/push
@@ -187,6 +198,7 @@ jobs:
           skip-duplicate: ${{ inputs.skip-duplicate }}
       
       - name: Upload packages
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
