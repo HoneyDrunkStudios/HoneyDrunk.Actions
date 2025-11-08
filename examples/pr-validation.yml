@@ -1,0 +1,22 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+
+jobs:
+  validate:
+    name: Validate Pull Request
+    uses: ./.github/workflows/templates/stages/pr-validation.yml
+    with:
+      dotnet-version: '10.0.x'
+      configuration: 'Release'
+      runs-on: 'ubuntu-latest'
+      enable-code-quality: true
+      post-pr-comment: true
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}

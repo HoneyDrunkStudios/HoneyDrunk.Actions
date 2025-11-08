@@ -1,0 +1,36 @@
+name: 'Post PR Comment'
+description: 'Post a comment to the pull request with build information'
+inputs:
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+  message:
+    description: 'Message to post in the comment'
+    required: true
+  comment-tag:
+    description: 'Unique tag to identify and update existing comments'
+    required: false
+    default: 'build-bot'
+runs:
+  using: 'composite'
+  steps:
+    - name: Find existing comment
+      uses: peter-evans/find-comment@v3
+      id: find-comment
+      if: ${{ github.event_name == 'pull_request' }}
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: ${{ inputs.comment-tag }}
+    
+    - name: Create or update comment
+      uses: peter-evans/create-or-update-comment@v4
+      if: ${{ github.event_name == 'pull_request' }}
+      with:
+        comment-id: ${{ steps.find-comment.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body: |
+          <!-- ${{ inputs.comment-tag }} -->
+          ${{ inputs.message }}
+        edit-mode: replace
+        token: ${{ inputs.github-token }}

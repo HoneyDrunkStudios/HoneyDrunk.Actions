@@ -1,0 +1,69 @@
+name: Custom Workflow with Actions
+
+on:
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  diagnostics-and-security:
+    name: Diagnostics and Security
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Debug build environment
+        uses: ./.github/actions/diagnostics/debug-build-identity
+      
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: '10.0.x'
+      
+      - name: Restore dependencies
+        uses: ./.github/actions/dotnet/restore
+      
+      - name: Security scan
+        uses: ./.github/actions/security/vulnerability-scan
+        with:
+          fail-on-severity: 'high'
+      
+      - name: Validate test naming
+        uses: ./.github/actions/diagnostics/validate-test-naming
+  
+  build-and-deploy:
+    name: Build and Deploy
+    needs: diagnostics-and-security
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: '10.0.x'
+      
+      - name: Restore dependencies
+        uses: ./.github/actions/dotnet/restore
+      
+      - name: Build
+        uses: ./.github/actions/dotnet/build
+        with:
+          configuration: 'Release'
+          no-restore: 'true'
+      
+      - name: Publish application
+        uses: ./.github/actions/dotnet/publish
+        with:
+          configuration: 'Release'
+          no-build: 'true'
+          output-directory: './publish'
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-app
+          path: ./publish

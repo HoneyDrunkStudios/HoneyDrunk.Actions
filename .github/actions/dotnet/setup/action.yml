@@ -1,0 +1,19 @@
+name: 'Setup .NET SDK'
+description: 'Install a specific version of the .NET SDK'
+inputs:
+  dotnet-version:
+    description: 'The .NET SDK version to install'
+    required: false
+    default: '10.0.x'
+  include-prerelease:
+    description: 'Include prerelease versions'
+    required: false
+    default: 'false'
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        include-prerelease: ${{ inputs.include-prerelease }}

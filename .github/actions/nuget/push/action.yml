@@ -1,0 +1,30 @@
+name: 'Push NuGet Package'
+description: 'Push NuGet packages to a feed'
+inputs:
+  package-path:
+    description: 'Path to the NuGet package(s) to push'
+    required: true
+  source:
+    description: 'The NuGet feed URL'
+    required: false
+    default: 'https://api.nuget.org/v3/index.json'
+  api-key:
+    description: 'API key for the NuGet feed'
+    required: true
+  skip-duplicate:
+    description: 'Skip pushing if package already exists'
+    required: false
+    default: 'true'
+runs:
+  using: 'composite'
+  steps:
+    - name: Push NuGet package
+      shell: bash
+      run: |
+        ARGS="${{ inputs.package-path }} --source ${{ inputs.source }} --api-key ${{ inputs.api-key }}"
+        
+        if [ "${{ inputs.skip-duplicate }}" == "true" ]; then
+          ARGS="$ARGS --skip-duplicate"
+        fi
+        
+        dotnet nuget push $ARGS

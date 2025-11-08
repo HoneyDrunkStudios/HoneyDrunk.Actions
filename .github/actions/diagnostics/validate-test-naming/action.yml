@@ -1,0 +1,28 @@
+name: 'Validate Test Naming'
+description: 'Check that test files follow naming conventions'
+inputs:
+  test-directory:
+    description: 'Directory containing test projects'
+    required: false
+    default: '.'
+  pattern:
+    description: 'Regex pattern for test file names'
+    required: false
+    default: '.*Tests?\.cs$'
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate test naming conventions
+      shell: bash
+      working-directory: ${{ inputs.test-directory }}
+      run: |
+        echo "Checking test file naming conventions..."
+        INVALID_FILES=$(find . -type f -name "*.cs" -path "*/Test*/*" ! -regex "${{ inputs.pattern }}" | grep -i test || true)
+        
+        if [ -n "$INVALID_FILES" ]; then
+          echo "::error::Found test files that don't match naming convention:"
+          echo "$INVALID_FILES"
+          exit 1
+        else
+          echo "? All test files follow naming conventions"
+        fi

@@ -1,0 +1,18 @@
+name: Library CI - Using Stage
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # Use the pre-built stage for library CI
+  ci:
+    name: Library CI
+    uses: ./.github/workflows/templates/stages/dotnet-library-ci.yml
+    with:
+      dotnet-version: '10.0.x'
+      configuration: 'Release'
+      runs-on: 'ubuntu-latest'
+      enable-code-quality: true

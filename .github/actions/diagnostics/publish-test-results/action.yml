@@ -1,0 +1,21 @@
+name: 'Publish Test Results'
+description: 'Upload and publish test results with annotations'
+inputs:
+  test-results-directory:
+    description: 'Directory containing test result files'
+    required: false
+    default: 'TestResults'
+  report-name:
+    description: 'Name for the test report'
+    required: false
+    default: 'Test Results'
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: ${{ inputs.test-results-directory }}/**/*.trx
+        check_name: ${{ inputs.report-name }}
+        comment_mode: off

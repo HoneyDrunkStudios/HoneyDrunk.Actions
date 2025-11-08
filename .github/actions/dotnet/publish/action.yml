@@ -1,0 +1,53 @@
+name: 'Publish .NET Application'
+description: 'Publish a .NET application for deployment'
+inputs:
+  project-path:
+    description: 'Path to the project to publish'
+    required: false
+    default: '.'
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  output-directory:
+    description: 'Output directory for published files'
+    required: false
+    default: './publish'
+  runtime:
+    description: 'Target runtime identifier'
+    required: false
+    default: ''
+  self-contained:
+    description: 'Create a self-contained deployment'
+    required: false
+    default: 'false'
+  no-build:
+    description: 'Skip build during publish'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Working directory for publish'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish application
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        ARGS="${{ inputs.project-path }} --configuration ${{ inputs.configuration }} --output ${{ inputs.output-directory }}"
+        
+        if [ "${{ inputs.no-build }}" == "true" ]; then
+          ARGS="$ARGS --no-build"
+        fi
+        
+        if [ -n "${{ inputs.runtime }}" ]; then
+          ARGS="$ARGS --runtime ${{ inputs.runtime }}"
+        fi
+        
+        if [ "${{ inputs.self-contained }}" == "true" ]; then
+          ARGS="$ARGS --self-contained"
+        fi
+        
+        dotnet publish $ARGS

@@ -1,0 +1,40 @@
+name: Simple CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: '10.0.x'
+      
+      - name: Setup NuGet cache
+        uses: ./.github/actions/nuget/setup-cache
+      
+      - name: Restore dependencies
+        uses: ./.github/actions/dotnet/restore
+      
+      - name: Build
+        uses: ./.github/actions/dotnet/build
+        with:
+          configuration: 'Release'
+          no-restore: 'true'
+      
+      - name: Test
+        uses: ./.github/actions/dotnet/test
+        with:
+          configuration: 'Release'
+          no-build: 'true'
+          collect-coverage: 'true'

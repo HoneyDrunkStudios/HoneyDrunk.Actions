@@ -1,0 +1,45 @@
+name: 'Pack .NET Project'
+description: 'Create NuGet packages from .NET projects'
+inputs:
+  project-path:
+    description: 'Path to the project to pack'
+    required: false
+    default: '.'
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  output-directory:
+    description: 'Output directory for packages'
+    required: false
+    default: './artifacts'
+  version-suffix:
+    description: 'Version suffix for the package'
+    required: false
+    default: ''
+  no-build:
+    description: 'Skip build during pack'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Working directory for pack'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Pack project
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        ARGS="${{ inputs.project-path }} --configuration ${{ inputs.configuration }} --output ${{ inputs.output-directory }}"
+        
+        if [ "${{ inputs.no-build }}" == "true" ]; then
+          ARGS="$ARGS --no-build"
+        fi
+        
+        if [ -n "${{ inputs.version-suffix }}" ]; then
+          ARGS="$ARGS --version-suffix ${{ inputs.version-suffix }}"
+        fi
+        
+        dotnet pack $ARGS
