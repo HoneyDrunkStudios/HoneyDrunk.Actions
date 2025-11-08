@@ -196,11 +196,12 @@ jobs:
           source: ${{ inputs.nuget-source }}
           api-key: ${{ secrets.nuget-api-key }}
           skip-duplicate: ${{ inputs.skip-duplicate }}
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Upload packages
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
-          path: ./artifacts/*.nupkg
+          path: ${{ inputs.working-directory }}/artifacts/*.nupkg
           retention-days: 90
