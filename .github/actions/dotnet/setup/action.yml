@@ -5,10 +5,10 @@ inputs:
     description: 'The .NET SDK version to install'
     required: false
     default: '10.0.x'
-  include-prerelease:
-    description: 'Include prerelease versions'
+  dotnet-quality:
+    description: 'Quality of the .NET SDK version (e.g., daily, signed, validated, preview, ga)'
     required: false
-    default: 'false'
+    default: ''
 runs:
   using: 'composite'
   steps:
@@ -16,4 +16,4 @@ runs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
-        include-prerelease: ${{ inputs.include-prerelease }}
+        dotnet-quality: ${{ inputs.dotnet-quality }}

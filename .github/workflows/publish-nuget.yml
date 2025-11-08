@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: 'ubuntu-latest'
+      working-directory:
+        description: 'Working directory for operations'
+        required: false
+        type: string
+        default: '.'
       project-path:
         description: 'Path to the project to pack'
         required: false
@@ -42,6 +47,10 @@ on:
       nuget-api-key:
         description: 'API key for the NuGet feed'
         required: true
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   publish:
@@ -68,12 +77,15 @@ jobs:
       
       - name: Restore dependencies
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Build project
         uses: ./.github/actions-repo/.github/actions/dotnet/build
         with:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Pack project
         uses: ./.github/actions-repo/.github/actions/dotnet/pack
@@ -82,6 +94,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           no-build: 'true'
           output-directory: ./artifacts
+          working-directory: ${{ inputs.working-directory }}
       
       - name: Push to NuGet
         uses: ./.github/actions-repo/.github/actions/nuget/push
@@ -92,6 +105,7 @@ jobs:
           skip-duplicate: ${{ inputs.skip-duplicate }}
       
       - name: Upload packages
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
