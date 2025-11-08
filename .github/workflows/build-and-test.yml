@@ -37,11 +37,61 @@ on:
 jobs:
   build-and-test:
     name: Build and Test
-    uses: ./.github/workflows/templates/jobs/build-and-test.yml
-    with:
-      dotnet-version: ${{ inputs.dotnet-version }}
-      configuration: ${{ inputs.configuration }}
-      runs-on: ${{ inputs.runs-on }}
-      working-directory: ${{ inputs.working-directory }}
-      enable-cache: ${{ inputs.enable-cache }}
-      collect-coverage: ${{ inputs.collect-coverage }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Setup NuGet cache
+        if: ${{ inputs.enable-cache }}
+        uses: ./.github/actions/nuget/setup-cache
+        with:
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Build solution
+        uses: ./.github/actions/dotnet/build
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Run tests
+        uses: ./.github/actions/dotnet/test
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-build: 'true'
+          collect-coverage: ${{ inputs.collect-coverage }}
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Publish test results
+        if: always()
+        uses: ./.github/actions/diagnostics/publish-test-results
+        with:
+          test-results-directory: TestResults
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.runs-on }}
+          path: TestResults/**/*
+          retention-days: 30
+      
+      - name: Upload coverage reports
+        if: ${{ inputs.collect-coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ inputs.runs-on }}
+          path: TestResults/**/coverage.cobertura.xml
+          retention-days: 30
