@@ -111,7 +111,7 @@ jobs:
   # Job 1: Build and Test with Coverage
   build-and-test:
     name: Build and Test with Coverage
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/build-and-test.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-build-and-test.yml@main
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       configuration: ${{ inputs.configuration }}
@@ -129,7 +129,7 @@ jobs:
   coverage-analysis:
     name: Coverage Analysis
     needs: [build-and-test]
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/coverage-analysis.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-coverage-analysis.yml@main
     with:
       runs-on: ${{ inputs.runs-on }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
@@ -142,7 +142,7 @@ jobs:
   # Job 3: API Compatibility Check
   api-compatibility:
     name: API Compatibility Check
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/api-compatibility.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-api-compatibility.yml@main
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       runs-on: ${{ inputs.runs-on }}
@@ -156,7 +156,7 @@ jobs:
   # Job 4: Static Analysis
   static-analysis:
     name: Static Analysis
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/static-analysis.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-static-analysis.yml@main
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       runs-on: ${{ inputs.runs-on }}
@@ -174,7 +174,7 @@ jobs:
   secret-scan:
     name: Secret Scan (Diff Only)
     if: ${{ inputs.enable-secret-scan }}
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/secret-scan.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-secret-scan.yml@main
     with:
       runs-on: ${{ inputs.runs-on }}
       scan-mode: 'diff-only'

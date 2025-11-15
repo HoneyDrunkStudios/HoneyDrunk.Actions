@@ -46,16 +46,14 @@ runs:
         TARGET="${{ inputs.project-path }}"
         if [ -n "$TARGET" ]; then
           echo "Running tests for explicit target: $TARGET"
-          eval "dotnet test \"$TARGET\" $ARGS"
-          exit $?
+          eval "dotnet test \"$TARGET\" $ARGS" && exit 0
         fi
         
         # Try a solution first (maxdepth 4 for consistency)
         SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
         if [ -n "$SOLN" ]; then
           echo "Detected solution: $SOLN"
-          eval "dotnet test \"$SOLN\" $ARGS"
-          exit $?
+          eval "dotnet test \"$SOLN\" $ARGS" && exit 0
         fi
         
         # Discover test projects (maxdepth 4 for consistency with solution search)

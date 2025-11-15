@@ -17,7 +17,7 @@ inputs:
     default: '.'
   
   actions-repo-path:
-    description: 'Path where HoneyDrunk.Actions is checked out'
+    description: 'Path where HoneyDrunk.Actions is checked out (deprecated; not used in composite uses)'
     required: false
     default: '.github/actions-repo'
 
@@ -25,12 +25,12 @@ runs:
   using: 'composite'
   steps:
     - name: Setup .NET SDK
-      uses: ${{ inputs.actions-repo-path }}/.github/actions/dotnet/setup
+      uses: ./.github/actions/dotnet/setup
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
     
     - name: Setup NuGet cache
       if: ${{ inputs.enable-cache == 'true' }}
-      uses: ${{ inputs.actions-repo-path }}/.github/actions/nuget/setup-cache
+      uses: ./.github/actions/nuget/setup-cache
       with:
         working-directory: ${{ inputs.working-directory }}

@@ -1,6 +1,6 @@
 # ==============================================================================
 # PR Core Workflow
-# ==============================================================================/
+# ==============================================================================
 # Purpose:
 #   Fast, minimal PR validation for most repos in the HoneyDrunk Grid.
 #   Designed to be a required check that provides quick feedback on PRs.
@@ -105,7 +105,7 @@ jobs:
   # Job 1: Build and Test
   build-and-test:
     name: Build and Test
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/build-and-test.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-build-and-test.yml@main
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       configuration: ${{ inputs.configuration }}
@@ -122,7 +122,7 @@ jobs:
   # Job 2: Static Analysis
   static-analysis:
     name: Static Analysis
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/static-analysis.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-static-analysis.yml@main
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       runs-on: ${{ inputs.runs-on }}
@@ -140,7 +140,7 @@ jobs:
   secret-scan:
     name: Secret Scan (Diff Only)
     if: ${{ inputs.enable-secret-scan }}
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/secret-scan.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-secret-scan.yml@main
     with:
       runs-on: ${{ inputs.runs-on }}
       scan-mode: 'diff-only'

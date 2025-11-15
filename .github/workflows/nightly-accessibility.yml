@@ -221,6 +221,11 @@ jobs:
     needs: [build-application]
     runs-on: ${{ inputs.runs-on }}
     
+    outputs:
+      should_create_issue: ${{ steps.analyze.outputs.should_create_issue }}
+      violation_count: ${{ steps.analyze.outputs.violation_count }}
+      critical_count: ${{ steps.analyze.outputs.critical_count }}
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -301,7 +306,7 @@ jobs:
         run: |
           echo "Running comprehensive accessibility scan..."
           echo "Base URL: ${{ inputs.base-url }}"
-          echo "Routes: ${{ steps.routes.outputs.routes }}"
+          echo "Routes: ${{ steps.routes.outputs.routes }}
           echo "WCAG Level: ${{ inputs.wcag-level }}"
           echo ""
           echo "This is a placeholder for HoneyDrunk.Tools accessibility scanner"
@@ -415,7 +420,7 @@ jobs:
           echo "**WCAG Level:** ${{ inputs.wcag-level }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Application: ${{ needs.build-application.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Application: ${{ needs.accessibility-scan.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Accessibility Scan: ${{ needs.accessibility-scan.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           

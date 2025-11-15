@@ -122,6 +122,8 @@ jobs:
   scan-organization:
     name: Scan Organization Repositories
     runs-on: ${{ inputs.runs-on }}
+    outputs:
+      organization: ${{ steps.org.outputs.organization }}
     
     steps:
       - name: Checkout repository
