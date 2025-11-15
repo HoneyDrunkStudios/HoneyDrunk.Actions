@@ -269,41 +269,55 @@ jobs:
       
       - name: Build summary message
         id: message
+        env:
+          BASE_MARKDOWN: ${{ steps.gen.outputs.markdown }}
+          JOB_BUILD_RESULT: ${{ needs.build-and-test.result }}
+          JOB_STATIC_RESULT: ${{ needs.static-analysis.result }}
+          JOB_SECRET_RESULT: ${{ needs.secret-scan.result }}
+          WARNINGS_BLOCK: ${{ steps.status.outputs.warnings }}
+          BUILD_CONFIGURATION: ${{ inputs.configuration }}
+          RUNS_ON: ${{ inputs.runs-on }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
-          # Use the exact markdown from generate-summary as the base message
-          BASE="${{ steps.gen.outputs.markdown }}"
-          MESSAGE="$BASE
-          
-          ### Job Results
-          - **Build and Test:** ${{ needs.build-and-test.result }}
-          - **Static Analysis:** ${{ needs.static-analysis.result }}"
-          
-          if [[ "${{ needs.secret-scan.result }}" != "skipped" ]]; then
-            MESSAGE="${MESSAGE}
-          - **Secret Scan:** ${{ needs.secret-scan.result }}"
+          set -euo pipefail
+          # Persist base markdown from env var safely
+          printf "%s\n" "$BASE_MARKDOWN" > message.md
+
+          {
+            echo ""
+            echo "### Job Results"
+            echo "- **Build and Test:** $JOB_BUILD_RESULT"
+            echo "- **Static Analysis:** $JOB_STATIC_RESULT"
+          } >> message.md
+
+          if [ "$JOB_SECRET_RESULT" != "skipped" ]; then
+            echo "- **Secret Scan:** $JOB_SECRET_RESULT" >> message.md
           fi
-          
-          if [[ -n "${{ steps.status.outputs.warnings }}" ]]; then
-            MESSAGE="${MESSAGE}
-          
-          ### Warnings
-          ${{ steps.status.outputs.warnings }}"
+
+          if [ -n "$WARNINGS_BLOCK" ]; then
+            {
+              echo ""
+              echo "### Warnings"
+              echo "$WARNINGS_BLOCK"
+            } >> message.md
           fi
-          
-          MESSAGE="${MESSAGE}
-          
-          ### Configuration
-          - **Build Configuration:** ${{ inputs.configuration }}
-          - **Runner:** ${{ inputs.runs-on }}
-          - **Commit:** \`${{ github.sha }}\`
-          
-          ---
-          _View detailed logs in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
-          
+
+          {
+            echo ""
+            echo "### Configuration"
+            echo "- **Build Configuration:** $BUILD_CONFIGURATION"
+            echo "- **Runner:** $RUNS_ON"
+            echo "- **Commit:** \`$COMMIT_SHA\`"
+            echo ""
+            echo "---"
+            echo "_View detailed logs in the [workflow run]($RUN_URL)_"
+          } >> message.md
+
           {
             echo "text<<EOF"
-            echo "$MESSAGE"
+            cat message.md
             echo "EOF"
           } >> $GITHUB_OUTPUT
       
