@@ -13,6 +13,10 @@ inputs:
     description: 'Output directory for packages'
     required: false
     default: './artifacts'
+  version:
+    description: 'Version to override in the package (e.g., 1.2.3)'
+    required: false
+    default: ''
   version-suffix:
     description: 'Version suffix for the package'
     required: false
@@ -36,6 +40,10 @@ runs:
         
         if [ "${{ inputs.no-build }}" == "true" ]; then
           ARGS="$ARGS --no-build"
+        fi
+        
+        if [ -n "${{ inputs.version }}" ]; then
+          ARGS="$ARGS /p:Version=${{ inputs.version }}"
         fi
         
         if [ -n "${{ inputs.version-suffix }}" ]; then

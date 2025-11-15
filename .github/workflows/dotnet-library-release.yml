@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: '.'
+      package-version:
+        description: 'Version to use for the NuGet package (overrides .csproj version)'
+        required: false
+        type: string
+        default: ''
       nuget-source:
         description: 'NuGet feed URL'
         required: false
@@ -185,6 +190,7 @@ jobs:
         with:
           project-path: ${{ inputs.project-path }}
           configuration: ${{ inputs.configuration }}
+          version: ${{ inputs.package-version }}
           no-build: 'true'
           output-directory: ./artifacts
           working-directory: ${{ inputs.working-directory }}
