@@ -113,7 +113,7 @@ jobs:
       working-directory: ${{ inputs.working-directory }}
       project-path: ${{ inputs.project-path }}
       enable-cache: true
-      collect-coverage: false  # Coverage is for pr-sdk
+      collect-coverage: true
       actions-ref: ${{ inputs.actions-ref }}
     permissions:
       contents: read
@@ -193,8 +193,27 @@ jobs:
           path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
+      - name: Download test results artifact (if exists)
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results-${{ inputs.runs-on }}
+          path: TestResults
+        continue-on-error: true
+      
+      - name: Download coverage reports artifact (if exists)
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports-${{ inputs.runs-on }}
+          path: TestResults
+        continue-on-error: true
+      
       - name: Generate PR summary
+        id: gen
         uses: ./.github/actions-repo/.github/actions/pr/generate-summary
+        with:
+          test-results-directory: TestResults
+          build-status: ${{ needs.build-and-test.result == 'success' && 'success' || 'failure' }}
+          include-coverage: 'true'
       
       - name: Determine overall status
         id: status
@@ -252,20 +271,19 @@ jobs:
         id: message
         shell: bash
         run: |
-          # Generate the full summary message
-          MESSAGE="## ${{ steps.status.outputs.icon }} PR Core Validation ${{ steps.status.outputs.status }}
+          # Use the exact markdown from generate-summary as the base message
+          BASE="${{ steps.gen.outputs.markdown }}"
+          MESSAGE="$BASE
           
           ### Job Results
           - **Build and Test:** ${{ needs.build-and-test.result }}
           - **Static Analysis:** ${{ needs.static-analysis.result }}"
           
-          # Only include secret scan if it was enabled (not skipped)
           if [[ "${{ needs.secret-scan.result }}" != "skipped" ]]; then
             MESSAGE="${MESSAGE}
           - **Secret Scan:** ${{ needs.secret-scan.result }}"
           fi
           
-          # Add warnings section if there are any
           if [[ -n "${{ steps.status.outputs.warnings }}" ]]; then
             MESSAGE="${MESSAGE}
           
@@ -283,7 +301,6 @@ jobs:
           ---
           _View detailed logs in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
           
-          # Save to output using heredoc for multiline
           {
             echo "text<<EOF"
             echo "$MESSAGE"
