@@ -17,6 +17,10 @@ inputs:
     description: 'Project or solution name'
     required: false
     default: ''
+outputs:
+  markdown:
+    description: 'Markdown content of the generated PR summary'
+    value: ${{ steps.generate.outputs.content }}
 runs:
   using: 'composite'
   steps:
@@ -76,68 +80,77 @@ runs:
         echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
     
     - name: Generate PR summary
+      id: generate
       shell: bash
       run: |
         set -euo pipefail
         
-        echo "## :rocket: PR Validation Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        # Build status
-        if [ "${{ inputs.build-status }}" = "success" ]; then
-          echo "### :white_check_mark: Build: **Passed**" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "### :x: Build: **Failed**" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        # Test results with safe defaults
+        # Build the markdown content once and both write to step summary and set as an output
         TOTAL="${{ steps.test-results.outputs.total }}"
         PASSED="${{ steps.test-results.outputs.passed }}"
         FAILED="${{ steps.test-results.outputs.failed }}"
         SKIPPED="${{ steps.test-results.outputs.skipped }}"
         
-        # Provide defaults if empty
         TOTAL=${TOTAL:-0}
         PASSED=${PASSED:-0}
         FAILED=${FAILED:-0}
         SKIPPED=${SKIPPED:-0}
         
-        if [ "$TOTAL" -gt 0 ]; then
-          echo "### :test_tube: Tests: $PASSED / $TOTAL passed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| :white_check_mark: Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
-          if [ "$FAILED" -gt 0 ]; then
-            echo "| :x: Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+        {
+          echo "## :rocket: PR Validation Summary"
+          echo ""
+          
+          if [ "${{ inputs.build-status }}" = "success" ]; then
+            echo "### :white_check_mark: Build: **Passed**"
+          else
+            echo "### :x: Build: **Failed**"
           fi
-          if [ "$SKIPPED" -gt 0 ]; then
-            echo "| :next_track_button: Skipped | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
+          echo ""
+          
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "### :test_tube: Tests: $PASSED / $TOTAL passed"
+            echo ""
+            echo "| Status | Count |"
+            echo "|--------|-------|"
+            echo "| :white_check_mark: Passed | $PASSED |"
+            if [ "$FAILED" -gt 0 ]; then
+              echo "| :x: Failed | $FAILED |"
+            fi
+            if [ "$SKIPPED" -gt 0 ]; then
+              echo "| :next_track_button: Skipped | $SKIPPED |"
+            fi
+            echo ""
+          else
+            echo "### :test_tube: Tests: No tests found"
+            echo ""
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "### :test_tube: Tests: No tests found" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-        fi
+          
+          if [ "${{ inputs.include-coverage }}" = "true" ]; then
+            COVERAGE="${{ steps.coverage.outputs.coverage }}"
+            if [ -n "$COVERAGE" ] && [ "$COVERAGE" != "N/A" ]; then
+              echo "### :bar_chart: Code Coverage: ${COVERAGE}%"
+              echo ""
+            fi
+          fi
+          
+          echo "### :information_source: Details"
+          echo "- **Commit:** \`${{ github.sha }}\`"
+          echo "- **Branch:** \`${{ github.ref_name }}\`"
+          echo "- **Triggered by:** @${{ github.actor }}"
+          if [ -n "${{ inputs.project-name }}" ]; then
+            echo "- **Project:** ${{ inputs.project-name }}"
+          fi
+          echo ""
+          echo "---"
+          echo "_View detailed logs in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
+        } > summary.md
         
-        # Coverage (only if step ran and produced valid output)
-        if [ "${{ inputs.include-coverage }}" = "true" ]; then
-          COVERAGE="${{ steps.coverage.outputs.coverage }}"
-          if [ -n "$COVERAGE" ] && [ "$COVERAGE" != "N/A" ]; then
-            echo "### :bar_chart: Code Coverage: ${COVERAGE}%" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-        fi
+        # Write to the PR summary panel
+        cat summary.md >> $GITHUB_STEP_SUMMARY
         
-        # Details
-        echo "### :information_source: Details" >> $GITHUB_STEP_SUMMARY
-        echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-        if [ -n "${{ inputs.project-name }}" ]; then
-          echo "- **Project:** ${{ inputs.project-name }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "---" >> $GITHUB_STEP_SUMMARY
-        echo "_View detailed logs in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_" >> $GITHUB_STEP_SUMMARY
+        # Set as output
+        {
+          echo "content<<EOF"
+          cat summary.md
+          echo "EOF"
+        } >> $GITHUB_OUTPUT

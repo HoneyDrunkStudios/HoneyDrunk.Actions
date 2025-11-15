@@ -110,7 +110,7 @@ jobs:
         if: always()
         uses: ./.github/actions-repo/.github/actions/diagnostics/publish-test-results
         with:
-          test-results-directory: TestResults
+          test-results-directory: ${{ inputs.working-directory }}/TestResults
       
       - name: Upload test results
         id: upload-tests
@@ -119,7 +119,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ inputs.runs-on }}
-          path: TestResults/**/*
+          path: ${{ inputs.working-directory }}/TestResults/**/*
           retention-days: 30
       
       - name: Upload coverage reports
@@ -127,7 +127,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-reports-${{ inputs.runs-on }}
-          path: TestResults/**/coverage.cobertura.xml
+          path: ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
           retention-days: 30
       
       - name: Check for warnings
