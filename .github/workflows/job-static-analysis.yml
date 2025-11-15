@@ -152,7 +152,8 @@ jobs:
           HAS_WARNINGS="false"
           WARNINGS=""
           
-          if [ "${{ steps.formatting.outputs.has-issue }}" = "true" ]; then
+          # Only check formatting output if the formatting step actually ran
+          if [ "${{ inputs.check-formatting }}" = "true" ] && [ "${{ steps.formatting.outputs.has-issue }}" = "true" ]; then
             HAS_WARNINGS="true"
             WARNINGS="Code formatting issues detected. Run 'dotnet format' to fix."
           fi

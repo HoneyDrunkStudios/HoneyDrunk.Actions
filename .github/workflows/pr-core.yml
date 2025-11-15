@@ -205,16 +205,16 @@ jobs:
           ANALYSIS_RESULT="${{ needs.static-analysis.result }}"
           SECRETS_RESULT="${{ needs.secret-scan.result }}"
           
-          # Collect warnings
+          # Collect warnings - use empty defaults for skipped jobs
           BUILD_WARNINGS="${{ needs.build-and-test.outputs.has-warnings }}"
           ANALYSIS_WARNINGS="${{ needs.static-analysis.outputs.has-warnings }}"
-          SECRETS_WARNINGS="${{ needs.secret-scan.outputs.has-warnings }}"
+          SECRETS_WARNINGS="${{ needs.secret-scan.outputs.has-warnings || 'false' }}"
           
           BUILD_WARNING_MSG="${{ needs.build-and-test.outputs.warning-messages }}"
           ANALYSIS_WARNING_MSG="${{ needs.static-analysis.outputs.warning-messages }}"
           SECRETS_WARNING_MSG="${{ needs.secret-scan.outputs.warning-messages }}"
           
-          # Determine status
+          # Determine status - don't fail on skipped jobs
           if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" ]]; then
             echo "icon=:x:" >> $GITHUB_OUTPUT
             echo "status=Failed" >> $GITHUB_OUTPUT
@@ -259,7 +259,8 @@ jobs:
           - **Build and Test:** ${{ needs.build-and-test.result }}
           - **Static Analysis:** ${{ needs.static-analysis.result }}"
           
-          if [[ "${{ inputs.enable-secret-scan }}" == "true" ]]; then
+          # Only include secret scan if it was enabled (not skipped)
+          if [[ "${{ needs.secret-scan.result }}" != "skipped" ]]; then
             MESSAGE="${MESSAGE}
           - **Secret Scan:** ${{ needs.secret-scan.result }}"
           fi

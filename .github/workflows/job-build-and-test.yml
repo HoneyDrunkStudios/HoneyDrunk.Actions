@@ -97,6 +97,7 @@ jobs:
           project-path: ${{ inputs.project-path }}
       
       - name: Run tests
+        id: run-tests
         uses: ./.github/actions-repo/.github/actions/dotnet/test
         with:
           configuration: ${{ inputs.configuration }}
@@ -138,10 +139,14 @@ jobs:
           HAS_WARNINGS="false"
           WARNINGS=""
           
-          # Check if test results directory exists and has .trx files
-          if [ ! -d "TestResults" ] || [ -z "$(find TestResults -name '*.trx' 2>/dev/null)" ]; then
-            HAS_WARNINGS="true"
-            WARNINGS="No test result files were found. Ensure tests are generating output."
+          # Only warn about missing test results if tests were expected to run
+          TESTS_FOUND="${{ steps.run-tests.outputs.tests-found }}"
+          if [ "$TESTS_FOUND" = "true" ]; then
+            # Check if test results directory exists and has .trx files
+            if [ ! -d "TestResults" ] || [ -z "$(find TestResults -name '*.trx' 2>/dev/null)" ]; then
+              HAS_WARNINGS="true"
+              WARNINGS="Test projects found but no test result files were generated. Check test execution logs."
+            fi
           fi
           
           echo "has-warnings=$HAS_WARNINGS" >> $GITHUB_OUTPUT

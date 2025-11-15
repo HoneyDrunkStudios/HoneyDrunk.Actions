@@ -25,10 +25,15 @@ inputs:
     description: 'Path to a solution or project to test (optional)'
     required: false
     default: ''
+outputs:
+  tests-found:
+    description: 'Whether test projects were found and executed'
+    value: ${{ steps.run-tests.outputs.tests-found }}
 runs:
   using: 'composite'
   steps:
     - name: Run tests
+      id: run-tests
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
@@ -52,6 +57,7 @@ runs:
         if [ -n "$TARGET" ]; then
           echo "Running tests for explicit target: $TARGET"
           echo "Results will be saved to: $RESULTS_DIR"
+          echo "tests-found=true" >> $GITHUB_OUTPUT
           eval "dotnet test \"$TARGET\" $ARGS" && exit 0
         fi
         
@@ -60,6 +66,7 @@ runs:
         if [ -n "$SOLN" ]; then
           echo "Detected solution: $SOLN"
           echo "Results will be saved to: $RESULTS_DIR"
+          echo "tests-found=true" >> $GITHUB_OUTPUT
           eval "dotnet test \"$SOLN\" $ARGS" && exit 0
         fi
         
@@ -67,11 +74,13 @@ runs:
         mapfile -t TEST_PROJECTS < <(find . -maxdepth 4 -name "*.csproj" -exec grep -l "Microsoft.NET.Test.Sdk\|MSTest.TestAdapter\|xunit\|nunit" {} \; || true)
         if [ ${#TEST_PROJECTS[@]} -eq 0 ]; then
           echo "No test projects found - skipping tests"
+          echo "tests-found=false" >> $GITHUB_OUTPUT
           exit 0
         fi
         
         echo "Discovered ${#TEST_PROJECTS[@]} test project(s). Running individually."
         echo "Results will be saved to: $RESULTS_DIR"
+        echo "tests-found=true" >> $GITHUB_OUTPUT
         FAIL=0
         for PROJ in "${TEST_PROJECTS[@]}"; do
           echo "Testing: $PROJ"
