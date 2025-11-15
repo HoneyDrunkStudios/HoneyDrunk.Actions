@@ -1,0 +1,500 @@
+# ==============================================================================
+# Release Workflow
+# ==============================================================================
+# Purpose:
+#   Comprehensive release validation and artifact publication.
+#   Runs on version tags and performs all checks required for production release.
+#
+# Responsibilities:
+#   - Build and run full test suite
+#   - Generate SBOM (Software Bill of Materials)
+#   - Run dependency vulnerability scan
+#   - Run license compliance checks
+#   - Build and scan container images (if applicable)
+#   - Optionally trigger smoke tests
+#   - Publish release artifacts
+#
+# Target:
+#   Any repo that produces shippable artifacts (libraries, apps, containers)
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Consuming repos should trigger on push to version tags (e.g., v*)
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      configuration:
+        description: 'Build configuration (always Release for production)'
+        required: false
+        type: string
+        default: 'Release'
+      
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      
+      package-version:
+        description: 'Version for packages (auto-detected from tag if not specified)'
+        required: false
+        type: string
+        default: ''
+      
+      enable-nuget-publish:
+        description: 'Publish NuGet packages'
+        required: false
+        type: boolean
+        default: false
+      
+      nuget-source:
+        description: 'NuGet feed URL'
+        required: false
+        type: string
+        default: 'https://api.nuget.org/v3/index.json'
+      
+      enable-container-build:
+        description: 'Build and scan container images'
+        required: false
+        type: boolean
+        default: false
+      
+      dockerfile-path:
+        description: 'Path to Dockerfile (required if enable-container-build is true)'
+        required: false
+        type: string
+        default: './Dockerfile'
+      
+      container-registry:
+        description: 'Container registry (e.g., ghcr.io, docker.io)'
+        required: false
+        type: string
+        default: 'ghcr.io'
+      
+      container-image-name:
+        description: 'Container image name (required if enable-container-build is true)'
+        required: false
+        type: string
+        default: ''
+      
+      enable-smoke-tests:
+        description: 'Run smoke tests after deployment'
+        required: false
+        type: boolean
+        default: false
+      
+      smoke-test-url:
+        description: 'URL for smoke tests (required if enable-smoke-tests is true)'
+        required: false
+        type: string
+        default: ''
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      nuget-api-key:
+        description: 'API key for NuGet feed'
+        required: false
+      
+      container-registry-username:
+        description: 'Container registry username'
+        required: false
+      
+      container-registry-password:
+        description: 'Container registry password or token'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # For SBOM attestation
+
+jobs:
+  build-and-test:
+    name: Build and Full Test Suite
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.package-version }}" ]; then
+            VERSION="${{ inputs.package-version }}"
+          elif [ -n "${{ github.ref_name }}" ]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"  # Remove leading 'v' if present
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Setup NuGet cache
+        uses: ./.github/actions-repo/.github/actions/nuget/setup-cache
+        with:
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Build solution
+        uses: ./.github/actions-repo/.github/actions/dotnet/build
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Run full test suite
+        uses: ./.github/actions-repo/.github/actions/dotnet/test
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-build: 'true'
+          collect-coverage: 'true'
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-release
+          path: ${{ inputs.working-directory }}/TestResults/**/*
+          retention-days: 90  # Long retention for release artifacts
+          if-no-files-found: ignore
+      
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-release
+          path: ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: ignore
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+  
+  security-compliance:
+    name: Security and Compliance
+    needs: [build-and-test]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Run dependency vulnerability scan
+        uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          fail-on-severity: 'moderate'  # Stricter for releases
+      
+      - name: Generate SBOM
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Generating Software Bill of Materials (SBOM)..."
+          echo "This is a placeholder for HoneyDrunk.Tools SBOM generation"
+          echo "Command: hd-tools sbom generate --project ${{ inputs.project-path }} --format spdx"
+          echo "::notice::SBOM generation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools sbom generate \
+          #   --project "${{ inputs.project-path }}" \
+          #   --format spdx \
+          #   --output "./artifacts/sbom.spdx.json"
+          
+          # Create placeholder SBOM
+          mkdir -p ./artifacts
+          echo '{"spdxVersion":"SPDX-2.3","dataLicense":"CC0-1.0","name":"placeholder"}' > ./artifacts/sbom.spdx.json
+      
+      - name: Run license compliance check
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Running license compliance check..."
+          echo "This is a placeholder for HoneyDrunk.Tools license scanner"
+          echo "Command: hd-tools license check --project ${{ inputs.project-path }}"
+          echo "::notice::License compliance checking will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools license check \
+          #   --project "${{ inputs.project-path }}" \
+          #   --allowed-licenses "MIT,Apache-2.0,BSD-3-Clause" \
+          #   --output "./artifacts/licenses.json"
+      
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: ${{ inputs.working-directory }}/artifacts/sbom.spdx.json
+          retention-days: 365  # Keep SBOMs for a year
+      
+      - name: Upload license report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: ${{ inputs.working-directory }}/artifacts/licenses.json
+          retention-days: 90
+          if-no-files-found: ignore
+  
+  publish-nuget:
+    name: Publish NuGet Packages
+    if: ${{ inputs.enable-nuget-publish }}
+    needs: [build-and-test, security-compliance]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Build project
+        uses: ./.github/actions-repo/.github/actions/dotnet/build
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Pack project
+        uses: ./.github/actions-repo/.github/actions/dotnet/pack
+        with:
+          project-path: ${{ inputs.project-path }}
+          configuration: ${{ inputs.configuration }}
+          version: ${{ needs.build-and-test.outputs.version }}
+          no-build: 'true'
+          output-directory: ./artifacts
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Push to NuGet
+        uses: ./.github/actions-repo/.github/actions/nuget/push
+        with:
+          package-path: './artifacts/*.nupkg'
+          source: ${{ inputs.nuget-source }}
+          api-key: ${{ secrets.nuget-api-key }}
+          skip-duplicate: 'false'  # Releases should fail if version exists
+          working-directory: ${{ inputs.working-directory }}
+      
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ${{ inputs.working-directory }}/artifacts/*.nupkg
+          retention-days: 365
+  
+  build-and-scan-container:
+    name: Build and Scan Container
+    if: ${{ inputs.enable-container-build }}
+    needs: [build-and-test, security-compliance]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Validate container inputs
+        shell: bash
+        run: |
+          if [ -z "${{ inputs.container-image-name }}" ]; then
+            echo "::error::container-image-name is required when enable-container-build is true"
+            exit 1
+          fi
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.container-registry }}
+          username: ${{ secrets.container-registry-username }}
+          password: ${{ secrets.container-registry-password }}
+      
+      - name: Build and tag container image
+        shell: bash
+        run: |
+          IMAGE_TAG="${{ inputs.container-registry }}/${{ inputs.container-image-name }}:${{ needs.build-and-test.outputs.version }}"
+          LATEST_TAG="${{ inputs.container-registry }}/${{ inputs.container-image-name }}:latest"
+          
+          docker buildx build \
+            --file ${{ inputs.dockerfile-path }} \
+            --tag "$IMAGE_TAG" \
+            --tag "$LATEST_TAG" \
+            --load \
+            .
+          
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+      
+      - name: Scan container image for vulnerabilities
+        shell: bash
+        run: |
+          echo "Scanning container image for vulnerabilities..."
+          echo "This is a placeholder for HoneyDrunk.Tools container scanner"
+          echo "Command: hd-tools container scan --image $IMAGE_TAG"
+          echo "::notice::Container scanning will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools container scan \
+          #   --image "$IMAGE_TAG" \
+          #   --fail-on-severity high \
+          #   --output "./scan-results.json"
+      
+      - name: Push container image
+        shell: bash
+        run: |
+          docker push "$IMAGE_TAG"
+          docker push "$LATEST_TAG"
+          echo "Pushed container images:"
+          echo "  - $IMAGE_TAG"
+          echo "  - $LATEST_TAG"
+  
+  smoke-tests:
+    name: Smoke Tests
+    if: ${{ inputs.enable-smoke-tests }}
+    needs: [publish-nuget, build-and-scan-container]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Validate smoke test inputs
+        if: ${{ inputs.smoke-test-url == '' }}
+        shell: bash
+        run: |
+          echo "::error::smoke-test-url is required when enable-smoke-tests is true"
+          exit 1
+      
+      - name: Wait for deployment
+        shell: bash
+        run: |
+          echo "Waiting for deployment to be ready..."
+          sleep 30
+      
+      - name: Run smoke tests
+        shell: bash
+        run: |
+          echo "Running smoke tests against: ${{ inputs.smoke-test-url }}"
+          echo "This is a placeholder for HoneyDrunk.Tools smoke test runner"
+          echo "Command: hd-tools smoke-test --url ${{ inputs.smoke-test-url }}"
+          echo "::notice::Smoke testing will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools smoke-test \
+          #   --url "${{ inputs.smoke-test-url }}" \
+          #   --timeout 300 \
+          #   --retry 3
+  
+  release-summary:
+    name: Release Summary
+    needs: [build-and-test, security-compliance]
+    if: always()
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Generate release summary
+        shell: bash
+        run: |
+          echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build-and-test.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration:** ${{ inputs.configuration }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Ref:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Build and Test: ${{ needs.build-and-test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Security and Compliance: ${{ needs.security-compliance.result }}" >> $GITHUB_STEP_SUMMARY

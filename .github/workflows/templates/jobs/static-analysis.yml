@@ -1,0 +1,128 @@
+# ==============================================================================
+# Static Analysis Job
+# ==============================================================================
+# Purpose:
+#   Run static analysis checks including code formatting, vulnerability scanning,
+#   and test naming validation.
+#
+# Single Responsibility:
+#   Static code analysis only - no building or testing
+# ==============================================================================
+
+name: Static Analysis (Job)
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file'
+        required: false
+        type: string
+        default: ''
+      
+      check-formatting:
+        description: 'Check code formatting'
+        required: false
+        type: boolean
+        default: true
+      
+      fail-on-formatting-issues:
+        description: 'Fail build on formatting issues'
+        required: false
+        type: boolean
+        default: false
+      
+      fail-on-severity:
+        description: 'Minimum vulnerability severity to fail (low, moderate, high, critical)'
+        required: false
+        type: string
+        default: 'high'
+      
+      validate-test-naming:
+        description: 'Validate test naming conventions'
+        required: false
+        type: boolean
+        default: true
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  static-analysis:
+    name: Static Analysis
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Check code formatting
+        if: ${{ inputs.check-formatting }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Checking code formatting..."
+          if ! dotnet format --verify-no-changes --verbosity diagnostic; then
+            if [ "${{ inputs.fail-on-formatting-issues }}" == "true" ]; then
+              echo "::error::Code formatting issues detected. Run 'dotnet format' to fix."
+              exit 1
+            else
+              echo "::warning::Code formatting issues detected. Run 'dotnet format' to fix."
+            fi
+          fi
+      
+      - name: Run vulnerability scan
+        uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+      
+      - name: Validate test naming conventions
+        if: ${{ inputs.validate-test-naming }}
+        continue-on-error: true
+        uses: ./.github/actions-repo/.github/actions/diagnostics/validate-test-naming
+        with:
+          test-directory: ${{ inputs.working-directory }}

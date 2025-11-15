@@ -1,0 +1,45 @@
+name: 'Generate Report Artifact'
+description: 'Composite action to generate timestamped report artifacts with consistent naming'
+inputs:
+  report-name:
+    description: 'Name of the report (e.g., security, dependency, accessibility)'
+    required: true
+  
+  report-directory:
+    description: 'Directory containing report files'
+    required: true
+  
+  retention-days:
+    description: 'Number of days to retain the artifact'
+    required: false
+    default: '90'
+  
+  include-timestamp:
+    description: 'Include timestamp in artifact name'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine artifact name
+      id: artifact-name
+      shell: bash
+      run: |
+        NAME="${{ inputs.report-name }}-report"
+        
+        if [ "${{ inputs.include-timestamp }}" == "true" ]; then
+          TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
+          NAME="${NAME}-${TIMESTAMP}"
+        fi
+        
+        echo "artifact_name=$NAME" >> $GITHUB_OUTPUT
+        echo "Artifact name: $NAME"
+    
+    - name: Upload report artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.artifact-name.outputs.artifact_name }}
+        path: ${{ inputs.report-directory }}/**/*
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: warn

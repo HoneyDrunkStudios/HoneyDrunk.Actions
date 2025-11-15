@@ -1,0 +1,402 @@
+# ==============================================================================
+# Nightly Security Workflow
+# ==============================================================================
+# Purpose:
+#   Deep, comprehensive security scanning run on a schedule.
+#   Performs thorough analysis that is too expensive for PR workflows.
+#
+# Responsibilities:
+#   - Run deep SAST (Static Application Security Testing)
+#   - Run full dependency vulnerability scan (including transitive deps)
+#   - Run infrastructure as code (IaC) security checks
+#   - Detect secrets and credentials in entire codebase
+#   - Generate security report artifacts
+#   - Optionally create/update security issues
+#
+# Target:
+#   All repos in the HoneyDrunk Grid
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Consuming repos should trigger on schedule (e.g., cron: '0 2 * * *')
+#   - Can also be triggered manually via workflow_dispatch
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Nightly Security
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      
+      enable-sast:
+        description: 'Run deep SAST analysis'
+        required: false
+        type: boolean
+        default: true
+      
+      enable-iac-scan:
+        description: 'Scan infrastructure as code files (Terraform, ARM, etc.)'
+        required: false
+        type: boolean
+        default: true
+      
+      enable-secret-scan:
+        description: 'Scan entire codebase for secrets'
+        required: false
+        type: boolean
+        default: true
+      
+      fail-on-high-severity:
+        description: 'Fail the workflow if high or critical issues found'
+        required: false
+        type: boolean
+        default: false
+      
+      create-issues:
+        description: 'Create GitHub issues for security findings'
+        required: false
+        type: boolean
+        default: false
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      github-token:
+        description: 'GitHub token for creating issues'
+        required: false
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+jobs:
+  dependency-scan:
+    name: Deep Dependency Vulnerability Scan
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Run comprehensive vulnerability scan
+        uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          fail-on-severity: ${{ inputs.fail-on-high-severity && 'high' || 'critical' }}
+      
+      - name: Generate detailed vulnerability report
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Generating detailed vulnerability report..."
+          echo "This is a placeholder for HoneyDrunk.Tools vulnerability reporter"
+          echo "Command: hd-tools security vuln-report --format json --output ./security-reports/vulnerabilities.json"
+          echo "::notice::Vulnerability reporting will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools security vuln-report \
+          #   --project "${{ inputs.project-path }}" \
+          #   --format json \
+          #   --format html \
+          #   --output-dir "./security-reports"
+          
+          mkdir -p ./security-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","vulnerabilities":[]}' > ./security-reports/vulnerabilities.json
+      
+      - name: Upload vulnerability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-report
+          path: ${{ inputs.working-directory }}/security-reports/**/*
+          retention-days: 90
+  
+  sast-analysis:
+    name: Deep SAST Analysis
+    if: ${{ inputs.enable-sast }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Run deep SAST scan
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Running deep Static Application Security Testing (SAST)..."
+          echo "This is a placeholder for HoneyDrunk.Tools SAST scanner"
+          echo "Command: hd-tools security sast --project ${{ inputs.project-path }}"
+          echo "::notice::SAST scanning will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools security sast \
+          #   --project "${{ inputs.project-path }}" \
+          #   --ruleset extended \
+          #   --fail-on-severity high \
+          #   --output "./security-reports/sast-results.sarif"
+          
+          mkdir -p ./security-reports
+          echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > ./security-reports/sast-results.sarif
+      
+      - name: Upload SAST results to GitHub Security
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ inputs.working-directory }}/security-reports/sast-results.sarif
+      
+      - name: Upload SAST report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-report
+          path: ${{ inputs.working-directory }}/security-reports/sast-results.sarif
+          retention-days: 90
+  
+  secret-scan:
+    name: Full Codebase Secret Scan
+    if: ${{ inputs.enable-secret-scan }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Scan entire history
+      
+      - name: Run comprehensive secret scan
+        shell: bash
+        run: |
+          echo "Running comprehensive secret scan on entire codebase and history..."
+          echo "This is a placeholder for HoneyDrunk.Tools secret scanner"
+          echo "Command: hd-tools security secrets --scan-history"
+          echo "::notice::Secret scanning will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools security secrets \
+          #   --scan-history \
+          #   --fail-on-found \
+          #   --output "./security-reports/secrets-scan.json"
+          
+          mkdir -p ./security-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","secrets_found":0}' > ./security-reports/secrets-scan.json
+      
+      - name: Upload secret scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secret-scan-report
+          path: ./security-reports/secrets-scan.json
+          retention-days: 90
+  
+  iac-security-scan:
+    name: Infrastructure as Code Security Scan
+    if: ${{ inputs.enable-iac-scan }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Detect IaC files
+        id: detect
+        shell: bash
+        run: |
+          echo "Detecting Infrastructure as Code files..."
+          
+          # Look for common IaC patterns
+          IAC_COUNT=0
+          if find . -name "*.tf" -o -name "*.tfvars" | grep -q .; then
+            echo "Terraform files detected"
+            ((IAC_COUNT++))
+          fi
+          if find . -name "*.bicep" -o -name "*.json" | xargs grep -l "Microsoft.Resources" 2>/dev/null | grep -q .; then
+            echo "Azure Bicep/ARM templates detected"
+            ((IAC_COUNT++))
+          fi
+          if find . -name "docker-compose*.yml" -o -name "Dockerfile*" | grep -q .; then
+            echo "Docker files detected"
+            ((IAC_COUNT++))
+          fi
+          if find . -name "*.yaml" -o -name "*.yml" | xargs grep -l "apiVersion:" 2>/dev/null | grep -q .; then
+            echo "Kubernetes manifests detected"
+            ((IAC_COUNT++))
+          fi
+          
+          if [ $IAC_COUNT -gt 0 ]; then
+            echo "has_iac=true" >> $GITHUB_OUTPUT
+            echo "Found IaC files, will proceed with scan"
+          else
+            echo "has_iac=false" >> $GITHUB_OUTPUT
+            echo "No IaC files detected, skipping scan"
+          fi
+      
+      - name: Run IaC security scan
+        if: steps.detect.outputs.has_iac == 'true'
+        shell: bash
+        run: |
+          echo "Running Infrastructure as Code security scan..."
+          echo "This is a placeholder for HoneyDrunk.Tools IaC scanner"
+          echo "Command: hd-tools security iac-scan"
+          echo "::notice::IaC security scanning will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools security iac-scan \
+          #   --scan-terraform \
+          #   --scan-docker \
+          #   --scan-kubernetes \
+          #   --fail-on-severity high \
+          #   --output "./security-reports/iac-scan.json"
+          
+          mkdir -p ./security-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","findings":[]}' > ./security-reports/iac-scan.json
+      
+      - name: Upload IaC scan report
+        if: steps.detect.outputs.has_iac == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iac-security-report
+          path: ./security-reports/iac-scan.json
+          retention-days: 90
+  
+  consolidate-and-report:
+    name: Consolidate Security Reports
+    needs: [dependency-scan, sast-analysis, secret-scan, iac-security-scan]
+    if: always()
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download all security reports
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-security-reports
+      
+      - name: Consolidate security findings
+        shell: bash
+        run: |
+          echo "Consolidating all security findings..."
+          echo "This is a placeholder for HoneyDrunk.Tools security report consolidator"
+          echo "Command: hd-tools security consolidate-reports"
+          echo "::notice::Report consolidation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools security consolidate-reports \
+          #   --input-dir "./all-security-reports" \
+          #   --output "./consolidated-security-report.json" \
+          #   --output-html "./consolidated-security-report.html"
+          
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","summary":{"total_issues":0}}' > ./consolidated-security-report.json
+      
+      - name: Generate summary
+        shell: bash
+        run: |
+          echo "# Nightly Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- SAST Analysis: ${{ needs.sast-analysis.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Secret Scan: ${{ needs.secret-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- IaC Security Scan: ${{ needs.iac-security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts for detailed reports." >> $GITHUB_STEP_SUMMARY
+      
+      - name: Create GitHub issue for findings
+        if: ${{ inputs.create-issues }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
+        run: |
+          echo "Creating or updating GitHub issue for security findings..."
+          echo "This is a placeholder for HoneyDrunk.Tools issue creator"
+          echo "Command: hd-tools github create-security-issue"
+          echo "::notice::GitHub issue creation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools github create-security-issue \
+          #   --report "./consolidated-security-report.json" \
+          #   --title "Nightly Security Scan - $(date +%Y-%m-%d)" \
+          #   --labels "security,automated" \
+          #   --update-existing
+      
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-security-report
+          path: ./consolidated-security-report.*
+          retention-days: 90
