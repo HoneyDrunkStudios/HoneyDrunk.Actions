@@ -283,7 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           # Persist base markdown from env var safely
-          printf "%s\n" "$BASE_MARKDOWN" > message.md
+          printf "%s" "$BASE_MARKDOWN" > message.md
 
           {
             echo ""
