@@ -14,11 +14,11 @@ inputs:
     required: false
     default: './artifacts'
   version:
-    description: 'Version to override in the package (e.g., 1.2.3)'
+    description: 'Full version to override (e.g., 1.2.3). Cannot be used with version-suffix.'
     required: false
     default: ''
   version-suffix:
-    description: 'Version suffix for the package'
+    description: 'Version suffix to append (e.g., beta.1). Cannot be used with version.'
     required: false
     default: ''
   no-build:
@@ -36,6 +36,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # Validate that version and version-suffix are not both set
+        if [ -n "${{ inputs.version }}" ] && [ -n "${{ inputs.version-suffix }}" ]; then
+          echo "::error::Cannot specify both 'version' and 'version-suffix'. Use 'version' for full version override (e.g., 1.2.3) or 'version-suffix' to append to existing version (e.g., beta.1)."
+          exit 1
+        fi
+        
         ARGS="${{ inputs.project-path }} --configuration ${{ inputs.configuration }} --output ${{ inputs.output-directory }}"
         
         if [ "${{ inputs.no-build }}" == "true" ]; then
