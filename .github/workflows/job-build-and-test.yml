@@ -43,11 +43,22 @@ on:
         required: false
         type: string
         default: 'main'
+    
+    outputs:
+      has-warnings:
+        description: 'Whether warnings were detected'
+        value: ${{ jobs.build-and-test.outputs.has-warnings }}
+      warning-messages:
+        description: 'List of warning messages'
+        value: ${{ jobs.build-and-test.outputs.warning-messages }}
 
 jobs:
   build-and-test:
     name: Build and Test
     runs-on: ${{ inputs.runs-on }}
+    outputs:
+      has-warnings: ${{ steps.check-warnings.outputs.has-warnings }}
+      warning-messages: ${{ steps.check-warnings.outputs.warning-messages }}
     
     steps:
       - name: Checkout code
@@ -101,7 +112,9 @@ jobs:
           test-results-directory: TestResults
       
       - name: Upload test results
+        id: upload-tests
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ inputs.runs-on }}
@@ -115,3 +128,21 @@ jobs:
           name: coverage-reports-${{ inputs.runs-on }}
           path: TestResults/**/coverage.cobertura.xml
           retention-days: 30
+      
+      - name: Check for warnings
+        id: check-warnings
+        if: always()
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          HAS_WARNINGS="false"
+          WARNINGS=""
+          
+          # Check if test results directory exists and has .trx files
+          if [ ! -d "TestResults" ] || [ -z "$(find TestResults -name '*.trx' 2>/dev/null)" ]; then
+            HAS_WARNINGS="true"
+            WARNINGS="No test result files were found. Ensure tests are generating output."
+          fi
+          
+          echo "has-warnings=$HAS_WARNINGS" >> $GITHUB_OUTPUT
+          echo "warning-messages=$WARNINGS" >> $GITHUB_OUTPUT

@@ -34,8 +34,13 @@ runs:
       run: |
         set -euo pipefail
         
+        # Convert results directory to absolute path to ensure it's created in the working directory
+        # This is critical because dotnet test with a solution may create results relative to project location
+        RESULTS_DIR="$(pwd)/${{ inputs.test-results-directory }}"
+        mkdir -p "$RESULTS_DIR"
+        
         # Build common args
-        ARGS="--configuration ${{ inputs.configuration }} --logger trx --results-directory ${{ inputs.test-results-directory }}"
+        ARGS="--configuration ${{ inputs.configuration }} --logger trx --results-directory \"$RESULTS_DIR\""
         if [ "${{ inputs.no-build }}" == "true" ]; then
           ARGS="$ARGS --no-build"
         fi
@@ -46,6 +51,7 @@ runs:
         TARGET="${{ inputs.project-path }}"
         if [ -n "$TARGET" ]; then
           echo "Running tests for explicit target: $TARGET"
+          echo "Results will be saved to: $RESULTS_DIR"
           eval "dotnet test \"$TARGET\" $ARGS" && exit 0
         fi
         
@@ -53,6 +59,7 @@ runs:
         SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
         if [ -n "$SOLN" ]; then
           echo "Detected solution: $SOLN"
+          echo "Results will be saved to: $RESULTS_DIR"
           eval "dotnet test \"$SOLN\" $ARGS" && exit 0
         fi
         
@@ -64,6 +71,7 @@ runs:
         fi
         
         echo "Discovered ${#TEST_PROJECTS[@]} test project(s). Running individually."
+        echo "Results will be saved to: $RESULTS_DIR"
         FAIL=0
         for PROJ in "${TEST_PROJECTS[@]}"; do
           echo "Testing: $PROJ"
