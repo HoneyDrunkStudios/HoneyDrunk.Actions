@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: 'main'
+      project-path:
+        description: 'Path to solution or project to build/test'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -74,6 +79,7 @@ jobs:
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Build solution
         uses: ./.github/actions-repo/.github/actions/dotnet/build
@@ -81,6 +87,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Run tests
         continue-on-error: false
@@ -90,6 +97,7 @@ jobs:
           no-build: 'true'
           collect-coverage: ${{ inputs.collect-coverage }}
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Publish test results
         if: always()

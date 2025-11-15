@@ -87,6 +87,7 @@ jobs:
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Build solution
         uses: ./.github/actions-repo/.github/actions/dotnet/build
@@ -94,6 +95,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Run tests
         continue-on-error: false
@@ -137,6 +139,7 @@ jobs:
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Security vulnerability scan
         uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
@@ -177,6 +180,7 @@ jobs:
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Build project
         uses: ./.github/actions-repo/.github/actions/dotnet/build
@@ -184,6 +188,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Pack project
         uses: ./.github/actions-repo/.github/actions/dotnet/pack
