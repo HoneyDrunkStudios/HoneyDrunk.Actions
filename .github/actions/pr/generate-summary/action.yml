@@ -24,6 +24,8 @@ runs:
       id: test-results
       shell: bash
       run: |
+        set -euo pipefail
+        
         # Parse TRX files for actual test counts
         TOTAL=0
         PASSED=0
@@ -31,17 +33,18 @@ runs:
         SKIPPED=0
         
         if [ -d "${{ inputs.test-results-directory }}" ]; then
-          for trx in "${{ inputs.test-results-directory }}"/**/*.trx; do
+          # Use find instead of globstar pattern
+          while IFS= read -r trx; do
             if [ -f "$trx" ]; then
-              # Parse TRX XML for test counts
-              T=$(grep -o '<Counters total="[0-9]*"' "$trx" | grep -o '[0-9]*' || echo 0)
-              P=$(grep -o 'passed="[0-9]*"' "$trx" | grep -o '[0-9]*' || echo 0)
-              F=$(grep -o 'failed="[0-9]*"' "$trx" | grep -o '[0-9]*' || echo 0)
+              # Parse TRX XML for test counts (first occurrence only)
+              T=$(grep -o '<Counters total="[0-9]*"' "$trx" | head -n1 | grep -o '[0-9]*' || echo 0)
+              P=$(grep -o 'passed="[0-9]*"' "$trx" | head -n1 | grep -o '[0-9]*' || echo 0)
+              F=$(grep -o 'failed="[0-9]*"' "$trx" | head -n1 | grep -o '[0-9]*' || echo 0)
               TOTAL=$((TOTAL + T))
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
             fi
-          done
+          done < <(find "${{ inputs.test-results-directory }}" -type f -name "*.trx")
           SKIPPED=$((TOTAL - PASSED - FAILED))
         fi
         
@@ -55,13 +58,19 @@ runs:
       if: ${{ inputs.include-coverage == 'true' }}
       shell: bash
       run: |
+        set -euo pipefail
+        
         # Parse coverage from Cobertura XML
         COVERAGE="N/A"
         if [ -d "${{ inputs.test-results-directory }}" ]; then
-          COV_FILE=$(find "${{ inputs.test-results-directory }}" -name "coverage.cobertura.xml" | head -n 1)
-          if [ -f "$COV_FILE" ]; then
-            COVERAGE=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -n1 | grep -o '[0-9.]*' || echo "0")
-            COVERAGE=$(awk "BEGIN {printf \"%.1f\", $COVERAGE * 100}")
+          COV_FILE=$(find "${{ inputs.test-results-directory }}" -type f -name "coverage.cobertura.xml" | head -n 1)
+          if [ -n "$COV_FILE" ] && [ -f "$COV_FILE" ]; then
+            # Extract line-rate (should be between 0 and 1)
+            LINE_RATE=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -n1 | grep -o '[0-9.]*' || echo "")
+            if [ -n "$LINE_RATE" ] && [ "$LINE_RATE" != "0" ]; then
+              # Validate it's a valid decimal and convert to percentage
+              COVERAGE=$(awk "BEGIN {rate=$LINE_RATE; if (rate >= 0 && rate <= 1) printf \"%.1f\", rate * 100; else print \"N/A\"}")
+            fi
           fi
         fi
         echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
@@ -69,22 +78,30 @@ runs:
     - name: Generate PR summary
       shell: bash
       run: |
+        set -euo pipefail
+        
         echo "## :rocket: PR Validation Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Build status
-        if [ "${{ inputs.build-status }}" == "success" ]; then
+        if [ "${{ inputs.build-status }}" = "success" ]; then
           echo "### :white_check_mark: Build: **Passed**" >> $GITHUB_STEP_SUMMARY
         else
           echo "### :x: Build: **Failed**" >> $GITHUB_STEP_SUMMARY
         fi
         echo "" >> $GITHUB_STEP_SUMMARY
         
-        # Test results
+        # Test results with safe defaults
         TOTAL="${{ steps.test-results.outputs.total }}"
         PASSED="${{ steps.test-results.outputs.passed }}"
         FAILED="${{ steps.test-results.outputs.failed }}"
         SKIPPED="${{ steps.test-results.outputs.skipped }}"
+        
+        # Provide defaults if empty
+        TOTAL=${TOTAL:-0}
+        PASSED=${PASSED:-0}
+        FAILED=${FAILED:-0}
+        SKIPPED=${SKIPPED:-0}
         
         if [ "$TOTAL" -gt 0 ]; then
           echo "### :test_tube: Tests: $PASSED / $TOTAL passed" >> $GITHUB_STEP_SUMMARY
@@ -104,10 +121,10 @@ runs:
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
         
-        # Coverage
-        if [ "${{ inputs.include-coverage }}" == "true" ]; then
+        # Coverage (only if step ran and produced valid output)
+        if [ "${{ inputs.include-coverage }}" = "true" ]; then
           COVERAGE="${{ steps.coverage.outputs.coverage }}"
-          if [ "$COVERAGE" != "N/A" ]; then
+          if [ -n "$COVERAGE" ] && [ "$COVERAGE" != "N/A" ]; then
             echo "### :bar_chart: Code Coverage: ${COVERAGE}%" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
