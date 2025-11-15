@@ -50,7 +50,7 @@ runs:
           exit $?
         fi
         
-        # Try a solution first
+        # Try a solution first (maxdepth 4 for consistency)
         SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
         if [ -n "$SOLN" ]; then
           echo "Detected solution: $SOLN"
@@ -58,8 +58,8 @@ runs:
           exit $?
         fi
         
-        # Discover test projects
-        mapfile -t TEST_PROJECTS < <(find . -maxdepth 6 -name "*.csproj" -exec grep -l "Microsoft.NET.Test.Sdk\|MSTest.TestAdapter\|xunit\|nunit" {} \; || true)
+        # Discover test projects (maxdepth 4 for consistency with solution search)
+        mapfile -t TEST_PROJECTS < <(find . -maxdepth 4 -name "*.csproj" -exec grep -l "Microsoft.NET.Test.Sdk\|MSTest.TestAdapter\|xunit\|nunit" {} \; || true)
         if [ ${#TEST_PROJECTS[@]} -eq 0 ]; then
           echo "No test projects found - skipping tests"
           exit 0
