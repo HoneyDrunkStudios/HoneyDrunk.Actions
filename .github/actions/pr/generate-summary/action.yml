@@ -9,25 +9,135 @@ inputs:
     description: 'Directory containing test results'
     required: false
     default: 'TestResults'
+  build-status:
+    description: 'Build status (success or failure)'
+    required: false
+    default: 'success'
+  project-name:
+    description: 'Project or solution name'
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
+    - name: Parse test results
+      id: test-results
+      shell: bash
+      run: |
+        set -euo pipefail
+        
+        # Parse TRX files for actual test counts
+        TOTAL=0
+        PASSED=0
+        FAILED=0
+        SKIPPED=0
+        
+        if [ -d "${{ inputs.test-results-directory }}" ]; then
+          # Use find instead of globstar pattern
+          while IFS= read -r trx; do
+            if [ -f "$trx" ]; then
+              # Parse TRX XML for test counts (first occurrence only)
+              T=$(grep -o '<Counters total="[0-9]*"' "$trx" | head -n1 | grep -o '[0-9]*' || echo 0)
+              P=$(grep -o 'passed="[0-9]*"' "$trx" | head -n1 | grep -o '[0-9]*' || echo 0)
+              F=$(grep -o 'failed="[0-9]*"' "$trx" | head -n1 | grep -o '[0-9]*' || echo 0)
+              TOTAL=$((TOTAL + T))
+              PASSED=$((PASSED + P))
+              FAILED=$((FAILED + F))
+            fi
+          done < <(find "${{ inputs.test-results-directory }}" -type f -name "*.trx")
+          SKIPPED=$((TOTAL - PASSED - FAILED))
+        fi
+        
+        echo "total=$TOTAL" >> $GITHUB_OUTPUT
+        echo "passed=$PASSED" >> $GITHUB_OUTPUT
+        echo "failed=$FAILED" >> $GITHUB_OUTPUT
+        echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
+    
+    - name: Parse coverage results
+      id: coverage
+      if: ${{ inputs.include-coverage == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        
+        # Parse coverage from Cobertura XML
+        COVERAGE="N/A"
+        if [ -d "${{ inputs.test-results-directory }}" ]; then
+          COV_FILE=$(find "${{ inputs.test-results-directory }}" -type f -name "coverage.cobertura.xml" | head -n 1)
+          if [ -n "$COV_FILE" ] && [ -f "$COV_FILE" ]; then
+            # Extract line-rate (should be between 0 and 1)
+            LINE_RATE=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -n1 | grep -o '[0-9.]*' || echo "")
+            if [ -n "$LINE_RATE" ] && [ "$LINE_RATE" != "0" ]; then
+              # Validate it's a valid decimal and convert to percentage
+              COVERAGE=$(awk "BEGIN {rate=$LINE_RATE; if (rate >= 0 && rate <= 1) printf \"%.1f\", rate * 100; else print \"N/A\"}")
+            fi
+          fi
+        fi
+        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+    
     - name: Generate PR summary
       shell: bash
       run: |
-        echo "## :white_check_mark: Build & Test Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### :hammer: Build Status" >> $GITHUB_STEP_SUMMARY
-        echo "Build completed successfully" >> $GITHUB_STEP_SUMMARY
+        set -euo pipefail
+        
+        echo "## :rocket: PR Validation Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
-        if [ -d "${{ inputs.test-results-directory }}" ]; then
-          echo "### :test_tube: Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "Test results available in artifacts" >> $GITHUB_STEP_SUMMARY
+        # Build status
+        if [ "${{ inputs.build-status }}" = "success" ]; then
+          echo "### :white_check_mark: Build: **Passed**" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### :x: Build: **Failed**" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Test results with safe defaults
+        TOTAL="${{ steps.test-results.outputs.total }}"
+        PASSED="${{ steps.test-results.outputs.passed }}"
+        FAILED="${{ steps.test-results.outputs.failed }}"
+        SKIPPED="${{ steps.test-results.outputs.skipped }}"
+        
+        # Provide defaults if empty
+        TOTAL=${TOTAL:-0}
+        PASSED=${PASSED:-0}
+        FAILED=${FAILED:-0}
+        SKIPPED=${SKIPPED:-0}
+        
+        if [ "$TOTAL" -gt 0 ]; then
+          echo "### :test_tube: Tests: $PASSED / $TOTAL passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| :white_check_mark: Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+          if [ "$FAILED" -gt 0 ]; then
+            echo "| :x: Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "$SKIPPED" -gt 0 ]; then
+            echo "| :next_track_button: Skipped | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### :test_tube: Tests: No tests found" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
         
+        # Coverage (only if step ran and produced valid output)
+        if [ "${{ inputs.include-coverage }}" = "true" ]; then
+          COVERAGE="${{ steps.coverage.outputs.coverage }}"
+          if [ -n "$COVERAGE" ] && [ "$COVERAGE" != "N/A" ]; then
+            echo "### :bar_chart: Code Coverage: ${COVERAGE}%" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # Details
         echo "### :information_source: Details" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ inputs.project-name }}" ]; then
+          echo "- **Project:** ${{ inputs.project-name }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "_View detailed logs in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_" >> $GITHUB_STEP_SUMMARY
