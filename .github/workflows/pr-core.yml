@@ -178,7 +178,7 @@ jobs:
   # Job 5: PR Summary
   pr-summary:
     name: PR Summary
-    needs: [build-and-test, static-analysis]
+    needs: [build-and-test, static-analysis, secret-scan]
     if: ${{ always() && inputs.post-pr-summary }}
     runs-on: ${{ inputs.runs-on }}
     
@@ -196,29 +196,108 @@ jobs:
       - name: Generate PR summary
         uses: ./.github/actions-repo/.github/actions/pr/generate-summary
       
-      - name: Determine job status
+      - name: Determine overall status
         id: status
         shell: bash
         run: |
-          if [[ "${{ needs.build-and-test.result }}" == "success" && "${{ needs.static-analysis.result }}" == "success" ]]; then
-            echo "icon=:white_check_mark:" >> $GITHUB_OUTPUT
-            echo "status=Success" >> $GITHUB_OUTPUT
-          else
+          # Check if any job failed
+          BUILD_RESULT="${{ needs.build-and-test.result }}"
+          ANALYSIS_RESULT="${{ needs.static-analysis.result }}"
+          SECRETS_RESULT="${{ needs.secret-scan.result }}"
+          
+          # Collect warnings - use empty defaults for skipped jobs
+          BUILD_WARNINGS="${{ needs.build-and-test.outputs.has-warnings }}"
+          ANALYSIS_WARNINGS="${{ needs.static-analysis.outputs.has-warnings }}"
+          SECRETS_WARNINGS="${{ needs.secret-scan.outputs.has-warnings || 'false' }}"
+          
+          BUILD_WARNING_MSG="${{ needs.build-and-test.outputs.warning-messages }}"
+          ANALYSIS_WARNING_MSG="${{ needs.static-analysis.outputs.warning-messages }}"
+          SECRETS_WARNING_MSG="${{ needs.secret-scan.outputs.warning-messages }}"
+          
+          # Determine status - don't fail on skipped jobs
+          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" ]]; then
             echo "icon=:x:" >> $GITHUB_OUTPUT
             echo "status=Failed" >> $GITHUB_OUTPUT
+          elif [[ "$BUILD_WARNINGS" == "true" || "$ANALYSIS_WARNINGS" == "true" || "$SECRETS_WARNINGS" == "true" ]]; then
+            echo "icon=:warning:" >> $GITHUB_OUTPUT
+            echo "status=Passed with Warnings" >> $GITHUB_OUTPUT
+          else
+            echo "icon=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "status=Success" >> $GITHUB_OUTPUT
           fi
+          
+          # Build warnings section
+          WARNINGS_SECTION=""
+          if [[ "$BUILD_WARNINGS" == "true" && -n "$BUILD_WARNING_MSG" ]]; then
+            WARNINGS_SECTION="${WARNINGS_SECTION}
+          - :warning: **Build & Test:** $BUILD_WARNING_MSG"
+          fi
+          if [[ "$ANALYSIS_WARNINGS" == "true" && -n "$ANALYSIS_WARNING_MSG" ]]; then
+            WARNINGS_SECTION="${WARNINGS_SECTION}
+          - :warning: **Static Analysis:** $ANALYSIS_WARNING_MSG"
+          fi
+          if [[ "$SECRETS_WARNINGS" == "true" && -n "$SECRETS_WARNING_MSG" ]]; then
+            WARNINGS_SECTION="${WARNINGS_SECTION}
+          - :warning: **Secret Scan:** $SECRETS_WARNING_MSG"
+          fi
+          
+          # Save to output
+          {
+            echo "warnings<<EOF"
+            echo "$WARNINGS_SECTION"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Build summary message
+        id: message
+        shell: bash
+        run: |
+          # Generate the full summary message
+          MESSAGE="## ${{ steps.status.outputs.icon }} PR Core Validation ${{ steps.status.outputs.status }}
+          
+          ### Job Results
+          - **Build and Test:** ${{ needs.build-and-test.result }}
+          - **Static Analysis:** ${{ needs.static-analysis.result }}"
+          
+          # Only include secret scan if it was enabled (not skipped)
+          if [[ "${{ needs.secret-scan.result }}" != "skipped" ]]; then
+            MESSAGE="${MESSAGE}
+          - **Secret Scan:** ${{ needs.secret-scan.result }}"
+          fi
+          
+          # Add warnings section if there are any
+          if [[ -n "${{ steps.status.outputs.warnings }}" ]]; then
+            MESSAGE="${MESSAGE}
+          
+          ### Warnings
+          ${{ steps.status.outputs.warnings }}"
+          fi
+          
+          MESSAGE="${MESSAGE}
+          
+          ### Configuration
+          - **Build Configuration:** ${{ inputs.configuration }}
+          - **Runner:** ${{ inputs.runs-on }}
+          - **Commit:** \`${{ github.sha }}\`
+          
+          ---
+          _View detailed logs in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
+          
+          # Save to output using heredoc for multiline
+          {
+            echo "text<<EOF"
+            echo "$MESSAGE"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Write summary to GitHub
+        shell: bash
+        run: |
+          echo "${{ steps.message.outputs.text }}" >> $GITHUB_STEP_SUMMARY
       
       - name: Post PR comment
         continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/pr/post-comment
         with:
           github-token: ${{ secrets.github-token || github.token }}
-          message: |
-            ## ${{ steps.status.outputs.icon }} PR Core Validation ${{ steps.status.outputs.status }}
-            
-            **Build and Test:** ${{ needs.build-and-test.result }}
-            **Static Analysis:** ${{ needs.static-analysis.result }}
-            
-            **Configuration:** ${{ inputs.configuration }}
-            **Runner:** ${{ inputs.runs-on }}
-            **Commit:** `${{ github.sha }}`
+          message: ${{ steps.message.outputs.text }}

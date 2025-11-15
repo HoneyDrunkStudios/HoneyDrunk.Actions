@@ -67,6 +67,14 @@ on:
         required: false
         type: string
         default: 'main'
+    
+    outputs:
+      has-warnings:
+        description: 'Whether warnings were detected'
+        value: ${{ jobs.static-analysis.outputs.has-warnings }}
+      warning-messages:
+        description: 'List of warning messages'
+        value: ${{ jobs.static-analysis.outputs.warning-messages }}
 
 permissions:
   contents: read
@@ -75,6 +83,9 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: ${{ inputs.runs-on }}
+    outputs:
+      has-warnings: ${{ steps.check-warnings.outputs.has-warnings }}
+      warning-messages: ${{ steps.check-warnings.outputs.warning-messages }}
     
     steps:
       - name: Checkout repository
@@ -99,18 +110,24 @@ jobs:
           project-path: ${{ inputs.project-path }}
       
       - name: Check code formatting
+        id: formatting
         if: ${{ inputs.check-formatting }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "Checking code formatting..."
+          FORMAT_STATUS=0
           if ! dotnet format --verify-no-changes --verbosity diagnostic; then
+            FORMAT_STATUS=1
             if [ "${{ inputs.fail-on-formatting-issues }}" = "true" ]; then
               echo "::error::Code formatting issues detected. Run 'dotnet format' to fix."
               exit 1
             else
               echo "::warning::Code formatting issues detected. Run 'dotnet format' to fix."
+              echo "has-issue=true" >> $GITHUB_OUTPUT
             fi
+          else
+            echo "has-issue=false" >> $GITHUB_OUTPUT
           fi
       
       - name: Run vulnerability scan
@@ -126,3 +143,20 @@ jobs:
         uses: ./.github/actions-repo/.github/actions/diagnostics/validate-test-naming
         with:
           test-directory: ${{ inputs.working-directory }}
+      
+      - name: Check for warnings
+        id: check-warnings
+        if: always()
+        shell: bash
+        run: |
+          HAS_WARNINGS="false"
+          WARNINGS=""
+          
+          # Only check formatting output if the formatting step actually ran
+          if [ "${{ inputs.check-formatting }}" = "true" ] && [ "${{ steps.formatting.outputs.has-issue }}" = "true" ]; then
+            HAS_WARNINGS="true"
+            WARNINGS="Code formatting issues detected. Run 'dotnet format' to fix."
+          fi
+          
+          echo "has-warnings=$HAS_WARNINGS" >> $GITHUB_OUTPUT
+          echo "warning-messages=$WARNINGS" >> $GITHUB_OUTPUT
