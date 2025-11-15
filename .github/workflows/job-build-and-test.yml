@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: '.'
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
       enable-cache:
         description: 'Enable NuGet package caching'
         required: false
@@ -58,6 +63,7 @@ jobs:
         uses: ./.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Build solution
         uses: ./.github/actions/dotnet/build
@@ -65,6 +71,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           no-restore: 'true'
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Run tests
         uses: ./.github/actions/dotnet/test
@@ -73,6 +80,7 @@ jobs:
           no-build: 'true'
           collect-coverage: ${{ inputs.collect-coverage }}
           working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
       
       - name: Publish test results
         if: always()

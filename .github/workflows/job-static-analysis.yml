@@ -61,12 +61,6 @@ on:
         required: false
         type: boolean
         default: true
-      
-      actions-ref:
-        description: 'Git ref of HoneyDrunk.Actions to use'
-        required: false
-        type: string
-        default: 'main'
 
 permissions:
   contents: read
@@ -80,20 +74,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
-        with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
-          ref: ${{ inputs.actions-ref }}
-      
       - name: Setup .NET SDK
-        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        uses: ./.github/actions/dotnet/setup
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
       
       - name: Restore dependencies
-        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        uses: ./.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
           project-path: ${{ inputs.project-path }}
@@ -114,7 +101,7 @@ jobs:
           fi
       
       - name: Run vulnerability scan
-        uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
+        uses: ./.github/actions/security/vulnerability-scan
         with:
           working-directory: ${{ inputs.working-directory }}
           project-path: ${{ inputs.project-path }}
@@ -123,6 +110,6 @@ jobs:
       - name: Validate test naming conventions
         if: ${{ inputs.validate-test-naming }}
         continue-on-error: true
-        uses: ./.github/actions-repo/.github/actions/diagnostics/validate-test-naming
+        uses: ./.github/actions/diagnostics/validate-test-naming
         with:
           test-directory: ${{ inputs.working-directory }}

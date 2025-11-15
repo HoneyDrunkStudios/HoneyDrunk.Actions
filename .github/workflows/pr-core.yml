@@ -114,7 +114,6 @@ jobs:
       project-path: ${{ inputs.project-path }}
       enable-cache: true
       collect-coverage: false  # Coverage is for pr-sdk
-      actions-ref: ${{ inputs.actions-ref }}
     permissions:
       contents: read
       checks: write
@@ -132,7 +131,6 @@ jobs:
       fail-on-formatting-issues: false  # Warn only in PR
       fail-on-severity: 'high'
       validate-test-naming: true
-      actions-ref: ${{ inputs.actions-ref }}
     permissions:
       contents: read
   
@@ -144,7 +142,6 @@ jobs:
     with:
       runs-on: ${{ inputs.runs-on }}
       scan-mode: 'diff-only'
-      actions-ref: ${{ inputs.actions-ref }}
     permissions:
       contents: read
   
