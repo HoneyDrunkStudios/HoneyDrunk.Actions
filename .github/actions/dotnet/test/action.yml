@@ -21,6 +21,10 @@ inputs:
     description: 'Working directory for tests'
     required: false
     default: '.'
+  project-path:
+    description: 'Path to a solution or project to test (optional)'
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
@@ -28,20 +32,43 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Check if there are any test projects
-        if ! find . -name "*.csproj" -exec grep -l "Microsoft.NET.Test.Sdk\|MSTest.TestAdapter\|xunit\|nunit" {} \; | grep -q .; then
-          echo "No test projects found - skipping tests"
-          exit 0
-        fi
+        set -euo pipefail
         
+        # Build common args
         ARGS="--configuration ${{ inputs.configuration }} --logger trx --results-directory ${{ inputs.test-results-directory }}"
-        
         if [ "${{ inputs.no-build }}" == "true" ]; then
           ARGS="$ARGS --no-build"
         fi
-        
         if [ "${{ inputs.collect-coverage }}" == "true" ]; then
           ARGS="$ARGS --collect \"XPlat Code Coverage\""
         fi
         
-        eval "dotnet test $ARGS"
+        TARGET="${{ inputs.project-path }}"
+        if [ -n "$TARGET" ]; then
+          echo "Running tests for explicit target: $TARGET"
+          eval "dotnet test \"$TARGET\" $ARGS" && exit 0
+        fi
+        
+        # Try a solution first (maxdepth 4 for consistency)
+        SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+        if [ -n "$SOLN" ]; then
+          echo "Detected solution: $SOLN"
+          eval "dotnet test \"$SOLN\" $ARGS" && exit 0
+        fi
+        
+        # Discover test projects (maxdepth 4 for consistency with solution search)
+        mapfile -t TEST_PROJECTS < <(find . -maxdepth 4 -name "*.csproj" -exec grep -l "Microsoft.NET.Test.Sdk\|MSTest.TestAdapter\|xunit\|nunit" {} \; || true)
+        if [ ${#TEST_PROJECTS[@]} -eq 0 ]; then
+          echo "No test projects found - skipping tests"
+          exit 0
+        fi
+        
+        echo "Discovered ${#TEST_PROJECTS[@]} test project(s). Running individually."
+        FAIL=0
+        for PROJ in "${TEST_PROJECTS[@]}"; do
+          echo "Testing: $PROJ"
+          if ! eval "dotnet test \"$PROJ\" $ARGS"; then
+            FAIL=1
+          fi
+        done
+        exit $FAIL

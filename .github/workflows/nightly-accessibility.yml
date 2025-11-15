@@ -1,0 +1,434 @@
+# ==============================================================================
+# Nightly Accessibility Workflow
+# ==============================================================================
+# Purpose:
+#   Comprehensive accessibility (ADA/WCAG) scanning for web and UI repos.
+#   Runs on a schedule to perform thorough checks that are too slow for PRs.
+#
+# Responsibilities:
+#   - Build the site, app, or Storybook
+#   - Run full accessibility scan across all configured routes/stories
+#   - Check WCAG 2.1 AA compliance (or higher if configured)
+#   - Generate detailed accessibility report
+#   - Optionally create/update tracking issue when violations exceed threshold
+#
+# Target:
+#   Web apps, UI libraries, and any repo with user-facing interfaces
+#   This is opt-in for applicable repos only
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Consuming repos should trigger on schedule (e.g., cron: '0 4 * * 2,5')
+#   - Can also be triggered manually via workflow_dispatch
+#
+# Non-goals:
+#   - This is not for minimal PR checks (use pr-core with enable-accessibility-check)
+#   - This does not block releases, it's for visibility and tracking
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Nightly Accessibility
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use (for .NET web apps)'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      node-version:
+        description: 'Node.js version (for npm-based builds)'
+        required: false
+        type: string
+        default: '20.x'
+      
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+      
+      build-type:
+        description: 'Type of build (dotnet-web, npm-static, storybook, custom)'
+        required: false
+        type: string
+        default: 'dotnet-web'
+      
+      build-command:
+        description: 'Custom build command (used if build-type is custom)'
+        required: false
+        type: string
+        default: ''
+      
+      serve-command:
+        description: 'Command to serve the application (if needed)'
+        required: false
+        type: string
+        default: ''
+      
+      base-url:
+        description: 'Base URL to scan (e.g., http://localhost:5000)'
+        required: true
+        type: string
+      
+      routes-file:
+        description: 'Path to file containing routes to scan (one per line)'
+        required: false
+        type: string
+        default: ''
+      
+      routes:
+        description: 'Comma-separated list of routes to scan'
+        required: false
+        type: string
+        default: '/'
+      
+      wcag-level:
+        description: 'WCAG compliance level (A, AA, AAA)'
+        required: false
+        type: string
+        default: 'AA'
+      
+      violation-threshold:
+        description: 'Maximum allowed violations before creating issue (0 = always create)'
+        required: false
+        type: number
+        default: 0
+      
+      create-tracking-issue:
+        description: 'Create or update GitHub issue for accessibility violations'
+        required: false
+        type: boolean
+        default: true
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      github-token:
+        description: 'GitHub token for creating issues'
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  build-application:
+    name: Build Application
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        if: ${{ contains(inputs.build-type, 'dotnet') }}
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Setup Node.js
+        if: ${{ contains(inputs.build-type, 'npm') || contains(inputs.build-type, 'storybook') }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      
+      - name: Build .NET web application
+        if: ${{ inputs.build-type == 'dotnet-web' }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Building .NET web application..."
+          
+          # Find web project
+          WEB_PROJ=$(find . -maxdepth 4 -name "*.csproj" -exec grep -l "Microsoft.NET.Sdk.Web\|Microsoft.AspNetCore.App" {} \; | head -n 1 || true)
+          
+          if [ -z "$WEB_PROJ" ]; then
+            echo "::error::No .NET web project found"
+            exit 1
+          fi
+          
+          echo "Building: $WEB_PROJ"
+          dotnet build "$WEB_PROJ" --configuration Release
+          dotnet publish "$WEB_PROJ" --configuration Release --output ./publish --no-build
+      
+      - name: Build npm static site
+        if: ${{ inputs.build-type == 'npm-static' }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Building npm static site..."
+          npm ci
+          npm run build
+      
+      - name: Build Storybook
+        if: ${{ inputs.build-type == 'storybook' }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Building Storybook..."
+          npm ci
+          npm run build-storybook
+      
+      - name: Run custom build command
+        if: ${{ inputs.build-type == 'custom' }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -z "${{ inputs.build-command }}" ]; then
+            echo "::error::build-command is required when build-type is custom"
+            exit 1
+          fi
+          
+          echo "Running custom build command..."
+          ${{ inputs.build-command }}
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-application
+          path: |
+            ${{ inputs.working-directory }}/publish
+            ${{ inputs.working-directory }}/dist
+            ${{ inputs.working-directory }}/build
+            ${{ inputs.working-directory }}/storybook-static
+          retention-days: 7
+          if-no-files-found: warn
+  
+  accessibility-scan:
+    name: Run Accessibility Scan
+    needs: [build-application]
+    runs-on: ${{ inputs.runs-on }}
+    
+    outputs:
+      should_create_issue: ${{ steps.analyze.outputs.should_create_issue }}
+      violation_count: ${{ steps.analyze.outputs.violation_count }}
+      critical_count: ${{ steps.analyze.outputs.critical_count }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: built-application
+          path: ./app
+      
+      - name: Setup Node.js (for accessibility tools)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      
+      - name: Start application server
+        shell: bash
+        run: |
+          echo "Starting application server..."
+          
+          if [ -n "${{ inputs.serve-command }}" ]; then
+            echo "Using custom serve command: ${{ inputs.serve-command }}"
+            ${{ inputs.serve-command }} &
+          elif [ -d "./app/publish" ]; then
+            echo "Starting .NET application..."
+            # This is a placeholder - actual command depends on app type
+            echo "Command: dotnet ./app/publish/YourApp.dll &"
+            echo "::notice::Actual serve command will depend on application type"
+          elif [ -d "./app/dist" ] || [ -d "./app/build" ]; then
+            echo "Starting static file server..."
+            npx serve -s ./app/dist -l 5000 &
+          elif [ -d "./app/storybook-static" ]; then
+            echo "Starting Storybook static server..."
+            npx serve -s ./app/storybook-static -l 6006 &
+          else
+            echo "::error::Unable to determine how to serve application"
+            exit 1
+          fi
+          
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          
+          # Wait for server to be ready
+          echo "Waiting for server to start..."
+          sleep 10
+          
+          # Health check
+          for i in {1..30}; do
+            if curl -sf "${{ inputs.base-url }}" > /dev/null 2>&1; then
+              echo "Server is ready!"
+              exit 0
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+          
+          echo "::error::Server failed to start within timeout"
+          exit 1
+      
+      - name: Parse routes to scan
+        id: routes
+        shell: bash
+        run: |
+          echo "Parsing routes to scan..."
+          
+          if [ -n "${{ inputs.routes-file }}" ] && [ -f "${{ inputs.routes-file }}" ]; then
+            echo "Reading routes from file: ${{ inputs.routes-file }}"
+            ROUTES=$(cat "${{ inputs.routes-file }}" | tr '\n' ',' | sed 's/,$//')
+          else
+            ROUTES="${{ inputs.routes }}"
+          fi
+          
+          echo "routes=$ROUTES" >> $GITHUB_OUTPUT
+          echo "Routes to scan: $ROUTES"
+      
+      - name: Run comprehensive accessibility scan
+        shell: bash
+        run: |
+          echo "Running comprehensive accessibility scan..."
+          echo "Base URL: ${{ inputs.base-url }}"
+          echo "Routes: ${{ steps.routes.outputs.routes }}
+          echo "WCAG Level: ${{ inputs.wcag-level }}"
+          echo ""
+          echo "This is a placeholder for HoneyDrunk.Tools accessibility scanner"
+          echo "Command: hd-tools accessibility scan --full"
+          echo "::notice::Accessibility scanning will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools accessibility scan \
+          #   --base-url "${{ inputs.base-url }}" \
+          #   --routes "${{ steps.routes.outputs.routes }}" \
+          #   --wcag-level "${{ inputs.wcag-level }}" \
+          #   --full-scan \
+          #   --output-json "./accessibility-reports/scan-results.json" \
+          #   --output-html "./accessibility-reports/scan-results.html"
+          
+          mkdir -p ./accessibility-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","violations":[]}' > ./accessibility-reports/scan-results.json
+      
+      - name: Stop application server
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            echo "Stopping server (PID: $SERVER_PID)"
+            kill $SERVER_PID || true
+          fi
+      
+      - name: Analyze accessibility results
+        id: analyze
+        shell: bash
+        run: |
+          echo "Analyzing accessibility scan results..."
+          
+          # Placeholder analysis
+          VIOLATION_COUNT=0
+          CRITICAL_COUNT=0
+          
+          echo "violation_count=$VIOLATION_COUNT" >> $GITHUB_OUTPUT
+          echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+          
+          if [ $VIOLATION_COUNT -gt ${{ inputs.violation-threshold }} ]; then
+            echo "should_create_issue=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_create_issue=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Total violations: $VIOLATION_COUNT"
+          echo "Critical violations: $CRITICAL_COUNT"
+      
+      - name: Upload accessibility report
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-report
+          path: ./accessibility-reports/**/*
+          retention-days: 90
+  
+  create-tracking-issue:
+    name: Create Accessibility Tracking Issue
+    needs: [accessibility-scan]
+    if: ${{ inputs.create-tracking-issue && needs.accessibility-scan.outputs.should_create_issue == 'true' }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download accessibility report
+        uses: actions/download-artifact@v4
+        with:
+          name: accessibility-report
+          path: ./accessibility-reports
+      
+      - name: Create or update accessibility issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
+        run: |
+          echo "Creating or updating accessibility tracking issue..."
+          echo "This is a placeholder for HoneyDrunk.Tools issue creator"
+          echo "Command: hd-tools github create-accessibility-issue"
+          echo "::notice::GitHub issue creation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools github create-accessibility-issue \
+          #   --report "./accessibility-reports/scan-results.json" \
+          #   --title "Accessibility Violations Detected - $(date +%Y-%m-%d)" \
+          #   --labels "accessibility,automated,wcag-${{ inputs.wcag-level }}" \
+          #   --update-existing
+  
+  accessibility-summary:
+    name: Generate Accessibility Summary
+    needs: [accessibility-scan]
+    if: always()
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Download accessibility report
+        uses: actions/download-artifact@v4
+        with:
+          name: accessibility-report
+          path: ./accessibility-reports
+      
+      - name: Generate summary
+        shell: bash
+        run: |
+          echo "# Nightly Accessibility Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Base URL:** ${{ inputs.base-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**WCAG Level:** ${{ inputs.wcag-level }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Application: ${{ needs.accessibility-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Accessibility Scan: ${{ needs.accessibility-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "./accessibility-reports/scan-results.json" ]; then
+            echo "Detailed report available in artifacts." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ inputs.create-tracking-issue }}" == "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Tracking Issues:** Enabled" >> $GITHUB_STEP_SUMMARY
+          fi

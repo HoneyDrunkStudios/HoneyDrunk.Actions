@@ -1,0 +1,258 @@
+# ==============================================================================
+# PR SDK Workflow
+# ==============================================================================
+# Purpose:
+#   PR validation for SDK-style repos that expose public APIs.
+#   Extends pr-core behavior with API surface checks and coverage reporting.
+#
+# Responsibilities:
+#   - Orchestrate SDK-specific validation jobs
+#   - Coordinate API compatibility and coverage analysis
+#   - Generate comprehensive PR summary
+#
+# Single Responsibility:
+#   Orchestration only - delegates to job-level workflows
+#
+# Target Repos:
+#   - NuGet libraries with public APIs
+#   - SDKs exposed to external consumers
+#   - Shared libraries within the HoneyDrunk Grid
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Consuming repos should trigger it on pull_request events
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: PR SDK
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Release'
+      
+      runs-on:
+        description: 'GitHub runner to use (ubuntu-latest, windows-latest, macos-latest)'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      
+      api-compat-baseline:
+        description: 'Path to baseline API surface file for compatibility check'
+        required: false
+        type: string
+        default: ''
+      
+      coverage-threshold:
+        description: 'Minimum code coverage percentage (0-100, 0 = no enforcement)'
+        required: false
+        type: number
+        default: 80
+      
+      coverage-delta-threshold:
+        description: 'Maximum allowed coverage decrease percentage (0 = no enforcement)'
+        required: false
+        type: number
+        default: 5
+      
+      enable-secret-scan:
+        description: 'Run secret scanning on PR diff'
+        required: false
+        type: boolean
+        default: true
+      
+      post-pr-summary:
+        description: 'Post results summary to PR as comment'
+        required: false
+        type: boolean
+        default: true
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use (main, tag, or commit)'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      github-token:
+        description: 'GitHub token for PR comments and API access'
+        required: false
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  # Job 1: Build and Test with Coverage
+  build-and-test:
+    name: Build and Test with Coverage
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-build-and-test.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      configuration: ${{ inputs.configuration }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      enable-cache: true
+      collect-coverage: true  # SDK repos need coverage
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+      checks: write
+  
+  # Job 2: Coverage Analysis
+  coverage-analysis:
+    name: Coverage Analysis
+    needs: [build-and-test]
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-coverage-analysis.yml@main
+    with:
+      runs-on: ${{ inputs.runs-on }}
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      coverage-delta-threshold: ${{ inputs.coverage-delta-threshold }}
+      coverage-artifact-name: 'coverage-reports-${{ inputs.runs-on }}'
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+  
+  # Job 3: API Compatibility Check
+  api-compatibility:
+    name: API Compatibility Check
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-api-compatibility.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      api-compat-baseline: ${{ inputs.api-compat-baseline }}
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+  
+  # Job 4: Static Analysis
+  static-analysis:
+    name: Static Analysis
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-static-analysis.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      check-formatting: true
+      fail-on-formatting-issues: false  # Warn only in PR
+      fail-on-severity: 'high'
+      validate-test-naming: true
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+  
+  # Job 5: Secret Scan (Optional)
+  secret-scan:
+    name: Secret Scan (Diff Only)
+    if: ${{ inputs.enable-secret-scan }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-secret-scan.yml@main
+    with:
+      runs-on: ${{ inputs.runs-on }}
+      scan-mode: 'diff-only'
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+  
+  # Job 6: Documentation Check
+  documentation-check:
+    name: Documentation Check
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Check XML documentation completeness
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Checking XML documentation for public APIs..."
+          echo "This is a placeholder for HoneyDrunk.Tools documentation checker"
+          echo "Command: hd-tools docs check --project ${{ inputs.project-path }}"
+          echo "::notice::Documentation checking will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools docs check --project "${{ inputs.project-path }}" --fail-on-missing
+  
+  # Job 7: PR Summary
+  pr-summary:
+    name: PR Summary
+    needs: [build-and-test, coverage-analysis, api-compatibility, static-analysis]
+    if: ${{ always() && inputs.post-pr-summary }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Generate PR summary
+        uses: ./.github/actions-repo/.github/actions/pr/generate-summary
+      
+      - name: Determine job status
+        id: status
+        shell: bash
+        run: |
+          if [[ "${{ needs.build-and-test.result }}" == "success" && \
+                "${{ needs.coverage-analysis.result }}" == "success" && \
+                "${{ needs.api-compatibility.result }}" == "success" && \
+                "${{ needs.static-analysis.result }}" == "success" ]]; then
+            echo "icon=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "status=Success" >> $GITHUB_OUTPUT
+          else
+            echo "icon=:x:" >> $GITHUB_OUTPUT
+            echo "status=Failed" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Post PR comment
+        continue-on-error: true
+        uses: ./.github/actions-repo/.github/actions/pr/post-comment
+        with:
+          github-token: ${{ secrets.github-token || github.token }}
+          message: |
+            ## ${{ steps.status.outputs.icon }} PR SDK Validation ${{ steps.status.outputs.status }}
+            
+            **Build and Test:** ${{ needs.build-and-test.result }}
+            **Coverage Analysis:** ${{ needs.coverage-analysis.result }}
+            **API Compatibility:** ${{ needs.api-compatibility.result }}
+            **Static Analysis:** ${{ needs.static-analysis.result }}
+            
+            **Configuration:** ${{ inputs.configuration }}
+            **Coverage Threshold:** ${{ inputs.coverage-threshold }}%
+            **Runner:** ${{ inputs.runs-on }}
+            **Commit:** `${{ github.sha }}`

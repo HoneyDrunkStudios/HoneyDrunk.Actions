@@ -1,177 +1,191 @@
 # HoneyDrunk.Actions
 
-GitHub Actions reusable workflows and composite actions — the public CI/CD toolkit for open-source and community-facing HoneyDrunk projects.
+Central library of reusable GitHub Actions workflows and composite actions for the HoneyDrunk Grid.
 
 ## 📚 Table of Contents
 
 - [Overview](#overview)
-- [Architecture](#architecture)
+- [Workflow Families](#workflow-families)
 - [Quick Start](#quick-start)
-- [Directory Structure](#directory-structure)
-- [Composite Actions (Steps)](#composite-actions-steps)
-- [Job-Level Workflows](#job-level-workflows)
-- [Stage-Level Workflows](#stage-level-workflows)
-- [Examples](#examples)
-- [Best Practices](#best-practices)
-- [Azure DevOps Templates](#azure-devops-templates)
+- [Composite Actions](#composite-actions-steps)
+- [Legacy Workflows](#legacy-workflows)
+- [Documentation](#documentation)
+- [Design Principles](#design-principles)
 - [Contributing](#contributing)
 - [Additional Resources](#additional-resources)
 
 ## 🎯 Overview
 
-This repository contains comprehensive template libraries for both GitHub Actions and Azure DevOps, providing a three-tier architecture that mirrors Azure DevOps patterns:
-
-- **Actions** (Steps): Reusable building blocks for common tasks
-- **Jobs**: Single-job workflows for specific operations
-- **Stages**: Multi-job workflows for complete CI/CD pipelines
+HoneyDrunk.Actions provides standardized CI/CD workflows that can be reused across all repositories in the HoneyDrunk ecosystem. This ensures consistency, reduces duplication, and simplifies maintenance.
 
 ### Key Features
 
-✅ .NET 10.0 support with easy version customization  
-✅ Cross-platform builds (Linux, Windows, macOS)  
-✅ NuGet package caching for faster builds  
-✅ Code coverage collection and reporting  
-✅ Security vulnerability scanning  
-✅ Test result publishing with annotations  
-✅ PR validation and commenting  
-✅ Flexible three-tier composition  
+✅ **Workflow Families** - Standard rituals for PR, release, security, dependencies, accessibility, and governance  
+✅ **Fast PR Validation** - Minimal checks for quick feedback  
+✅ **Deep Scheduled Scans** - Comprehensive analysis without blocking development  
+✅ **.NET 10.0 Support** - Latest .NET with easy version customization  
+✅ **Cross-Platform** - Linux, Windows, macOS support  
+✅ **HoneyDrunk.Tools Integration** - Designed to work with external scanning CLIs  
+✅ **Versioned Contracts** - Semantic versioning for stability  
 
-## 🏗️ Architecture
+## 🏗️ Workflow Families
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  STAGES (Multi-Job Workflows)                           │
-│  Complete CI/CD pipelines you drop into your repo       │
-│  └─ .github/workflows/templates/stages/                 │
-│     ├─ pr-validation.yml                                │
-│     ├─ dotnet-library-ci.yml                            │
-│     ├─ dotnet-library-release.yml                       │
-│     └─ dotnet-app-ci.yml                                │
-└─────────────────────────────────────────────────────────┘
-                         ↓ composed of
-┌─────────────────────────────────────────────────────────┐
-│  JOBS (Single-Job Workflows)                            │
-│  Opinionated units of work                              │
-│  └─ .github/workflows/templates/jobs/                   │
-│     ├─ build-and-test.yml                               │
-│     ├─ code-quality.yml                                 │
-│     └─ publish-nuget.yml                                │
-└─────────────────────────────────────────────────────────┘
-                         ↓ composed of
-┌─────────────────────────────────────────────────────────┐
-│  ACTIONS (Composite Actions)                            │
-│  Primitive building blocks (steps)                      │
-│  └─ .github/actions/                                    │
-│     ├─ dotnet/ (setup, restore, build, test...)        │
-│     ├─ nuget/ (cache, push, add-source)                │
-│     ├─ diagnostics/ (debug, validate, publish)         │
-│     ├─ security/ (vulnerability-scan)                   │
-│     └─ pr/ (generate-summary, post-comment)            │
-└─────────────────────────────────────────────────────────┘
-```
+### PR Workflows
 
-### When to Use What
+Fast validation for pull requests:
 
-| Level | Use When | Example |
-|-------|----------|---------|
-| **Stages** | You want a complete pipeline | `dotnet-library-ci.yml` for standard library builds |
-| **Jobs** | You need custom composition | Mix `build-and-test` + custom deployment job |
-| **Actions** | You need maximum control | Build complex workflows step-by-step |
+- **[pr-core.yml](.github/workflows/pr-core.yml)** - Basic PR validation for most repos
+  - Build and unit tests
+  - Fast static analysis
+  - Diff-only secret scanning
+  - Optional minimal accessibility check
+  
+- **[pr-sdk.yml](.github/workflows/pr-sdk.yml)** - Extended validation for SDK repos
+  - Everything in pr-core
+  - API compatibility checks
+  - Code coverage with delta reporting
+  - Documentation completeness validation
+
+### Release Workflows
+
+Comprehensive release validation:
+
+- **[release.yml](.github/workflows/release.yml)** - Production release workflow
+  - Full test suite
+  - SBOM generation
+  - Dependency vulnerability scan
+  - License compliance checks
+  - Container build and scan (optional)
+  - Smoke tests (optional)
+
+### Scheduled Workflows
+
+Deep analysis on a schedule:
+
+- **[nightly-security.yml](.github/workflows/nightly-security.yml)** - Comprehensive security scanning
+  - Deep SAST analysis
+  - Full dependency vulnerability scan
+  - Infrastructure as Code security checks
+  - Secret scanning across entire codebase
+
+- **[nightly-deps.yml](.github/workflows/nightly-deps.yml)** - Dependency management
+  - Detect outdated NuGet and npm packages
+  - Check for deprecated packages
+  - Auto-generate dependency update PRs (optional)
+
+- **[nightly-accessibility.yml](.github/workflows/nightly-accessibility.yml)** - Accessibility compliance
+  - Build and serve web apps/Storybook
+  - Full WCAG 2.1 AA/AAA scanning
+  - Track violations with GitHub issues
+
+- **[weekly-governance.yml](.github/workflows/weekly-governance.yml)** - Organization governance
+  - Scan repos for CI workflow presence
+  - Check for required workflows and files
+  - Detect stale branches and PRs
+  - Ensure security policies exist
 
 ## 🚀 Quick Start
 
-### Using a Stage (Recommended for most cases)
+### Basic PR Workflow
 
-Create a workflow file in your repository (e.g., `.github/workflows/ci.yml`):
+Add to your repo at `.github/workflows/pr.yml`:
 
 ```yaml
-name: CI
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  pr-validation:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+```
+
+### SDK/Library PR Workflow
+
+For repos with public APIs:
+
+```yaml
+name: PR SDK Validation
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  pr-sdk-validation:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
+    with:
+      coverage-threshold: 80
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+```
+
+### Release Workflow
+
+For tag-based releases:
+
+```yaml
+name: Release
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags:
+      - 'v*'
 
 jobs:
-  ci:
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/stages/dotnet-library-ci.yml@main
+  release:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/release.yml@main
     with:
-      dotnet-version: '10.0.x'
-      configuration: 'Release'
-      enable-code-quality: true
+      enable-nuget-publish: true
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
 ```
 
-### Using Jobs (For custom composition)
+### Nightly Security Scan
 
 ```yaml
+name: Nightly Security
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+
 jobs:
-  build:
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/templates/jobs/build-and-test.yml@main
-    with:
-      dotnet-version: '10.0.x'
-  
-  custom-deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Custom deployment logic"
+  security-scan:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/nightly-security.yml@main
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
 ```
 
-### Using Actions (For maximum control)
+## 📖 Documentation
 
-```yaml
-steps:
-  - uses: actions/checkout@v4
-  
-  - name: Setup .NET
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/dotnet/setup@main
-    with:
-      dotnet-version: '10.0.x'
-  
-  - name: Build
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/dotnet/build@main
-    with:
-      configuration: 'Release'
-```
-
-## 📁 Directory Structure
-
-```
-.github/
-├── actions/                    # STEP-LEVEL: Composite actions (primitives)
-│   ├── dotnet/                # .NET SDK operations
-│   │   ├── setup/
-│   │   ├── restore/
-│   │   ├── build/
-│   │   ├── test/
-│   │   ├── pack/
-│   │   └── publish/
-│   ├── nuget/                 # NuGet operations
-│   │   ├── setup-cache/
-│   │   ├── push/
-│   │   └── add-source/
-│   ├── diagnostics/           # Diagnostics & validation
-│   │   ├── debug-build-identity/
-│   │   ├── validate-test-naming/
-│   │   └── publish-test-results/
-│   ├── security/              # Security scanning
-│   │   └── vulnerability-scan/
-│   └── pr/                    # Pull request operations
-│       ├── generate-summary/
-│       └── post-comment/
-└── workflows/
-    └── templates/
-        ├── jobs/              # JOB-LEVEL: Single-job workflows
-        │   ├── build-and-test.yml
-        │   ├── code-quality.yml
-        │   └── publish-nuget.yml
-        └── stages/            # STAGE-LEVEL: Multi-job workflows
-            ├── pr-validation.yml
-            ├── dotnet-library-ci.yml
-            ├── dotnet-library-release.yml
-            └── dotnet-app-ci.yml
-```
+- **[Consumer Usage Guide](docs/consumer-usage.md)** - Complete examples for all workflows
+- **Workflow Headers** - Each workflow contains detailed inline documentation
+- **[Quick Reference](docs/QUICK-REFERENCE.md)** - Common patterns and troubleshooting
 
 ## 🧩 Composite Actions (Steps)
 
@@ -352,260 +366,111 @@ Posts a comment to the pull request.
     comment-tag: 'build-bot'   # Default: build-bot
 ```
 
-## 🔄 Job-Level Workflows
+## 🔄 Legacy Workflows
 
-Single-job reusable workflows for specific tasks. These are opinionated units of work that you can compose into custom pipelines.
+The repository also contains legacy template-based workflows for backward compatibility:
 
-### Build and Test Job
-Complete build and test pipeline with coverage.
+### Legacy PR Validation
 
-**Path:** `.github/workflows/templates/jobs/build-and-test.yml`
-
-```yaml
-jobs:
-  build:
-    uses: ./.github/workflows/templates/jobs/build-and-test.yml
-    with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      configuration: 'Release'      # Default: Release
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      working-directory: '.'        # Default: .
-      enable-cache: true            # Default: true
-      collect-coverage: true        # Default: true
-```
-
-### Code Quality Job
-Runs security scans and code quality checks.
-
-**Path:** `.github/workflows/templates/jobs/code-quality.yml`
+**Path:** `.github/workflows/legacy/pr-validation.yml`
 
 ```yaml
-jobs:
-  quality:
-    uses: ./.github/workflows/templates/jobs/code-quality.yml
-    with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      working-directory: '.'        # Default: .
-      fail-on-severity: 'moderate'  # Default: moderate
-      validate-test-naming: true    # Default: true
-      check-formatting: true        # Default: true
-      fail-on-formatting-issues: false  # Default: false
-```
+name: Legacy PR Validation
 
-**Formatting Check Options:**
-- `check-formatting: true` - Run `dotnet format --verify-no-changes`
-- `fail-on-formatting-issues: false` - Warn only (good for gradual adoption)
-- `fail-on-formatting-issues: true` - Fail build on formatting issues (HoneyDrunk.Standards alignment)
+on:
+  pull_request:
+    branches: [main]
 
-### Publish NuGet Job
-Builds, tests, and publishes NuGet packages.
-
-**Path:** `.github/workflows/templates/jobs/publish-nuget.yml`
-
-```yaml
-jobs:
-  publish:
-    uses: ./.github/workflows/templates/jobs/publish-nuget.yml
-    with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      configuration: 'Release'      # Default: Release
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      project-path: '.'             # Default: .
-      nuget-source: 'https://api.nuget.org/v3/index.json'
-      skip-duplicate: true          # Default: true
-    secrets:
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-```
-
-## 🎭 Stage-Level Workflows
-
-Multi-job workflows for complete CI/CD pipelines. These are full pipelines you can drop into any repository.
-
-### PR Validation Stage
-Complete PR validation with build, test, and code quality checks.
-
-**Path:** `.github/workflows/templates/stages/pr-validation.yml`
-
-```yaml
 jobs:
   validate:
-    uses: ./.github/workflows/templates/stages/pr-validation.yml
-    with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      configuration: 'Release'      # Default: Release
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      working-directory: '.'        # Default: .
-      enable-code-quality: true     # Default: true
-      post-pr-comment: false        # Default: false
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/legacy/pr-validation.yml@main
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 ```
 
-**Includes:** Build + Test + Code Quality + PR Summary
+### Legacy Release
 
-### .NET Library CI Stage
-Complete CI pipeline for .NET libraries.
-
-**Path:** `.github/workflows/templates/stages/dotnet-library-ci.yml`
+**Path:** `.github/workflows/legacy/release.yml`
 
 ```yaml
-jobs:
-  ci:
-    uses: ./.github/workflows/templates/stages/dotnet-library-ci.yml
-    with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      configuration: 'Release'      # Default: Release
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      working-directory: '.'        # Default: .
-      enable-code-quality: true     # Default: true
-```
+name: Legacy Release
 
-**Includes:** Build + Test + Code Quality
+on:
+  push:
+    tags:
+      - 'v*'
 
-### .NET Library Release Stage
-Complete release pipeline for .NET libraries including package publishing.
-
-**Path:** `.github/workflows/templates/stages/dotnet-library-release.yml`
-
-```yaml
 jobs:
   release:
-    uses: ./.github/workflows/templates/stages/dotnet-library-release.yml
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/legacy/release.yml@main
     with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      configuration: 'Release'      # Default: Release
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      working-directory: '.'        # Default: .
-      project-path: '.'             # Default: .
-      nuget-source: 'https://api.nuget.org/v3/index.json'
-      skip-duplicate: true          # Default: true
+      enable-nuget-publish: true
     secrets:
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
 ```
 
-**Includes:** Build + Test + Code Quality + Pack + Publish
+## 🎯 Design Principles
 
-### .NET Application CI Stage
-Complete CI pipeline for .NET applications.
+### 1. Reusable, Not Bespoke
+All workflows are designed to be consumed via `uses:` syntax. No repo-specific logic.
 
-**Path:** `.github/workflows/templates/stages/dotnet-app-ci.yml`
+### 2. Separation of Concerns
+This repo orchestrates CI behavior. Heavy scanning logic belongs in HoneyDrunk.Tools CLI.
+
+### 3. Fast PRs, Deep Scheduled Checks
+- PR workflows: Fast and minimal, only relevant to the diff
+- Scheduled workflows: Slow, thorough, organization-wide
+
+### 4. Convention Over Configuration
+Consistent workflow names and minimal configuration required.
+
+### 5. Versioned Contracts
+Breaking changes bump workflow versions. Semantic versioning for stability.
+
+## 🔧 Integration with HoneyDrunk.Tools
+
+Many workflows call placeholder commands that will be implemented in the HoneyDrunk.Tools CLI:
+
+- `hd-tools deps scan` - Dependency scanning
+- `hd-tools security sast` - SAST analysis
+- `hd-tools accessibility scan` - Accessibility testing
+- `hd-tools api check` - API compatibility checking
+- `hd-tools sbom generate` - SBOM generation
+- `hd-tools governance check` - Governance checks
+
+These placeholders make it clear where external tools are needed without embedding complex logic in YAML.
+
+## 📝 Versioning
+
+### For Consumers
+
+Pin to stable versions for production:
 
 ```yaml
-jobs:
-  ci:
-    uses: ./.github/workflows/templates/stages/dotnet-app-ci.yml
-    with:
-      dotnet-version: '10.0.x'     # Default: 10.0.x
-      configuration: 'Release'      # Default: Release
-      runs-on: 'ubuntu-latest'      # Default: ubuntu-latest
-      working-directory: '.'        # Default: .
-      enable-code-quality: true     # Default: true
+uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@v1.0.0
 ```
 
-**Includes:** Build + Test + Code Quality
-
-## 📖 Examples
-
-See the `examples/` directory for complete workflow examples:
-
-- **pr-validation.yml** - PR validation using stage workflow
-- **build-multiplatform.yml** - Multi-platform build matrix using job workflows
-- **publish-nuget.yml** - Full NuGet publishing using stage workflow
-- **library-ci-stage.yml** - Library CI using stage workflow
-- **library-ci-jobs.yml** - Library CI manually composing job workflows
-- **simple-ci.yml** - Simple CI using composite actions only
-- **custom-workflow.yml** - Custom workflow mixing jobs and actions
-
-## 🎯 Best Practices
-
-### 1. Use Caching
-Always enable NuGet caching to speed up builds:
+Or use `@main` for latest features (less stable):
 
 ```yaml
-- uses: ./.github/actions/nuget/setup-cache
+uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
 ```
 
-### 2. Chain Operations Efficiently
-Use `no-restore` and `no-build` flags to avoid redundant work:
+### For Contributors
 
-```yaml
-- uses: ./.github/actions/dotnet/restore
-- uses: ./.github/actions/dotnet/build
-  with:
-    no-restore: 'true'
-- uses: ./.github/actions/dotnet/test
-  with:
-    no-build: 'true'
-```
-
-### 3. Run Tests on Multiple Platforms
-Use a matrix strategy for cross-platform validation:
-
-```yaml
-strategy:
-  matrix:
-    os: [ubuntu-latest, windows-latest, macos-latest]
-runs-on: ${{ matrix.os }}
-```
-
-### 4. Collect and Publish Test Results
-Always publish test results, even on failure:
-
-```yaml
-- uses: ./.github/actions/dotnet/test
-- uses: ./.github/actions/diagnostics/publish-test-results
-  if: always()
-```
-
-### 5. Pin Action Versions
-For production workflows, pin to specific versions or tags:
-
-```yaml
-uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/dotnet/setup@v1.0.0
-```
-
-### 6. Use Secrets for Sensitive Data
-Never hardcode API keys or tokens:
-
-```yaml
-api-key: ${{ secrets.NUGET_API_KEY }}
-```
-
-## 🔶 Azure DevOps Templates
-
-This repository also includes Azure DevOps pipeline templates in the `devops-example/` directory.
-
-### Using Azure DevOps Templates
-
-Reference templates in your pipeline:
-
-```yaml
-resources:
-  repositories:
-  - repository: templates
-    type: github
-    name: HoneyDrunkStudios/HoneyDrunk.Actions
-    endpoint: GitHubConnection
-
-stages:
-- template: devops-example/templates/stages/pr-validation.stage.yaml@templates
-  parameters:
-    dotNetVersion: '10.0.x'
-    buildConfiguration: 'Release'
-```
-
-### Architecture Philosophy
-
-Both template libraries follow the same hierarchical pattern:
-
-| Level | Azure DevOps | GitHub Actions | Purpose |
-|-------|--------------|----------------|---------|
-| Steps | Step Templates | Composite Actions | Primitive operations |
-| Jobs | Job Templates | Job-Level Workflows | Units of work |
-| Stages | Stage Templates | Stage-Level Workflows | Complete pipelines |
-
-This parallel structure makes it easy to understand and maintain both systems.
+- Major version: Breaking changes to workflow inputs/outputs
+- Minor version: New features, backward compatible
+- Patch version: Bug fixes
 
 ## 🤝 Contributing
 

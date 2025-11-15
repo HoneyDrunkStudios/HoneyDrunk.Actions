@@ -5,6 +5,10 @@ inputs:
     description: 'Working directory for restore'
     required: false
     default: '.'
+  project-path:
+    description: 'Path to a solution or project to restore (optional)'
+    required: false
+    default: ''
   verbosity:
     description: 'Restore verbosity level'
     required: false
@@ -15,4 +19,26 @@ runs:
     - name: Restore dependencies
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: dotnet restore --verbosity ${{ inputs.verbosity }}
+      run: |
+        set -euo pipefail
+        TARGET="${{ inputs.project-path }}"
+        if [ -n "$TARGET" ]; then
+          echo "Restoring explicit target: $TARGET"
+          dotnet restore "$TARGET" --verbosity ${{ inputs.verbosity }}
+          exit $?
+        fi
+        # Auto-detect a solution or project file if none explicitly provided
+        SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+        if [ -n "$SOLN" ]; then
+          echo "Detected solution: $SOLN"
+          dotnet restore "$SOLN" --verbosity ${{ inputs.verbosity }}
+          exit $?
+        fi
+        PROJ=$(find . -maxdepth 4 \( -name "*.csproj" -o -name "*.fsproj" -o -name "*.vbproj" \) | head -n 1 || true)
+        if [ -n "$PROJ" ]; then
+          echo "Detected project: $PROJ"
+          dotnet restore "$PROJ" --verbosity ${{ inputs.verbosity }}
+          exit $?
+        fi
+        echo "::error::No project or solution file found for restore in working directory '${{ inputs.working-directory }}'. Consider setting 'project-path' input."
+        exit 1

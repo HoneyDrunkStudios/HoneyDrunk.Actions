@@ -1,0 +1,114 @@
+# ==============================================================================
+# API Compatibility Check Job
+# ==============================================================================
+# Purpose:
+#   Check public API surface for breaking changes.
+#
+# Single Responsibility:
+#   API compatibility validation only
+# ==============================================================================
+
+name: API Compatibility Check (Job)
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file'
+        required: false
+        type: string
+        default: ''
+      
+      api-compat-baseline:
+        description: 'Path to baseline API surface file'
+        required: false
+        type: string
+        default: ''
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  api-compatibility:
+    name: API Compatibility Check
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Build solution
+        uses: ./.github/actions-repo/.github/actions/dotnet/build
+        with:
+          configuration: 'Release'
+          no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Check API surface compatibility
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Checking public API surface for breaking changes..."
+          echo "This is a placeholder for HoneyDrunk.Tools API compatibility checker"
+          
+          if [ -n "${{ inputs.api-compat-baseline }}" ]; then
+            echo "Baseline: ${{ inputs.api-compat-baseline }}"
+            echo "Command: hd-tools api check --baseline ${{ inputs.api-compat-baseline }}"
+          else
+            echo "No baseline specified, comparing against base branch"
+            echo "Command: hd-tools api check --compare-branch ${{ github.event.pull_request.base.ref || 'main' }}"
+          fi
+          
+          echo "::notice::API compatibility checking will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools api check \
+          #   --project "${{ inputs.project-path }}" \
+          #   --baseline "${{ inputs.api-compat-baseline }}" \
+          #   --fail-on-breaking \
+          #   --output "./api-compat-report.json"

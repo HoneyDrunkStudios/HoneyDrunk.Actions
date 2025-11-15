@@ -1,0 +1,426 @@
+# ==============================================================================
+# Weekly Governance Workflow
+# ==============================================================================
+# Purpose:
+#   Organization-wide governance checks using GitHub APIs.
+#   Ensures repos across the HoneyDrunk Grid meet baseline standards.
+#
+# Responsibilities:
+#   - Use GitHub APIs to inspect repos across the org
+#   - Detect repos with no CI workflows
+#   - Detect repos not using required workflows (e.g., pr-core)
+#   - Detect repos missing basic governance files (CODEOWNERS, README, LICENSE)
+#   - Check for stale branches and PRs
+#   - Check for security policy presence
+#   - Generate consolidated governance report
+#   - Optionally create issues for non-compliant repos
+#
+# Target:
+#   This is typically run from a dedicated meta/governance repo
+#   It scans across multiple repositories in the organization
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Should be triggered on schedule (e.g., cron: '0 8 * * 1' for Monday mornings)
+#   - Can also be triggered manually via workflow_dispatch
+#
+# Prerequisites:
+#   - Requires GitHub token with org:read and repo:read permissions
+#   - Should be run from a repo with appropriate access
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Weekly Governance
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      organization:
+        description: 'GitHub organization to scan (defaults to current org)'
+        required: false
+        type: string
+        default: ''
+      
+      required-workflows:
+        description: 'Comma-separated list of required workflow names (e.g., pr-core,pr-sdk)'
+        required: false
+        type: string
+        default: 'pr-core'
+      
+      required-files:
+        description: 'Comma-separated list of required files (e.g., CODEOWNERS,README.md,LICENSE)'
+        required: false
+        type: string
+        default: 'README.md,LICENSE,CODEOWNERS'
+      
+      exclude-repos:
+        description: 'Comma-separated list of repo names to exclude from checks'
+        required: false
+        type: string
+        default: ''
+      
+      exclude-archived:
+        description: 'Exclude archived repositories from checks'
+        required: false
+        type: boolean
+        default: true
+      
+      check-stale-branches:
+        description: 'Check for stale branches (no commits in N days)'
+        required: false
+        type: boolean
+        default: true
+      
+      stale-branch-days:
+        description: 'Number of days before a branch is considered stale'
+        required: false
+        type: number
+        default: 90
+      
+      check-stale-prs:
+        description: 'Check for stale pull requests'
+        required: false
+        type: boolean
+        default: true
+      
+      stale-pr-days:
+        description: 'Number of days before a PR is considered stale'
+        required: false
+        type: number
+        default: 30
+      
+      create-issues:
+        description: 'Create issues in non-compliant repos'
+        required: false
+        type: boolean
+        default: false
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      github-token:
+        description: 'GitHub token with org and repo read permissions'
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan-organization:
+    name: Scan Organization Repositories
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      organization: ${{ steps.org.outputs.organization }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Determine organization
+        id: org
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.organization }}" ]; then
+            ORG="${{ inputs.organization }}"
+          else
+            ORG="${{ github.repository_owner }}"
+          fi
+          echo "organization=$ORG" >> $GITHUB_OUTPUT
+          echo "Scanning organization: $ORG"
+      
+      - name: Fetch organization repositories
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Fetching repositories from ${{ steps.org.outputs.organization }}..."
+          
+          EXCLUDE_ARCHIVED=""
+          if [ "${{ inputs.exclude-archived }}" == "true" ]; then
+            EXCLUDE_ARCHIVED="--json name,isArchived | jq -r '.[] | select(.isArchived == false) | .name'"
+          else
+            EXCLUDE_ARCHIVED="--json name | jq -r '.[].name'"
+          fi
+          
+          gh repo list "${{ steps.org.outputs.organization }}" \
+            --limit 1000 \
+            $EXCLUDE_ARCHIVED > repos.txt
+          
+          # Filter out excluded repos
+          if [ -n "${{ inputs.exclude-repos }}" ]; then
+            IFS=',' read -ra EXCLUDED <<< "${{ inputs.exclude-repos }}"
+            for repo in "${EXCLUDED[@]}"; do
+              sed -i "/^${repo}$/d" repos.txt
+            done
+          fi
+          
+          REPO_COUNT=$(wc -l < repos.txt)
+          echo "Found $REPO_COUNT repositories to scan"
+          cat repos.txt
+      
+      - name: Check for CI workflows
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Checking for CI workflows in each repository..."
+          
+          mkdir -p ./governance-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","repos":[]}' > ./governance-reports/ci-check.json
+          
+          while IFS= read -r repo; do
+            FULL_REPO="${{ steps.org.outputs.organization }}/$repo"
+            echo "Checking: $FULL_REPO"
+            
+            # Check for workflows directory
+            WORKFLOWS=$(gh api "repos/$FULL_REPO/contents/.github/workflows" 2>/dev/null || echo "[]")
+            
+            if [ "$WORKFLOWS" == "[]" ] || [ -z "$WORKFLOWS" ]; then
+              echo "  ??  No CI workflows found"
+              # Log to report
+            else
+              WORKFLOW_COUNT=$(echo "$WORKFLOWS" | jq '. | length')
+              echo "  ? Found $WORKFLOW_COUNT workflow(s)"
+            fi
+          done < repos.txt
+          
+          echo "CI workflow check complete"
+      
+      - name: Check for required workflows
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Checking for required workflows..."
+          echo "Required workflows: ${{ inputs.required-workflows }}"
+          
+          mkdir -p ./governance-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","repos":[]}' > ./governance-reports/required-workflows.json
+          
+          IFS=',' read -ra REQUIRED <<< "${{ inputs.required-workflows }}"
+          
+          while IFS= read -r repo; do
+            FULL_REPO="${{ steps.org.outputs.organization }}/$repo"
+            echo "Checking: $FULL_REPO"
+            
+            for workflow in "${REQUIRED[@]}"; do
+              # Check if workflow exists or if any workflow uses HoneyDrunk.Actions/$workflow
+              FOUND=$(gh api "repos/$FULL_REPO/contents/.github/workflows" 2>/dev/null | \
+                      jq -r ".[].name | select(. | test(\"$workflow\"))" || echo "")
+              
+              if [ -z "$FOUND" ]; then
+                echo "  ??  Missing required workflow: $workflow"
+                # Log to report
+              else
+                echo "  ? Has workflow: $workflow"
+              fi
+            done
+          done < repos.txt
+          
+          echo "Required workflow check complete"
+      
+      - name: Check for required files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Checking for required governance files..."
+          echo "Required files: ${{ inputs.required-files }}"
+          
+          mkdir -p ./governance-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","repos":[]}' > ./governance-reports/required-files.json
+          
+          IFS=',' read -ra REQUIRED <<< "${{ inputs.required-files }}"
+          
+          while IFS= read -r repo; do
+            FULL_REPO="${{ steps.org.outputs.organization }}/$repo"
+            echo "Checking: $FULL_REPO"
+            
+            for file in "${REQUIRED[@]}"; do
+              STATUS=$(gh api "repos/$FULL_REPO/contents/$file" -i 2>&1 | head -n1 | grep -o "200\|404" || echo "404")
+              
+              if [ "$STATUS" == "404" ]; then
+                echo "  ??  Missing required file: $file"
+                # Log to report
+              else
+                echo "  ? Has file: $file"
+              fi
+            done
+          done < repos.txt
+          
+          echo "Required files check complete"
+      
+      - name: Check for security policy
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Checking for security policy (SECURITY.md)..."
+          
+          mkdir -p ./governance-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","repos":[]}' > ./governance-reports/security-policy.json
+          
+          while IFS= read -r repo; do
+            FULL_REPO="${{ steps.org.outputs.organization }}/$repo"
+            
+            # Check for SECURITY.md in root or .github
+            HAS_POLICY=false
+            for location in "SECURITY.md" ".github/SECURITY.md"; do
+              STATUS=$(gh api "repos/$FULL_REPO/contents/$location" -i 2>&1 | head -n1 | grep -o "200\|404" || echo "404")
+              if [ "$STATUS" == "200" ]; then
+                HAS_POLICY=true
+                break
+              fi
+            done
+            
+            if [ "$HAS_POLICY" == "false" ]; then
+              echo "$FULL_REPO: ??  No security policy"
+            else
+              echo "$FULL_REPO: ? Has security policy"
+            fi
+          done < repos.txt
+          
+          echo "Security policy check complete"
+      
+      - name: Check for stale branches
+        if: ${{ inputs.check-stale-branches }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Checking for stale branches (older than ${{ inputs.stale-branch-days }} days)..."
+          echo "This is a placeholder for HoneyDrunk.Tools stale branch checker"
+          echo "Command: hd-tools governance check-stale-branches"
+          echo "::notice::Stale branch checking will be implemented via HoneyDrunk.Tools CLI"
+          
+          mkdir -p ./governance-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","repos":[]}' > ./governance-reports/stale-branches.json
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools governance check-stale-branches \
+          #   --org "${{ steps.org.outputs.organization }}" \
+          #   --stale-days ${{ inputs.stale-branch-days }} \
+          #   --output "./governance-reports/stale-branches.json"
+      
+      - name: Check for stale pull requests
+        if: ${{ inputs.check-stale-prs }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Checking for stale pull requests (older than ${{ inputs.stale-pr-days }} days)..."
+          echo "This is a placeholder for HoneyDrunk.Tools stale PR checker"
+          echo "Command: hd-tools governance check-stale-prs"
+          echo "::notice::Stale PR checking will be implemented via HoneyDrunk.Tools CLI"
+          
+          mkdir -p ./governance-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","repos":[]}' > ./governance-reports/stale-prs.json
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools governance check-stale-prs \
+          #   --org "${{ steps.org.outputs.organization }}" \
+          #   --stale-days ${{ inputs.stale-pr-days }} \
+          #   --output "./governance-reports/stale-prs.json"
+      
+      - name: Upload governance reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-reports
+          path: ./governance-reports/**/*
+          retention-days: 90
+  
+  consolidate-report:
+    name: Consolidate Governance Report
+    needs: [scan-organization]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Download governance reports
+        uses: actions/download-artifact@v4
+        with:
+          name: governance-reports
+          path: ./governance-reports
+      
+      - name: Consolidate governance findings
+        shell: bash
+        run: |
+          echo "Consolidating governance findings..."
+          echo "This is a placeholder for HoneyDrunk.Tools governance report consolidator"
+          echo "Command: hd-tools governance consolidate-reports"
+          echo "::notice::Governance report consolidation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools governance consolidate-reports \
+          #   --input-dir "./governance-reports" \
+          #   --output-json "./consolidated-governance-report.json" \
+          #   --output-html "./consolidated-governance-report.html" \
+          #   --output-markdown "./consolidated-governance-report.md"
+          
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","summary":{"total_repos":0,"compliant":0,"non_compliant":0}}' > ./consolidated-governance-report.json
+      
+      - name: Generate summary
+        shell: bash
+        run: |
+          echo "# Weekly Governance Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Organization:** ${{ needs.scan-organization.outputs.organization || github.repository_owner }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Checks Performed" >> $GITHUB_STEP_SUMMARY
+          echo "- ? CI Workflow Presence" >> $GITHUB_STEP_SUMMARY
+          echo "- ? Required Workflows: ${{ inputs.required-workflows }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ? Required Files: ${{ inputs.required-files }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ? Security Policy" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.check-stale-branches }}" == "true" ]; then
+            echo "- ? Stale Branches (>${{ inputs.stale-branch-days }} days)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ inputs.check-stale-prs }}" == "true" ]; then
+            echo "- ? Stale Pull Requests (>${{ inputs.stale-pr-days }} days)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts for detailed governance reports." >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.create-issues }}" == "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Auto-issue Creation:** Enabled" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Create issues for non-compliant repos
+        if: ${{ inputs.create-issues }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "Creating governance issues for non-compliant repositories..."
+          echo "This is a placeholder for HoneyDrunk.Tools governance issue creator"
+          echo "Command: hd-tools governance create-issues"
+          echo "::notice::Governance issue creation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools governance create-issues \
+          #   --report "./consolidated-governance-report.json" \
+          #   --labels "governance,automated" \
+          #   --update-existing
+      
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-governance-report
+          path: ./consolidated-governance-report.*
+          retention-days: 90

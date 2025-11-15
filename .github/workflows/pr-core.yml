@@ -1,0 +1,225 @@
+# ==============================================================================
+# PR Core Workflow
+# ==============================================================================
+# Purpose:
+#   Fast, minimal PR validation for most repos in the HoneyDrunk Grid.
+#   Designed to be a required check that provides quick feedback on PRs.
+#
+# Responsibilities:
+#   - Orchestrate build, test, and analysis jobs
+#   - Coordinate PR validation workflow
+#   - Generate PR summary
+#
+# Single Responsibility:
+#   Orchestration only - delegates to job-level workflows
+#
+# Non-goals:
+#   - Deep security scans (use nightly-security.yml)
+#   - Full site crawls (use nightly-accessibility.yml)
+#   - Organization-wide checks (use weekly-governance.yml)
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Consuming repos should trigger it on pull_request events
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: PR Core
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Release'
+      
+      runs-on:
+        description: 'GitHub runner to use (ubuntu-latest, windows-latest, macos-latest)'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      
+      enable-secret-scan:
+        description: 'Run secret scanning on PR diff'
+        required: false
+        type: boolean
+        default: true
+      
+      enable-accessibility-check:
+        description: 'Run minimal accessibility check (opt-in)'
+        required: false
+        type: boolean
+        default: false
+      
+      accessibility-url:
+        description: 'URL to check for accessibility (required if enable-accessibility-check is true)'
+        required: false
+        type: string
+        default: ''
+      
+      post-pr-summary:
+        description: 'Post results summary to PR as comment'
+        required: false
+        type: boolean
+        default: true
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use (main, tag, or commit)'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      github-token:
+        description: 'GitHub token for PR comments and API access'
+        required: false
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  # Job 1: Build and Test
+  build-and-test:
+    name: Build and Test
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-build-and-test.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      configuration: ${{ inputs.configuration }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      enable-cache: true
+      collect-coverage: false  # Coverage is for pr-sdk
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+      checks: write
+  
+  # Job 2: Static Analysis
+  static-analysis:
+    name: Static Analysis
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-static-analysis.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      check-formatting: true
+      fail-on-formatting-issues: false  # Warn only in PR
+      fail-on-severity: 'high'
+      validate-test-naming: true
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+  
+  # Job 3: Secret Scan (Optional)
+  secret-scan:
+    name: Secret Scan (Diff Only)
+    if: ${{ inputs.enable-secret-scan }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-secret-scan.yml@main
+    with:
+      runs-on: ${{ inputs.runs-on }}
+      scan-mode: 'diff-only'
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+  
+  # Job 4: Accessibility Check (Optional)
+  accessibility-check:
+    name: Minimal Accessibility Check
+    if: ${{ inputs.enable-accessibility-check }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Validate accessibility URL provided
+        if: ${{ inputs.accessibility-url == '' }}
+        shell: bash
+        run: |
+          echo "::error::accessibility-url input is required when enable-accessibility-check is true"
+          exit 1
+      
+      - name: Run minimal accessibility check
+        shell: bash
+        run: |
+          echo "Running minimal accessibility check on: ${{ inputs.accessibility-url }}"
+          echo "This is a placeholder for HoneyDrunk.Tools accessibility scanning CLI"
+          echo "Command: hd-tools accessibility scan --url ${{ inputs.accessibility-url }} --minimal"
+          echo "::notice::Accessibility scanning will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools accessibility scan --url "${{ inputs.accessibility-url }}" --minimal
+  
+  # Job 5: PR Summary
+  pr-summary:
+    name: PR Summary
+    needs: [build-and-test, static-analysis]
+    if: ${{ always() && inputs.post-pr-summary }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Generate PR summary
+        uses: ./.github/actions-repo/.github/actions/pr/generate-summary
+      
+      - name: Determine job status
+        id: status
+        shell: bash
+        run: |
+          if [[ "${{ needs.build-and-test.result }}" == "success" && "${{ needs.static-analysis.result }}" == "success" ]]; then
+            echo "icon=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "status=Success" >> $GITHUB_OUTPUT
+          else
+            echo "icon=:x:" >> $GITHUB_OUTPUT
+            echo "status=Failed" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Post PR comment
+        continue-on-error: true
+        uses: ./.github/actions-repo/.github/actions/pr/post-comment
+        with:
+          github-token: ${{ secrets.github-token || github.token }}
+          message: |
+            ## ${{ steps.status.outputs.icon }} PR Core Validation ${{ steps.status.outputs.status }}
+            
+            **Build and Test:** ${{ needs.build-and-test.result }}
+            **Static Analysis:** ${{ needs.static-analysis.result }}
+            
+            **Configuration:** ${{ inputs.configuration }}
+            **Runner:** ${{ inputs.runs-on }}
+            **Commit:** `${{ github.sha }}`

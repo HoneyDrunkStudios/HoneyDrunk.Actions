@@ -1,0 +1,401 @@
+# ==============================================================================
+# Nightly Dependencies Workflow
+# ==============================================================================
+# Purpose:
+#   Detect outdated dependencies and optionally create update PRs.
+#   Runs on a schedule to keep dependencies current and secure.
+#
+# Responsibilities:
+#   - Detect outdated NuGet packages
+#   - Detect outdated npm packages (if applicable)
+#   - Detect outdated other package managers
+#   - Generate machine-readable dependency report
+#   - Optionally create or update dependency upgrade PRs
+#   - Check for deprecated packages
+#
+# Target:
+#   All repos in the HoneyDrunk Grid
+#
+# Triggers:
+#   - This workflow is reusable via workflow_call
+#   - Consuming repos should trigger on schedule (e.g., cron: '0 3 * * 1-5')
+#   - Can also be triggered manually via workflow_dispatch
+#
+# Non-goals:
+#   - This does NOT block merges or fail builds
+#   - This is for maintenance visibility and automation only
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Nightly Dependencies
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+      
+      node-version:
+        description: 'Node.js version (if repo has npm dependencies)'
+        required: false
+        type: string
+        default: '20.x'
+      
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+      
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      
+      check-dotnet-deps:
+        description: 'Check .NET/NuGet dependencies'
+        required: false
+        type: boolean
+        default: true
+      
+      check-npm-deps:
+        description: 'Check npm dependencies'
+        required: false
+        type: boolean
+        default: false
+      
+      create-update-prs:
+        description: 'Automatically create PRs for dependency updates'
+        required: false
+        type: boolean
+        default: false
+      
+      pr-branch-prefix:
+        description: 'Prefix for auto-created PR branches'
+        required: false
+        type: string
+        default: 'deps/auto-update'
+      
+      group-updates:
+        description: 'Group multiple dependency updates into single PR'
+        required: false
+        type: boolean
+        default: true
+      
+      exclude-prerelease:
+        description: 'Exclude pre-release versions from updates'
+        required: false
+        type: boolean
+        default: true
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+    
+    secrets:
+      github-token:
+        description: 'GitHub token for creating PRs'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  detect-dotnet-outdated:
+    name: Detect Outdated .NET Dependencies
+    if: ${{ inputs.check-dotnet-deps }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Scan for outdated packages
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Scanning for outdated .NET packages..."
+          
+          TARGET="${{ inputs.project-path }}"
+          if [ -z "$TARGET" ]; then
+            # Try to find solution or project
+            SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+            if [ -n "$SOLN" ]; then
+              TARGET="$SOLN"
+            else
+              TARGET="."
+            fi
+          fi
+          
+          echo "Scanning target: $TARGET"
+          
+          # List outdated packages
+          dotnet list "$TARGET" package --outdated --include-transitive > outdated-packages.txt || true
+          cat outdated-packages.txt
+          
+          # Extract package update information
+          echo "Package scan complete. Results saved to outdated-packages.txt"
+      
+      - name: Generate dependency report
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Generating structured dependency report..."
+          echo "This is a placeholder for HoneyDrunk.Tools dependency reporter"
+          echo "Command: hd-tools deps report --format json"
+          echo "::notice::Dependency reporting will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools deps report \
+          #   --project "${{ inputs.project-path }}" \
+          #   --format json \
+          #   --exclude-prerelease ${{ inputs.exclude-prerelease }} \
+          #   --output "./dependency-reports/dotnet-outdated.json"
+          
+          mkdir -p ./dependency-reports
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","outdated_packages":[]}' > ./dependency-reports/dotnet-outdated.json
+      
+      - name: Check for deprecated packages
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Checking for deprecated packages..."
+          echo "This is a placeholder for HoneyDrunk.Tools deprecated package checker"
+          echo "Command: hd-tools deps check-deprecated"
+          echo "::notice::Deprecated package checking will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools deps check-deprecated \
+          #   --project "${{ inputs.project-path }}" \
+          #   --output "./dependency-reports/deprecated-packages.json"
+      
+      - name: Upload .NET dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-dependency-report
+          path: |
+            ${{ inputs.working-directory }}/dependency-reports/**/*
+            ${{ inputs.working-directory }}/outdated-packages.txt
+          retention-days: 30
+  
+  detect-npm-outdated:
+    name: Detect Outdated npm Dependencies
+    if: ${{ inputs.check-npm-deps }}
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Check for package.json
+        id: check-npm
+        shell: bash
+        run: |
+          if [ -f "package.json" ]; then
+            echo "has_npm=true" >> $GITHUB_OUTPUT
+            echo "Found package.json, will scan npm dependencies"
+          else
+            echo "has_npm=false" >> $GITHUB_OUTPUT
+            echo "No package.json found, skipping npm scan"
+          fi
+      
+      - name: Setup Node.js
+        if: steps.check-npm.outputs.has_npm == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      
+      - name: Scan for outdated npm packages
+        if: steps.check-npm.outputs.has_npm == 'true'
+        shell: bash
+        run: |
+          echo "Scanning for outdated npm packages..."
+          npm outdated --json > npm-outdated.json || true
+          cat npm-outdated.json
+      
+      - name: Generate npm dependency report
+        if: steps.check-npm.outputs.has_npm == 'true'
+        shell: bash
+        run: |
+          echo "Generating structured npm dependency report..."
+          echo "This is a placeholder for HoneyDrunk.Tools npm dependency reporter"
+          echo "Command: hd-tools deps report-npm --format json"
+          echo "::notice::npm dependency reporting will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools deps report-npm \
+          #   --format json \
+          #   --exclude-prerelease ${{ inputs.exclude-prerelease }} \
+          #   --output "./dependency-reports/npm-outdated.json"
+          
+          mkdir -p ./dependency-reports
+          cp npm-outdated.json ./dependency-reports/npm-outdated.json
+      
+      - name: Upload npm dependency report
+        if: steps.check-npm.outputs.has_npm == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-dependency-report
+          path: |
+            ./dependency-reports/**/*
+            ./npm-outdated.json
+          retention-days: 30
+  
+  create-update-prs:
+    name: Create Dependency Update PRs
+    if: ${{ inputs.create-update-prs }}
+    needs: [detect-dotnet-outdated, detect-npm-outdated]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.github-token || github.token }}
+      
+      - name: Download dependency reports
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-dependency-reports
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        if: ${{ inputs.check-dotnet-deps }}
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Setup Node.js
+        if: ${{ inputs.check-npm-deps }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      
+      - name: Generate and apply dependency updates
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
+        run: |
+          echo "Generating dependency update PRs..."
+          echo "This is a placeholder for HoneyDrunk.Tools dependency PR creator"
+          echo "Command: hd-tools deps create-pr"
+          echo "::notice::Dependency PR creation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools deps create-pr \
+          #   --reports "./all-dependency-reports" \
+          #   --branch-prefix "${{ inputs.pr-branch-prefix }}" \
+          #   --group-updates ${{ inputs.group-updates }} \
+          #   --exclude-prerelease ${{ inputs.exclude-prerelease }} \
+          #   --auto-merge-patch
+          
+          echo "::notice::In production, this would create/update PRs for dependency upgrades"
+          echo "Branch prefix: ${{ inputs.pr-branch-prefix }}"
+          echo "Group updates: ${{ inputs.group-updates }}"
+  
+  consolidate-report:
+    name: Consolidate Dependency Report
+    needs: [detect-dotnet-outdated, detect-npm-outdated]
+    if: always()
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download all dependency reports
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-dependency-reports
+      
+      - name: Consolidate dependency findings
+        shell: bash
+        run: |
+          echo "Consolidating all dependency findings..."
+          echo "This is a placeholder for HoneyDrunk.Tools dependency report consolidator"
+          echo "Command: hd-tools deps consolidate-reports"
+          echo "::notice::Dependency report consolidation will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools deps consolidate-reports \
+          #   --input-dir "./all-dependency-reports" \
+          #   --output-json "./consolidated-dependency-report.json" \
+          #   --output-html "./consolidated-dependency-report.html" \
+          #   --output-markdown "./consolidated-dependency-report.md"
+          
+          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","summary":{"total_outdated":0}}' > ./consolidated-dependency-report.json
+      
+      - name: Generate summary
+        shell: bash
+        run: |
+          echo "# Nightly Dependency Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.check-dotnet-deps }}" == "true" ]; then
+            echo "- .NET Dependencies: ${{ needs.detect-dotnet-outdated.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ inputs.check-npm-deps }}" == "true" ]; then
+            echo "- npm Dependencies: ${{ needs.detect-npm-outdated.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.create-update-prs }}" == "true" ]; then
+            echo "**Auto-update PRs:** Enabled" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Auto-update PRs:** Disabled (reports only)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts for detailed dependency reports." >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-dependency-report
+          path: ./consolidated-dependency-report.*
+          retention-days: 30

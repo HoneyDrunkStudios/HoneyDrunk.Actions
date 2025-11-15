@@ -1,0 +1,93 @@
+# ==============================================================================
+# Coverage Analysis Job
+# ==============================================================================
+# Purpose:
+#   Analyze code coverage reports and generate delta reports.
+#
+# Single Responsibility:
+#   Coverage analysis only - expects coverage reports from test job
+# ==============================================================================
+
+name: Coverage Analysis (Job)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      
+      coverage-threshold:
+        description: 'Minimum code coverage percentage (0-100)'
+        required: false
+        type: number
+        default: 80
+      
+      coverage-delta-threshold:
+        description: 'Maximum allowed coverage decrease percentage'
+        required: false
+        type: number
+        default: 5
+      
+      coverage-artifact-name:
+        description: 'Name of artifact containing coverage reports'
+        required: false
+        type: string
+        default: 'coverage-reports'
+      
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  coverage-analysis:
+    name: Coverage Analysis
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.coverage-artifact-name }}
+          path: ./coverage-reports
+      
+      - name: Analyze coverage
+        shell: bash
+        run: |
+          echo "Analyzing code coverage..."
+          echo "Threshold: ${{ inputs.coverage-threshold }}%"
+          echo "Delta threshold: ${{ inputs.coverage-delta-threshold }}%"
+          echo ""
+          echo "This is a placeholder for HoneyDrunk.Tools coverage analysis CLI"
+          echo "Command: hd-tools coverage analyze --threshold ${{ inputs.coverage-threshold }} --delta-threshold ${{ inputs.coverage-delta-threshold }}"
+          echo "::notice::Coverage analysis will be implemented via HoneyDrunk.Tools CLI"
+          
+          # Placeholder exit - replace with actual tool invocation
+          # hd-tools coverage analyze \
+          #   --reports "./coverage-reports/**/*.cobertura.xml" \
+          #   --threshold ${{ inputs.coverage-threshold }} \
+          #   --delta-threshold ${{ inputs.coverage-delta-threshold }} \
+          #   --base-branch ${{ github.event.pull_request.base.ref || 'main' }} \
+          #   --output "./coverage-analysis.json"
+          
+          mkdir -p ./coverage-analysis
+          echo '{"coverage":85,"delta":-2}' > ./coverage-analysis/results.json
+      
+      - name: Upload analysis results
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-analysis-results
+          path: ./coverage-analysis/**/*
+          retention-days: 7

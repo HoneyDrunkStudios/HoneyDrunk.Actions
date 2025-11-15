@@ -1,0 +1,21 @@
+name: 'Checkout HoneyDrunk.Actions Repository'
+description: 'Composite action to checkout HoneyDrunk.Actions repo for reuse in workflows'
+inputs:
+  ref:
+    description: 'Git ref (branch/tag/commit) of HoneyDrunk.Actions to checkout'
+    required: false
+    default: 'main'
+  path:
+    description: 'Path to checkout the repository'
+    required: false
+    default: '.github/actions-repo'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout HoneyDrunk.Actions
+      uses: actions/checkout@v4
+      with:
+        repository: HoneyDrunkStudios/HoneyDrunk.Actions
+        path: ${{ inputs.path }}
+        ref: ${{ inputs.ref }}
