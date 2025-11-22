@@ -354,7 +354,6 @@ jobs:
           project-path: ${{ inputs.project-path }}
           configuration: ${{ inputs.configuration }}
           version: ${{ needs.build-and-test.outputs.version }}
-          no-build: 'true'
           output-directory: ./artifacts
           working-directory: ${{ inputs.working-directory }}
       
