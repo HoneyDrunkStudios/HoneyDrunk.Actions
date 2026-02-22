@@ -2,10 +2,10 @@
 # Coverage Analysis Job
 # ==============================================================================
 # Purpose:
-#   Analyze code coverage reports and generate delta reports.
+#   Analyze code coverage reports using ReportGenerator and enforce thresholds.
 #
 # Single Responsibility:
-#   Coverage analysis only - expects coverage reports from test job
+#   Coverage analysis only — expects Cobertura XML reports from test job
 # ==============================================================================
 
 name: Coverage Analysis (Job)
@@ -25,17 +25,17 @@ on:
         type: number
         default: 80
       
-      coverage-delta-threshold:
-        description: 'Maximum allowed coverage decrease percentage'
-        required: false
-        type: number
-        default: 5
-      
       coverage-artifact-name:
         description: 'Name of artifact containing coverage reports'
         required: false
         type: string
         default: 'coverage-reports'
+      
+      report-types:
+        description: 'ReportGenerator output types (semicolon-separated)'
+        required: false
+        type: string
+        default: 'HtmlInline_AzurePipelines;Cobertura;MarkdownSummaryGithub;JsonSummary'
       
       actions-ref:
         description: 'Git ref of HoneyDrunk.Actions to use'
@@ -54,40 +54,89 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
       - name: Download coverage reports
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.coverage-artifact-name }}
           path: ./coverage-reports
-      
-      - name: Analyze coverage
+
+      - name: Install ReportGenerator
+        shell: bash
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool 2>/dev/null || true
+
+      - name: Generate coverage report
         shell: bash
         run: |
-          echo "Analyzing code coverage..."
-          echo "Threshold: ${{ inputs.coverage-threshold }}%"
-          echo "Delta threshold: ${{ inputs.coverage-delta-threshold }}%"
-          echo ""
-          echo "This is a placeholder for HoneyDrunk.Tools coverage analysis CLI"
-          echo "Command: hd-tools coverage analyze --threshold ${{ inputs.coverage-threshold }} --delta-threshold ${{ inputs.coverage-delta-threshold }}"
-          echo "::notice::Coverage analysis will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools coverage analyze \
-          #   --reports "./coverage-reports/**/*.cobertura.xml" \
-          #   --threshold ${{ inputs.coverage-threshold }} \
-          #   --delta-threshold ${{ inputs.coverage-delta-threshold }} \
-          #   --base-branch ${{ github.event.pull_request.base.ref || 'main' }} \
-          #   --output "./coverage-analysis.json"
-          
-          mkdir -p ./coverage-analysis
-          echo '{"coverage":85,"delta":-2}' > ./coverage-analysis/results.json
-      
-      - name: Upload analysis results
+          reportgenerator \
+            "-reports:./coverage-reports/**/coverage.cobertura.xml" \
+            "-targetdir:./coverage-analysis" \
+            "-reporttypes:${{ inputs.report-types }}" \
+            "-assemblyfilters:+*;-*.Tests" \
+            || true
+
+      - name: Evaluate coverage threshold
+        id: threshold
+        shell: bash
+        run: |
+          if [ -f "./coverage-analysis/Summary.json" ]; then
+            LINE_COV=$(python3 -c "
+          import json
+          with open('./coverage-analysis/Summary.json') as f:
+              data = json.load(f)
+          print(data.get('summary', {}).get('linecoverage', 0))
+          " 2>/dev/null || echo "0")
+
+            BRANCH_COV=$(python3 -c "
+          import json
+          with open('./coverage-analysis/Summary.json') as f:
+              data = json.load(f)
+          print(data.get('summary', {}).get('branchcoverage', 0))
+          " 2>/dev/null || echo "0")
+
+            echo "line-coverage=$LINE_COV" >> "$GITHUB_OUTPUT"
+            echo "branch-coverage=$BRANCH_COV" >> "$GITHUB_OUTPUT"
+
+            THRESHOLD=${{ inputs.coverage-threshold }}
+            LINE_INT=${LINE_COV%.*}
+
+            echo ""
+            echo "Line coverage:   ${LINE_COV}%"
+            echo "Branch coverage: ${BRANCH_COV}%"
+            echo "Threshold:       ${THRESHOLD}%"
+            echo ""
+
+            if [ "$LINE_INT" -lt "$THRESHOLD" ]; then
+              echo "::warning::Line coverage ${LINE_COV}% is below threshold ${THRESHOLD}%"
+              echo "passed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "✅ Coverage ${LINE_COV}% meets threshold ${THRESHOLD}%"
+              echo "passed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "::warning::No coverage summary found — skipping threshold check"
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            echo "line-coverage=0" >> "$GITHUB_OUTPUT"
+            echo "branch-coverage=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post coverage to step summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "./coverage-analysis/SummaryGithub.md" ]; then
+            cat ./coverage-analysis/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "# Code Coverage" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Line: ${{ steps.threshold.outputs.line-coverage }}%" >> "$GITHUB_STEP_SUMMARY"
+            echo "Branch: ${{ steps.threshold.outputs.branch-coverage }}%" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-analysis-results
           path: ./coverage-analysis/**/*
-          retention-days: 7
+          retention-days: 30

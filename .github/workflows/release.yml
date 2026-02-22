@@ -261,38 +261,62 @@ jobs:
           fail-on-severity: 'moderate'  # Stricter for releases
       
       - name: Generate SBOM
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          echo "Generating Software Bill of Materials (SBOM)..."
-          echo "This is a placeholder for HoneyDrunk.Tools SBOM generation"
-          echo "Command: hd-tools sbom generate --project ${{ inputs.project-path }} --format spdx"
-          echo "::notice::SBOM generation will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools sbom generate \
-          #   --project "${{ inputs.project-path }}" \
-          #   --format spdx \
-          #   --output "./artifacts/sbom.spdx.json"
-          
-          # Create placeholder SBOM
-          mkdir -p ./artifacts
-          echo '{"spdxVersion":"SPDX-2.3","dataLicense":"CC0-1.0","name":"placeholder"}' > ./artifacts/sbom.spdx.json
-      
+        uses: anchore/sbom-action@v0
+        with:
+          path: ${{ inputs.working-directory }}
+          format: spdx-json
+          output-file: ${{ inputs.working-directory }}/artifacts/sbom.spdx.json
+          upload-artifact: false
+
       - name: Run license compliance check
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: |
-          echo "Running license compliance check..."
-          echo "This is a placeholder for HoneyDrunk.Tools license scanner"
-          echo "Command: hd-tools license check --project ${{ inputs.project-path }}"
-          echo "::notice::License compliance checking will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools license check \
-          #   --project "${{ inputs.project-path }}" \
-          #   --allowed-licenses "MIT,Apache-2.0,BSD-3-Clause" \
-          #   --output "./artifacts/licenses.json"
+          dotnet tool install --global dotnet-project-licenses 2>/dev/null || true
+
+          TARGET="${{ inputs.project-path }}"
+          if [ -z "$TARGET" ]; then
+            TARGET=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+          fi
+
+          mkdir -p ./artifacts
+
+          echo "Scanning licenses for: $TARGET"
+          dotnet-project-licenses \
+            --input "$TARGET" \
+            --output-directory ./artifacts \
+            --json \
+            --include-transitive \
+            || true
+
+          # Check for disallowed licenses
+          ALLOWED="MIT|Apache-2.0|BSD-2-Clause|BSD-3-Clause|ISC|MS-PL|MS-EULA|Unlicense"
+          if [ -f "./artifacts/licenses.json" ]; then
+            cat > /tmp/check_licenses.py << 'PYEOF'
+          import json, re, sys
+          allowed = re.compile(sys.argv[1], re.IGNORECASE)
+          with open(sys.argv[2]) as f:
+              data = json.load(f)
+          violations = [p for p in data if not allowed.search(p.get("LicenseType", ""))]
+          for v in violations:
+              name = v.get("PackageName", "?")
+              lic = v.get("LicenseType", "unknown")
+              print(f"  {name} - {lic}", file=sys.stderr)
+          print(len(violations))
+          PYEOF
+            VIOLATIONS=$(python3 /tmp/check_licenses.py "$ALLOWED" "./artifacts/licenses.json" 2>&1 | tail -1 || echo "0")
+
+            if [ "$VIOLATIONS" -gt 0 ]; then
+              echo "::warning::Found $VIOLATIONS package(s) with licenses outside the allow list"
+            else
+              echo "✅ All package licenses are within the allow list"
+            fi
+          fi
+
+          # Rename output for consistent artifact naming
+          if [ -f "./artifacts/licenses.json" ]; then
+            cp ./artifacts/licenses.json ./artifacts/license-report.json
+          fi
       
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
@@ -306,7 +330,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: license-report
-          path: ${{ inputs.working-directory }}/artifacts/licenses.json
+          path: ${{ inputs.working-directory }}/artifacts/license-report.json
           retention-days: 90
           if-no-files-found: ignore
   
@@ -418,18 +442,29 @@ jobs:
           echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
       
       - name: Scan container image for vulnerabilities
-        shell: bash
-        run: |
-          echo "Scanning container image for vulnerabilities..."
-          echo "This is a placeholder for HoneyDrunk.Tools container scanner"
-          echo "Command: hd-tools container scan --image $IMAGE_TAG"
-          echo "::notice::Container scanning will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools container scan \
-          #   --image "$IMAGE_TAG" \
-          #   --fail-on-severity high \
-          #   --output "./scan-results.json"
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_TAG }}
+          format: 'sarif'
+          output: 'container-scan.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+
+      - name: Upload container scan to GitHub Security
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: container-scan.sarif
+
+      - name: Upload container scan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-vulnerability-report
+          path: container-scan.sarif
+          retention-days: 90
+          if-no-files-found: ignore
       
       - name: Push container image
         shell: bash
@@ -466,16 +501,29 @@ jobs:
       - name: Run smoke tests
         shell: bash
         run: |
-          echo "Running smoke tests against: ${{ inputs.smoke-test-url }}"
-          echo "This is a placeholder for HoneyDrunk.Tools smoke test runner"
-          echo "Command: hd-tools smoke-test --url ${{ inputs.smoke-test-url }}"
-          echo "::notice::Smoke testing will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools smoke-test \
-          #   --url "${{ inputs.smoke-test-url }}" \
-          #   --timeout 300 \
-          #   --retry 3
+          SMOKE_URL="${{ inputs.smoke-test-url }}"
+          TIMEOUT=300
+          INTERVAL=10
+          ELAPSED=0
+
+          echo "Running smoke tests against: $SMOKE_URL"
+          echo "Timeout: ${TIMEOUT}s"
+
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$SMOKE_URL" 2>/dev/null || echo "000")
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+              echo "✅ Smoke test passed (HTTP $HTTP_CODE) after ${ELAPSED}s"
+              exit 0
+            fi
+
+            echo "  HTTP $HTTP_CODE — retrying in ${INTERVAL}s (${ELAPSED}s elapsed)"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "::error::Smoke test failed — $SMOKE_URL did not return 2xx/3xx within ${TIMEOUT}s"
+          exit 1
   
   release-summary:
     name: Release Summary

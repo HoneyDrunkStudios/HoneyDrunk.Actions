@@ -135,23 +135,47 @@ jobs:
           fail-on-severity: ${{ inputs.fail-on-high-severity && 'high' || 'critical' }}
       
       - name: Generate detailed vulnerability report
+        id: vuln-report
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: |
-          echo "Generating detailed vulnerability report..."
-          echo "This is a placeholder for HoneyDrunk.Tools vulnerability reporter"
-          echo "Command: hd-tools security vuln-report --format json --output ./security-reports/vulnerabilities.json"
-          echo "::notice::Vulnerability reporting will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools security vuln-report \
-          #   --project "${{ inputs.project-path }}" \
-          #   --format json \
-          #   --format html \
-          #   --output-dir "./security-reports"
-          
           mkdir -p ./security-reports
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","vulnerabilities":[]}' > ./security-reports/vulnerabilities.json
+          SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          PROJECT="${{ inputs.project-path }}"
+          if [ -z "$PROJECT" ]; then
+            PROJECT=$(find . -maxdepth 2 \( -name '*.slnx' -o -name '*.sln' \) | head -1)
+          fi
+
+          echo "Scanning $PROJECT for vulnerable packages (including transitive)..."
+
+          # Capture both vulnerable and deprecated packages
+          VULN_OUTPUT=$(dotnet list "$PROJECT" package --vulnerable --include-transitive --format json 2>/dev/null || echo '{}')
+          DEPRECATED_OUTPUT=$(dotnet list "$PROJECT" package --deprecated --include-transitive --format json 2>/dev/null || echo '{}')
+
+          # Write raw outputs
+          echo "$VULN_OUTPUT" > ./security-reports/vulnerable-packages.json
+          echo "$DEPRECATED_OUTPUT" > ./security-reports/deprecated-packages.json
+
+          # Count findings
+          VULN_COUNT=0
+          if echo "$VULN_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(len(fw.get('topLevelPackages',[])+fw.get('transitivePackages',[])) for p in d.get('projects',[]) for fw in p.get('frameworks',[])))" 2>/dev/null; then
+            VULN_COUNT=$(echo "$VULN_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(len(fw.get('topLevelPackages',[])+fw.get('transitivePackages',[])) for p in d.get('projects',[]) for fw in p.get('frameworks',[])))")
+          fi
+
+          echo "vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $VULN_COUNT vulnerable packages"
+
+          # Build consolidated report
+          cat > ./security-reports/vulnerabilities.json <<EOF
+          {
+            "scan_date": "$SCAN_DATE",
+            "repository": "${{ github.repository }}",
+            "vulnerability_count": $VULN_COUNT,
+            "vulnerable_packages": $VULN_OUTPUT,
+            "deprecated_packages": $DEPRECATED_OUTPUT
+          }
+          EOF
       
       - name: Upload vulnerability report
         uses: actions/upload-artifact@v4
@@ -168,59 +192,48 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
         with:
-          fetch-depth: 0  # Full history for better analysis
-      
+          languages: csharp
+          queries: security-and-quality
+
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v4
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
-      
+
       - name: Setup .NET SDK
         uses: ./.github/actions-repo/.github/actions/dotnet/setup
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
-      
-      - name: Restore dependencies
-        uses: ./.github/actions-repo/.github/actions/dotnet/restore
-        with:
-          working-directory: ${{ inputs.working-directory }}
-          project-path: ${{ inputs.project-path }}
-      
-      - name: Run deep SAST scan
+
+      - name: Build for CodeQL analysis
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: |
-          echo "Running deep Static Application Security Testing (SAST)..."
-          echo "This is a placeholder for HoneyDrunk.Tools SAST scanner"
-          echo "Command: hd-tools security sast --project ${{ inputs.project-path }}"
-          echo "::notice::SAST scanning will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools security sast \
-          #   --project "${{ inputs.project-path }}" \
-          #   --ruleset extended \
-          #   --fail-on-severity high \
-          #   --output "./security-reports/sast-results.sarif"
-          
-          mkdir -p ./security-reports
-          echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > ./security-reports/sast-results.sarif
-      
-      - name: Upload SAST results to GitHub Security
-        if: always()
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+          PROJECT="${{ inputs.project-path }}"
+          if [ -z "$PROJECT" ]; then
+            PROJECT=$(find . -maxdepth 2 \( -name '*.slnx' -o -name '*.sln' \) | head -1)
+          fi
+          dotnet build "$PROJECT" --no-incremental
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
         with:
-          sarif_file: ${{ inputs.working-directory }}/security-reports/sast-results.sarif
-      
+          category: nightly-sast
+          output: ${{ inputs.working-directory }}/security-reports
+          upload: true
+
       - name: Upload SAST report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sast-report
-          path: ${{ inputs.working-directory }}/security-reports/sast-results.sarif
+          path: ${{ inputs.working-directory }}/security-reports/**/*.sarif
           retention-days: 90
   
   secret-scan:
@@ -232,31 +245,52 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Scan entire history
-      
-      - name: Run comprehensive secret scan
+          fetch-depth: 0
+
+      - name: Run gitleaks full-history scan
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: --full-history --report-format sarif --report-path ./security-reports/secrets-scan.sarif
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.github-token || github.token }}
+
+      - name: Upload secrets SARIF to GitHub Security
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./security-reports/secrets-scan.sarif
+          category: nightly-secrets
+
+      - name: Evaluate findings
+        if: always()
+        id: findings
         shell: bash
         run: |
-          echo "Running comprehensive secret scan on entire codebase and history..."
-          echo "This is a placeholder for HoneyDrunk.Tools secret scanner"
-          echo "Command: hd-tools security secrets --scan-history"
-          echo "::notice::Secret scanning will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools security secrets \
-          #   --scan-history \
-          #   --fail-on-found \
-          #   --output "./security-reports/secrets-scan.json"
-          
-          mkdir -p ./security-reports
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","secrets_found":0}' > ./security-reports/secrets-scan.json
-      
+          if [ -f "./security-reports/secrets-scan.sarif" ]; then
+            FINDING_COUNT=$(python3 -c "
+          import json, sys
+          with open('./security-reports/secrets-scan.sarif') as f:
+              sarif = json.load(f)
+          total = sum(len(r.get('results', [])) for r in sarif.get('runs', []))
+          print(total)
+          " 2>/dev/null || echo "0")
+          else
+            FINDING_COUNT=0
+          fi
+          echo "secret_count=$FINDING_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $FINDING_COUNT secrets in full history scan"
+          if [ "$FINDING_COUNT" -gt 0 ]; then
+            echo "::warning::Found $FINDING_COUNT potential secrets in repository history"
+          fi
+
       - name: Upload secret scan report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: secret-scan-report
-          path: ./security-reports/secrets-scan.json
+          path: ./security-reports/secrets-scan.sarif
           retention-days: 90
   
   iac-security-scan:
@@ -303,30 +337,53 @@ jobs:
       
       - name: Run IaC security scan
         if: steps.detect.outputs.has_iac == 'true'
+        id: iac-scan
         shell: bash
         run: |
-          echo "Running Infrastructure as Code security scan..."
-          echo "This is a placeholder for HoneyDrunk.Tools IaC scanner"
-          echo "Command: hd-tools security iac-scan"
-          echo "::notice::IaC security scanning will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools security iac-scan \
-          #   --scan-terraform \
-          #   --scan-docker \
-          #   --scan-kubernetes \
-          #   --fail-on-severity high \
-          #   --output "./security-reports/iac-scan.json"
-          
           mkdir -p ./security-reports
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","findings":[]}' > ./security-reports/iac-scan.json
+
+          echo "Running Trivy filesystem scan for IaC misconfigurations..."
+          docker run --rm \
+            -v "$(pwd):/workspace" \
+            aquasec/trivy:latest fs /workspace \
+            --scanners misconfig \
+            --format sarif \
+            --output /workspace/security-reports/iac-trivy.sarif \
+            --severity MEDIUM,HIGH,CRITICAL \
+            --exit-code 0
+
+          # Count findings
+          FINDING_COUNT=0
+          if [ -f "./security-reports/iac-trivy.sarif" ]; then
+            FINDING_COUNT=$(python3 -c "
+          import json
+          with open('./security-reports/iac-trivy.sarif') as f:
+              sarif = json.load(f)
+          total = sum(len(r.get('results', [])) for r in sarif.get('runs', []))
+          print(total)
+          " 2>/dev/null || echo "0")
+          fi
+
+          echo "iac_finding_count=$FINDING_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $FINDING_COUNT IaC misconfigurations"
+          if [ "$FINDING_COUNT" -gt 0 ]; then
+            echo "::warning::Found $FINDING_COUNT IaC misconfigurations"
+          fi
+
+      - name: Upload IaC SARIF to GitHub Security
+        if: steps.detect.outputs.has_iac == 'true'
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./security-reports/iac-trivy.sarif
+          category: nightly-iac
       
       - name: Upload IaC scan report
         if: steps.detect.outputs.has_iac == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: iac-security-report
-          path: ./security-reports/iac-scan.json
+          path: ./security-reports/iac-trivy.sarif
           retention-days: 90
   
   consolidate-and-report:
@@ -345,54 +402,170 @@ jobs:
           path: ./all-security-reports
       
       - name: Consolidate security findings
+        id: consolidate
         shell: bash
         run: |
-          echo "Consolidating all security findings..."
-          echo "This is a placeholder for HoneyDrunk.Tools security report consolidator"
-          echo "Command: hd-tools security consolidate-reports"
-          echo "::notice::Report consolidation will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools security consolidate-reports \
-          #   --input-dir "./all-security-reports" \
-          #   --output "./consolidated-security-report.json" \
-          #   --output-html "./consolidated-security-report.html"
-          
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","summary":{"total_issues":0}}' > ./consolidated-security-report.json
+          SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          TOTAL_ISSUES=0
+
+          # Count vulnerability findings
+          VULN_COUNT=0
+          if [ -f "./all-security-reports/vulnerability-report/vulnerabilities.json" ]; then
+            VULN_COUNT=$(python3 -c "
+          import json
+          with open('./all-security-reports/vulnerability-report/vulnerabilities.json') as f:
+              d = json.load(f)
+          print(d.get('vulnerability_count', 0))
+          " 2>/dev/null || echo "0")
+          fi
+
+          # Count SAST findings from SARIF
+          SAST_COUNT=0
+          for sarif in ./all-security-reports/sast-report/*.sarif; do
+            if [ -f "$sarif" ]; then
+              COUNT=$(python3 -c "
+          import json
+          with open('$sarif') as f:
+              d = json.load(f)
+          print(sum(len(r.get('results', [])) for r in d.get('runs', [])))
+          " 2>/dev/null || echo "0")
+              SAST_COUNT=$((SAST_COUNT + COUNT))
+            fi
+          done
+
+          # Count secret findings
+          SECRET_COUNT=0
+          if [ -f "./all-security-reports/secret-scan-report/secrets-scan.sarif" ]; then
+            SECRET_COUNT=$(python3 -c "
+          import json
+          with open('./all-security-reports/secret-scan-report/secrets-scan.sarif') as f:
+              d = json.load(f)
+          print(sum(len(r.get('results', [])) for r in d.get('runs', [])))
+          " 2>/dev/null || echo "0")
+          fi
+
+          # Count IaC findings
+          IAC_COUNT=0
+          if [ -f "./all-security-reports/iac-security-report/iac-trivy.sarif" ]; then
+            IAC_COUNT=$(python3 -c "
+          import json
+          with open('./all-security-reports/iac-security-report/iac-trivy.sarif') as f:
+              d = json.load(f)
+          print(sum(len(r.get('results', [])) for r in d.get('runs', [])))
+          " 2>/dev/null || echo "0")
+          fi
+
+          TOTAL_ISSUES=$((VULN_COUNT + SAST_COUNT + SECRET_COUNT + IAC_COUNT))
+
+          cat > ./consolidated-security-report.json <<EOF
+          {
+            "scan_date": "$SCAN_DATE",
+            "repository": "${{ github.repository }}",
+            "summary": {
+              "total_issues": $TOTAL_ISSUES,
+              "vulnerabilities": $VULN_COUNT,
+              "sast_findings": $SAST_COUNT,
+              "secrets_detected": $SECRET_COUNT,
+              "iac_misconfigurations": $IAC_COUNT
+            },
+            "job_results": {
+              "dependency_scan": "${{ needs.dependency-scan.result }}",
+              "sast_analysis": "${{ needs.sast-analysis.result }}",
+              "secret_scan": "${{ needs.secret-scan.result }}",
+              "iac_security_scan": "${{ needs.iac-security-scan.result }}"
+            }
+          }
+          EOF
+
+          echo "total_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
+          echo "vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
+          echo "sast_count=$SAST_COUNT" >> $GITHUB_OUTPUT
+          echo "secret_count=$SECRET_COUNT" >> $GITHUB_OUTPUT
+          echo "iac_count=$IAC_COUNT" >> $GITHUB_OUTPUT
       
       - name: Generate summary
         shell: bash
         run: |
-          echo "# Nightly Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
-          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
-          echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- SAST Analysis: ${{ needs.sast-analysis.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Secret Scan: ${{ needs.secret-scan.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- IaC Security Scan: ${{ needs.iac-security-scan.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Download artifacts for detailed reports." >> $GITHUB_STEP_SUMMARY
+          TOTAL="${{ steps.consolidate.outputs.total_issues }}"
+          VULN="${{ steps.consolidate.outputs.vuln_count }}"
+          SAST="${{ steps.consolidate.outputs.sast_count }}"
+          SECRETS="${{ steps.consolidate.outputs.secret_count }}"
+          IAC="${{ steps.consolidate.outputs.iac_count }}"
+
+          {
+            echo "# 🔒 Nightly Security Scan Results"
+            echo ""
+            echo "**Repository:** \`${{ github.repository }}\`"
+            echo "**Scan Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo "**Total Issues:** $TOTAL"
+            echo ""
+            echo "## Scan Summary"
+            echo ""
+            echo "| Scanner | Status | Findings |"
+            echo "|---------|--------|----------|"
+            echo "| Dependency Scan | ${{ needs.dependency-scan.result }} | $VULN vulnerable packages |"
+            echo "| SAST (CodeQL) | ${{ needs.sast-analysis.result }} | $SAST findings |"
+            echo "| Secret Scan (gitleaks) | ${{ needs.secret-scan.result }} | $SECRETS secrets |"
+            echo "| IaC Scan (Trivy) | ${{ needs.iac-security-scan.result }} | $IAC misconfigurations |"
+            echo ""
+            if [ "$TOTAL" -gt 0 ]; then
+              echo "> ⚠️ **$TOTAL total issues found.** Download artifacts for detailed reports."
+            else
+              echo "> ✅ **No issues found.** All scans passed cleanly."
+            fi
+          } >> $GITHUB_STEP_SUMMARY
       
       - name: Create GitHub issue for findings
-        if: ${{ inputs.create-issues }}
+        if: ${{ inputs.create-issues && steps.consolidate.outputs.total_issues > 0 }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.github-token || github.token }}
         run: |
-          echo "Creating or updating GitHub issue for security findings..."
-          echo "This is a placeholder for HoneyDrunk.Tools issue creator"
-          echo "Command: hd-tools github create-security-issue"
-          echo "::notice::GitHub issue creation will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools github create-security-issue \
-          #   --report "./consolidated-security-report.json" \
-          #   --title "Nightly Security Scan - $(date +%Y-%m-%d)" \
-          #   --labels "security,automated" \
-          #   --update-existing
+          TOTAL="${{ steps.consolidate.outputs.total_issues }}"
+          VULN="${{ steps.consolidate.outputs.vuln_count }}"
+          SAST="${{ steps.consolidate.outputs.sast_count }}"
+          SECRETS="${{ steps.consolidate.outputs.secret_count }}"
+          IAC="${{ steps.consolidate.outputs.iac_count }}"
+          SCAN_DATE=$(date -u +"%Y-%m-%d")
+          TITLE="🔒 Nightly Security Scan - $SCAN_DATE - $TOTAL issues found"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          BODY="## Nightly Security Scan Results
+
+          **Date:** $SCAN_DATE
+          **Total Issues:** $TOTAL
+          **Run:** $RUN_URL
+
+          ### Breakdown
+
+          | Scanner | Findings |
+          |---------|----------|
+          | Vulnerable Dependencies | $VULN |
+          | SAST (CodeQL) | $SAST |
+          | Secrets (gitleaks) | $SECRETS |
+          | IaC Misconfigurations (Trivy) | $IAC |
+
+          ### Next Steps
+          1. Download artifacts from the [workflow run]($RUN_URL) for detailed reports
+          2. Triage and prioritize findings
+          3. Address critical and high severity items first
+
+          ---
+          *This issue was created automatically by the nightly security scan.*"
+
+          # Check for existing open issue with the security label
+          EXISTING=$(gh issue list --label "security,automated" --state open --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing issue #$EXISTING"
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            echo "Creating new security issue"
+            gh issue create \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label "security,automated"
+          fi
       
       - name: Upload consolidated report
         uses: actions/upload-artifact@v4

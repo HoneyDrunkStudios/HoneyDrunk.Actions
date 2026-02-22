@@ -1,0 +1,170 @@
+name: 'Send Notification'
+description: 'Send deployment or workflow notifications to Slack and/or Microsoft Teams via incoming webhooks'
+inputs:
+  slack-webhook-url:
+    description: 'Slack incoming webhook URL. Empty to skip Slack.'
+    required: false
+    default: ''
+  teams-webhook-url:
+    description: 'Microsoft Teams incoming webhook URL. Empty to skip Teams.'
+    required: false
+    default: ''
+  title:
+    description: 'Notification title'
+    required: true
+  message:
+    description: 'Notification body text'
+    required: true
+  status:
+    description: 'Status indicator: success, failure, warning, or info'
+    required: false
+    default: 'info'
+  fields:
+    description: >
+      Optional key-value pairs to include as fields (newline-separated KEY=VALUE).
+      Example:
+        Version=1.2.3
+        Environment=production
+    required: false
+    default: ''
+  url:
+    description: 'Optional link URL to include in the notification'
+    required: false
+    default: ''
+  url-text:
+    description: 'Link display text (used with url input)'
+    required: false
+    default: 'View Details'
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.slack-webhook-url }}" ] && [ -z "${{ inputs.teams-webhook-url }}" ]; then
+          echo "::warning::No webhook URL provided — skipping notification"
+        fi
+
+    - name: Send Slack notification
+      if: ${{ inputs.slack-webhook-url != '' }}
+      shell: bash
+      env:
+        SLACK_URL: ${{ inputs.slack-webhook-url }}
+        TITLE: ${{ inputs.title }}
+        MESSAGE: ${{ inputs.message }}
+        STATUS: ${{ inputs.status }}
+        FIELDS_INPUT: ${{ inputs.fields }}
+        LINK_URL: ${{ inputs.url }}
+        LINK_TEXT: ${{ inputs.url-text }}
+      run: |
+        case "$STATUS" in
+          success) COLOR="#36a64f" EMOJI="✅" ;;
+          failure) COLOR="#dc3545" EMOJI="❌" ;;
+          warning) COLOR="#ffc107" EMOJI="⚠️" ;;
+          *)       COLOR="#0078d4" EMOJI="ℹ️" ;;
+        esac
+
+        # Build fields JSON array
+        FIELDS_JSON="[]"
+        if [ -n "$FIELDS_INPUT" ]; then
+          FIELDS_JSON=$(echo "$FIELDS_INPUT" | python3 -c "
+        import json, sys
+        fields = []
+        for line in sys.stdin:
+            line = line.strip()
+            if '=' in line and line:
+                k, v = line.split('=', 1)
+                fields.append({'title': k.strip(), 'value': v.strip(), 'short': True})
+        print(json.dumps(fields))
+        " 2>/dev/null || echo "[]")
+        fi
+
+        # Build attachment
+        ATTACHMENT=$(python3 -c "
+        import json
+        att = {
+            'color': '$COLOR',
+            'title': '$EMOJI $TITLE',
+            'text': '$MESSAGE',
+            'fields': $FIELDS_JSON,
+            'footer': 'HoneyDrunk CI/CD',
+            'ts': $(date +%s)
+        }
+        if '$LINK_URL':
+            att['title_link'] = '$LINK_URL'
+        print(json.dumps({'attachments': [att]}))
+        ")
+
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d "$ATTACHMENT" \
+          "$SLACK_URL" \
+          -o /dev/null -w "Slack: HTTP %{http_code}\n"
+
+    - name: Send Teams notification
+      if: ${{ inputs.teams-webhook-url != '' }}
+      shell: bash
+      env:
+        TEAMS_URL: ${{ inputs.teams-webhook-url }}
+        TITLE: ${{ inputs.title }}
+        MESSAGE: ${{ inputs.message }}
+        STATUS: ${{ inputs.status }}
+        FIELDS_INPUT: ${{ inputs.fields }}
+        LINK_URL: ${{ inputs.url }}
+        LINK_TEXT: ${{ inputs.url-text }}
+      run: |
+        case "$STATUS" in
+          success) COLOR="00ff00" ;;
+          failure) COLOR="ff0000" ;;
+          warning) COLOR="ffff00" ;;
+          *)       COLOR="0078d4" ;;
+        esac
+
+        # Build facts JSON array
+        FACTS_JSON="[]"
+        if [ -n "$FIELDS_INPUT" ]; then
+          FACTS_JSON=$(echo "$FIELDS_INPUT" | python3 -c "
+        import json, sys
+        facts = []
+        for line in sys.stdin:
+            line = line.strip()
+            if '=' in line and line:
+                k, v = line.split('=', 1)
+                facts.append({'name': k.strip(), 'value': v.strip()})
+        print(json.dumps(facts))
+        " 2>/dev/null || echo "[]")
+        fi
+
+        # Build actions JSON
+        ACTIONS_JSON="[]"
+        if [ -n "$LINK_URL" ]; then
+          ACTIONS_JSON=$(python3 -c "
+        import json
+        print(json.dumps([{'@type': 'OpenUri', 'name': '$LINK_TEXT', 'targets': [{'os': 'default', 'uri': '$LINK_URL'}]}]))
+        ")
+        fi
+
+        CARD=$(python3 -c "
+        import json
+        card = {
+            '@type': 'MessageCard',
+            '@context': 'http://schema.org/extensions',
+            'themeColor': '$COLOR',
+            'summary': '$TITLE',
+            'sections': [{
+                'activityTitle': '$TITLE',
+                'activitySubtitle': 'HoneyDrunk CI/CD',
+                'facts': $FACTS_JSON,
+                'markdown': True,
+                'text': '$MESSAGE'
+            }],
+            'potentialAction': $ACTIONS_JSON
+        }
+        print(json.dumps(card))
+        ")
+
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d "$CARD" \
+          "$TEAMS_URL" \
+          -o /dev/null -w "Teams: HTTP %{http_code}\n"

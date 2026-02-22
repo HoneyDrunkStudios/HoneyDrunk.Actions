@@ -248,6 +248,143 @@ permissions:
 
 ---
 
+## Deploy Container to Azure App Service
+
+**Purpose:** Deploy a containerized application to Azure App Service after building with `release.yml`.
+
+**When to Use:** Repos with containerized apps targeting Azure App Service. Chains after the `build-and-scan-container` job in `release.yml`.
+
+### Basic Example (ACR + App Service with staging slot)
+
+```yaml
+name: Release and Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/release.yml@main
+    with:
+      enable-container-build: true
+      dockerfile-path: './Pulse.Collector/Dockerfile'
+      container-registry: 'myregistry.azurecr.io'
+      container-image-name: 'pulse-collector'
+    secrets:
+      container-registry-username: ${{ secrets.ACR_USERNAME }}
+      container-registry-password: ${{ secrets.ACR_PASSWORD }}
+
+  deploy:
+    needs: release
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container.yml@main
+    with:
+      acr-registry: 'myregistry.azurecr.io'
+      container-image: 'myregistry.azurecr.io/pulse-collector:${{ github.ref_name }}'
+      app-name: 'my-pulse-collector'
+      resource-group: 'rg-honeydrunk-prod'
+      slot-name: 'staging'
+      swap-to-production: true
+      health-check-url: '/healthz'
+    secrets:
+      acr-username: ${{ secrets.ACR_USERNAME }}
+      acr-password: ${{ secrets.ACR_PASSWORD }}
+      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+```
+
+### Direct-to-Production (No Slot Swap)
+
+```yaml
+  deploy:
+    needs: release
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container.yml@main
+    with:
+      acr-registry: 'myregistry.azurecr.io'
+      container-image: 'myregistry.azurecr.io/my-app:${{ github.ref_name }}'
+      app-name: 'my-app-service'
+      resource-group: 'rg-honeydrunk'
+      slot-name: 'production'
+    secrets:
+      acr-username: ${{ secrets.ACR_USERNAME }}
+      acr-password: ${{ secrets.ACR_PASSWORD }}
+```
+
+### Service Principal Authentication
+
+For full Azure CLI access (required for slot swaps), provide service principal credentials:
+
+```yaml
+    secrets:
+      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+```
+
+For ACR-only authentication (no slot swap), admin credentials suffice:
+
+```yaml
+    secrets:
+      acr-username: ${{ secrets.ACR_USERNAME }}
+      acr-password: ${{ secrets.ACR_PASSWORD }}
+```
+
+### Deploy with Key Vault Secret Injection
+
+Fetch secrets from Azure Key Vault and apply them as App Service configuration before deployment:
+
+```yaml
+  deploy:
+    needs: release
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container.yml@main
+    with:
+      acr-registry: 'myregistry.azurecr.io'
+      container-image: 'myregistry.azurecr.io/pulse-collector:${{ github.ref_name }}'
+      app-name: 'my-pulse-collector'
+      resource-group: 'rg-honeydrunk-prod'
+      keyvault-name: 'kv-honeydrunk-prod'
+      keyvault-secrets: |
+        ConnectionStrings--AppDb
+        PostHog--ApiKey=POSTHOG_API_KEY
+        Sentry--Dsn=SENTRY_DSN
+        ApplicationInsights--ConnectionString
+    secrets:
+      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      acr-username: ${{ secrets.ACR_USERNAME }}
+      acr-password: ${{ secrets.ACR_PASSWORD }}
+```
+
+Secret name mapping:
+- `ConnectionStrings--AppDb` → env var `ConnectionStrings__AppDb` (auto-converted)
+- `PostHog--ApiKey=POSTHOG_API_KEY` → env var `POSTHOG_API_KEY` (explicit mapping)
+
+### Using Key Vault Fetch Standalone
+
+The `azure/keyvault-fetch` action can be used independently in any workflow:
+
+```yaml
+    steps:
+      - uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/azure/keyvault-fetch@main
+        with:
+          vault-name: 'kv-honeydrunk-prod'
+          secrets: |
+            ConnectionStrings--AppDb
+            MySecret=MY_ENV_VAR
+          export-as: 'env'          # or 'output' or 'both'
+          config-file: './appsettings.Production.json'  # optional token substitution
+```
+
+---
+
 ## Nightly Security Workflow
 
 **Purpose:** Deep, comprehensive security scanning on a schedule.
@@ -698,6 +835,43 @@ jobs:
    - Start with PR workflows
    - Add release workflows after PR validation works
    - Add scheduled workflows last
+
+---
+
+## Notifications
+
+Use the `common/send-notification` composite action to send Slack or Teams messages from any workflow step.
+
+### Slack Notification on Failure
+
+```yaml
+- name: Notify Slack on failure
+  if: failure()
+  uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/common/send-notification@main
+  with:
+    provider: slack
+    webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+    status: failure
+    title: 'Build Failed'
+    message: 'Build failed on ${{ github.ref_name }}'
+    fields: 'Repo=${{ github.repository }},Run=${{ github.run_id }}'
+    run-url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+```
+
+### Teams Notification on Success
+
+```yaml
+- name: Notify Teams on success
+  if: success()
+  uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/common/send-notification@main
+  with:
+    provider: teams
+    webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
+    status: success
+    title: 'Deployment Complete'
+    message: 'Version ${{ needs.build.outputs.version }} deployed to production'
+    run-url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+```
 
 ---
 

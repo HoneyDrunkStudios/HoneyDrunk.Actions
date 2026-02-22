@@ -69,17 +69,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Azure Container Registry login composite action (`azure/acr-login`)
+  - Service principal and admin/token authentication modes
+  - Input validation with clear error messages
+- Azure App Service container deployment composite action (`azure/deploy-app-service`)
+  - Deployment slot support with swap-to-production
+  - Health check probing with configurable timeout
+  - Container startup wait period
+  - Outputs: deployed URL and deployment status
+- Azure Key Vault secret fetch composite action (`azure/keyvault-fetch`)
+  - Fetch secrets by name and expose as environment variables or step outputs
+  - Token substitution in config files (e.g., appsettings.json)
+  - Automatic value masking in logs
+- Reusable deploy container workflow (`job-deploy-container.yml`)
+  - Chains ACR login → Key Vault fetch → App Service config → deploy → health check → slot swap
+  - Deployment summary in GitHub Step Summary
+  - Supports both service principal and admin credentials
+- Slack/Teams notification composite action (`common/send-notification`)
+  - Incoming webhook support for Slack and Teams
+  - Configurable status, title, message, and fields
+  - Color-coded messages based on workflow status
+- Secret scanning (`job-secret-scan.yml`) — replaced stub with gitleaks-action@v2
+  - SARIF output uploaded to GitHub Security tab
+  - Finding count evaluation with conditional failure
+- Coverage analysis (`job-coverage-analysis.yml`) — replaced stub with ReportGenerator
+  - Cobertura input → HTML + Markdown + JSON output
+  - Configurable coverage threshold with pass/fail
+  - GitHub Step Summary with per-assembly breakdown
+- Container scanning in release workflow — replaced stub with Trivy
+  - `aquasecurity/trivy-action@0.28.0` scans built container images
+  - SARIF output uploaded to GitHub Security tab
+- SBOM generation in release workflow — replaced stub with anchore/sbom-action
+  - SPDX-format software bill of materials attached as artifact
+- License compliance in release workflow — replaced stub with dotnet-project-licenses
+  - Allow-list based license checking with configurable approved licenses
+- Smoke tests in release workflow — replaced stub with real health probing
+  - Curl-based endpoint polling with configurable timeout and retry interval
+- Nightly security workflow (`nightly-security.yml`) — replaced all stubs
+  - SAST: GitHub CodeQL (`github/codeql-action`) with `security-and-quality` queries
+  - Secret scan: gitleaks full-history scan with SARIF upload
+  - IaC scan: Trivy filesystem misconfig scanning for Terraform, Docker, K8s, Bicep
+  - Dependency scan: real `dotnet list package --vulnerable --include-transitive` JSON output
+  - Consolidated report: automated finding counts from all SARIF/JSON artifacts
+  - GitHub issue creation: auto-create or update issues labeled `security,automated`
+  - Rich GitHub Step Summary with scanner breakdown table
+
 ### Planned
-- Docker container support
-- Azure deployment actions
-- Code coverage reporting with trending
 - Integration with SonarQube
 - Database deployment actions
 - Terraform deployment actions
 - Multi-repository support
 - Custom labeling and tagging
-- Slack/Teams notifications
 - Release notes generation
+- API compatibility checking (`job-api-compatibility.yml`)
 
 ---
 

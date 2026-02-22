@@ -1,0 +1,76 @@
+name: 'Login to Azure Container Registry'
+description: 'Authenticate with Azure Container Registry using service principal or managed identity'
+inputs:
+  registry:
+    description: 'ACR login server (e.g., myregistry.azurecr.io)'
+    required: true
+  client-id:
+    description: 'Azure service principal client ID (for service principal auth)'
+    required: false
+    default: ''
+  client-secret:
+    description: 'Azure service principal client secret (for service principal auth)'
+    required: false
+    default: ''
+  tenant-id:
+    description: 'Azure AD tenant ID (for service principal auth)'
+    required: false
+    default: ''
+  username:
+    description: 'ACR username (for admin or token-based auth)'
+    required: false
+    default: ''
+  password:
+    description: 'ACR password or token (for admin or token-based auth)'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.registry }}" ]; then
+          echo "::error::ACR registry is required"
+          exit 1
+        fi
+
+        HAS_SP="false"
+        HAS_ADMIN="false"
+
+        if [ -n "${{ inputs.client-id }}" ] && [ -n "${{ inputs.client-secret }}" ] && [ -n "${{ inputs.tenant-id }}" ]; then
+          HAS_SP="true"
+        fi
+
+        if [ -n "${{ inputs.username }}" ] && [ -n "${{ inputs.password }}" ]; then
+          HAS_ADMIN="true"
+        fi
+
+        if [ "$HAS_SP" == "false" ] && [ "$HAS_ADMIN" == "false" ]; then
+          echo "::error::Provide either (client-id + client-secret + tenant-id) for service principal auth, or (username + password) for admin/token auth"
+          exit 1
+        fi
+
+    - name: Login via service principal
+      if: ${{ inputs.client-id != '' && inputs.client-secret != '' && inputs.tenant-id != '' }}
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        tenant-id: ${{ inputs.tenant-id }}
+
+    - name: Login to ACR (service principal)
+      if: ${{ inputs.client-id != '' && inputs.client-secret != '' && inputs.tenant-id != '' }}
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.client-id }}
+        password: ${{ inputs.client-secret }}
+
+    - name: Login to ACR (admin/token)
+      if: ${{ inputs.username != '' && inputs.password != '' && (inputs.client-id == '' || inputs.client-secret == '' || inputs.tenant-id == '') }}
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
