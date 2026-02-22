@@ -52,6 +52,7 @@ runs:
       id: resolve-url
       shell: bash
       run: |
+        set -euo pipefail
         APP_NAME="${{ inputs.app-name }}"
         SLOT="${{ inputs.slot-name }}"
 
@@ -65,6 +66,7 @@ runs:
       if: ${{ inputs.health-check-url != '' }}
       shell: bash
       run: |
+        set -euo pipefail
         echo "Waiting ${{ inputs.startup-wait }}s for container startup..."
         sleep ${{ inputs.startup-wait }}
 
@@ -73,6 +75,7 @@ runs:
       if: ${{ inputs.health-check-url != '' }}
       shell: bash
       run: |
+        set -euo pipefail
         BASE_URL="${{ steps.resolve-url.outputs.url }}"
         HEALTH_PATH="${{ inputs.health-check-url }}"
         TIMEOUT=${{ inputs.health-check-timeout }}
@@ -110,6 +113,7 @@ runs:
       if: ${{ inputs.slot-name != 'production' && inputs.swap-to-production == 'true' }}
       shell: bash
       run: |
+        set -euo pipefail
         echo "Swapping slot '${{ inputs.slot-name }}' → production..."
         az webapp deployment slot swap \
           --resource-group "${{ inputs.resource-group }}" \
@@ -123,12 +127,14 @@ runs:
       id: post-swap-url
       shell: bash
       run: |
+        set -euo pipefail
         echo "url=https://${{ inputs.app-name }}.azurewebsites.net" >> "$GITHUB_OUTPUT"
 
     - name: Final status
       id: final-status
       shell: bash
       run: |
+        set -euo pipefail
         SLOT="${{ inputs.slot-name }}"
         SWAP="${{ inputs.swap-to-production }}"
 

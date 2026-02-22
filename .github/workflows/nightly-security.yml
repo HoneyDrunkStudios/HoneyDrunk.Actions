@@ -158,10 +158,16 @@ jobs:
           echo "$DEPRECATED_OUTPUT" > ./security-reports/deprecated-packages.json
 
           # Count findings
-          VULN_COUNT=0
-          if echo "$VULN_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(len(fw.get('topLevelPackages',[])+fw.get('transitivePackages',[])) for p in d.get('projects',[]) for fw in p.get('frameworks',[])))" 2>/dev/null; then
-            VULN_COUNT=$(echo "$VULN_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(len(fw.get('topLevelPackages',[])+fw.get('transitivePackages',[])) for p in d.get('projects',[]) for fw in p.get('frameworks',[])))")
-          fi
+          VULN_COUNT=$(echo "$VULN_OUTPUT" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          total = 0
+          for project in data.get('projects', []):
+              for framework in project.get('frameworks', []):
+                  total += len(framework.get('topLevelPackages', []))
+                  total += len(framework.get('transitivePackages', []))
+          print(total)
+          " 2>/dev/null || echo "0")
 
           echo "vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
           echo "Found $VULN_COUNT vulnerable packages"
@@ -314,19 +320,19 @@ jobs:
           
           # Look for common IaC patterns
           IAC_COUNT=0
-          if find . -name "*.tf" -o -name "*.tfvars" | grep -q .; then
+          if find . \( -name "*.tf" -o -name "*.tfvars" \) | grep -q .; then
             echo "Terraform files detected"
             ((IAC_COUNT++))
           fi
-          if find . -name "*.bicep" -o -name "*.json" | xargs grep -l "Microsoft.Resources" 2>/dev/null | grep -q .; then
+          if find . \( -name "*.bicep" -o -name "*.json" \) | xargs grep -l "Microsoft.Resources" 2>/dev/null | grep -q .; then
             echo "Azure Bicep/ARM templates detected"
             ((IAC_COUNT++))
           fi
-          if find . -name "docker-compose*.yml" -o -name "Dockerfile*" | grep -q .; then
+          if find . \( -name "docker-compose*.yml" -o -name "Dockerfile*" \) | grep -q .; then
             echo "Docker files detected"
             ((IAC_COUNT++))
           fi
-          if find . -name "*.yaml" -o -name "*.yml" | xargs grep -l "apiVersion:" 2>/dev/null | grep -q .; then
+          if find . \( -name "*.yaml" -o -name "*.yml" \) | xargs grep -l "apiVersion:" 2>/dev/null | grep -q .; then
             echo "Kubernetes manifests detected"
             ((IAC_COUNT++))
           fi

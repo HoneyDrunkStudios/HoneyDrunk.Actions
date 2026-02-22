@@ -45,6 +45,7 @@ runs:
     - name: Validate inputs
       shell: bash
       run: |
+        set -euo pipefail
         if [ -z "${{ inputs.vault-name }}" ]; then
           echo "::error::vault-name is required"
           exit 1
@@ -63,6 +64,7 @@ runs:
         EXPORT_AS: ${{ inputs.export-as }}
         MASK_VALUES: ${{ inputs.mask-values }}
       run: |
+        set -euo pipefail
         FETCHED=0
         SECRET_NAMES=""
 
@@ -136,6 +138,7 @@ runs:
         SECRETS_INPUT: ${{ inputs.secrets }}
         VAULT_NAME: ${{ inputs.vault-name }}
       run: |
+        set -euo pipefail
         if [ ! -f "$CONFIG_FILE" ]; then
           echo "::error::Config file not found: $CONFIG_FILE"
           exit 1

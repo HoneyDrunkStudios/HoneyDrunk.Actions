@@ -80,14 +80,18 @@ jobs:
 
       - name: Generate coverage report
         if: steps.download.outcome == 'success'
+        id: reportgen
         shell: bash
         run: |
-          reportgenerator \
+          set -euo pipefail
+          if ! reportgenerator \
             "-reports:./coverage-reports/**/coverage.cobertura.xml" \
             "-targetdir:./coverage-analysis" \
             "-reporttypes:${{ inputs.report-types }}" \
-            "-assemblyfilters:+*;-*.Tests" \
-            || true
+            "-assemblyfilters:+*;-*.Tests"; then
+            echo "::warning::ReportGenerator failed — coverage analysis may be incomplete"
+            echo "reportgen_failed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Evaluate coverage threshold
         if: steps.download.outcome == 'success'

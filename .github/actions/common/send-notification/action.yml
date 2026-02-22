@@ -41,6 +41,7 @@ runs:
     - name: Validate inputs
       shell: bash
       run: |
+        set -euo pipefail
         if [ -z "${{ inputs.slack-webhook-url }}" ] && [ -z "${{ inputs.teams-webhook-url }}" ]; then
           echo "::warning::No webhook URL provided — skipping notification"
         fi
@@ -57,6 +58,7 @@ runs:
         LINK_URL: ${{ inputs.url }}
         LINK_TEXT: ${{ inputs.url-text }}
       run: |
+        set -euo pipefail
         case "$STATUS" in
           success) COLOR="#36a64f" EMOJI="✅" ;;
           failure) COLOR="#dc3545" EMOJI="❌" ;;
@@ -117,6 +119,7 @@ runs:
         LINK_URL: ${{ inputs.url }}
         LINK_TEXT: ${{ inputs.url-text }}
       run: |
+        set -euo pipefail
         case "$STATUS" in
           success) COLOR="00ff00" ;;
           failure) COLOR="ff0000" ;;

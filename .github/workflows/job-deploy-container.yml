@@ -165,6 +165,7 @@ jobs:
         env:
           CLIENT_ID: ${{ secrets.azure-client-id }}
         run: |
+          set -euo pipefail
           if [ -n "$CLIENT_ID" ]; then
             echo "has_sp=true" >> $GITHUB_OUTPUT
           else
@@ -178,6 +179,12 @@ jobs:
           client-id: ${{ secrets.azure-client-id }}
           client-secret: ${{ secrets.azure-client-secret }}
           tenant-id: ${{ secrets.azure-tenant-id }}
+
+      - name: Validate Key Vault inputs
+        if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}
+        shell: bash
+        run: |
+          echo "::warning::Both 'keyvault-name' and 'keyvault-secrets' must be provided together. One is missing — skipping Key Vault integration."
 
       - name: Fetch secrets from Key Vault
         if: ${{ inputs.keyvault-name != '' && inputs.keyvault-secrets != '' }}
@@ -196,7 +203,8 @@ jobs:
           RESOURCE_GROUP: ${{ inputs.resource-group }}
           SLOT: ${{ inputs.slot-name }}
         run: |
-          SETTINGS=""
+          set -euo pipefail
+          SETTINGS_ARGS=()
 
           while IFS= read -r line; do
             [[ -z "$line" || "$line" =~ ^# ]] && continue
@@ -208,27 +216,26 @@ jobs:
             fi
             ENV_NAME=$(echo "$ENV_NAME" | xargs)
 
-            # Read from the env var set by keyvault-fetch
             SECRET_VALUE="${!ENV_NAME}"
             if [ -n "$SECRET_VALUE" ]; then
-              SETTINGS="$SETTINGS $ENV_NAME=$SECRET_VALUE"
+              SETTINGS_ARGS+=("${ENV_NAME}=${SECRET_VALUE}")
             fi
           done <<< "$SECRETS_INPUT"
 
-          if [ -n "$SETTINGS" ]; then
-            SLOT_ARG=""
+          if [ ${#SETTINGS_ARGS[@]} -gt 0 ]; then
+            SLOT_ARGS=()
             if [ "$SLOT" != "production" ] && [ -n "$SLOT" ]; then
-              SLOT_ARG="--slot $SLOT"
+              SLOT_ARGS=(--slot "$SLOT")
             fi
 
             az webapp config appsettings set \
               --resource-group "$RESOURCE_GROUP" \
               --name "$APP_NAME" \
-              $SLOT_ARG \
-              --settings $SETTINGS \
+              "${SLOT_ARGS[@]}" \
+              --settings "${SETTINGS_ARGS[@]}" \
               --output none
 
-            echo "Applied Key Vault secrets to App Service configuration"
+            echo "Applied ${#SETTINGS_ARGS[@]} Key Vault secrets to App Service configuration"
           fi
 
       - name: Deploy to App Service
@@ -248,6 +255,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
           echo "# Container Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY

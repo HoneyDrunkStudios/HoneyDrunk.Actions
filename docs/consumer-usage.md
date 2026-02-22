@@ -849,13 +849,14 @@ Use the `common/send-notification` composite action to send Slack or Teams messa
   if: failure()
   uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/common/send-notification@main
   with:
-    provider: slack
-    webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+    slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
     status: failure
     title: 'Build Failed'
     message: 'Build failed on ${{ github.ref_name }}'
-    fields: 'Repo=${{ github.repository }},Run=${{ github.run_id }}'
-    run-url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+    fields: |
+      Repo=${{ github.repository }}
+      Run=${{ github.run_id }}
+    url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 ```
 
 ### Teams Notification on Success
@@ -865,12 +866,11 @@ Use the `common/send-notification` composite action to send Slack or Teams messa
   if: success()
   uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/common/send-notification@main
   with:
-    provider: teams
-    webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
+    teams-webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
     status: success
     title: 'Deployment Complete'
     message: 'Version ${{ needs.build.outputs.version }} deployed to production'
-    run-url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+    url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 ```
 
 ---

@@ -37,6 +37,7 @@ runs:
         ADMIN_USERNAME: ${{ inputs.username }}
         ADMIN_PASSWORD: ${{ inputs.password }}
       run: |
+        set -euo pipefail
         if [ -z "$ACR_REGISTRY" ]; then
           echo "::error::ACR registry is required"
           exit 1
