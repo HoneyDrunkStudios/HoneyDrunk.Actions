@@ -137,6 +137,7 @@ permissions:
   contents: read
   packages: write
   id-token: write  # For SBOM attestation
+  security-events: write  # For SARIF upload from container scan
 
 jobs:
   build-and-test:
@@ -304,7 +305,7 @@ jobs:
               print(f"  {name} - {lic}", file=sys.stderr)
           print(len(violations))
           PYEOF
-            VIOLATIONS=$(python3 /tmp/check_licenses.py "$ALLOWED" "./artifacts/licenses.json" 2>&1 | tail -1 || echo "0")
+            VIOLATIONS=$(python3 /tmp/check_licenses.py "$ALLOWED" "./artifacts/licenses.json" 2>/dev/null | tail -1 || echo "0")
 
             if [ "$VIOLATIONS" -gt 0 ]; then
               echo "::warning::Found $VIOLATIONS package(s) with licenses outside the allow list"
@@ -477,7 +478,7 @@ jobs:
   
   smoke-tests:
     name: Smoke Tests
-    if: ${{ inputs.enable-smoke-tests }}
+    if: ${{ always() && inputs.enable-smoke-tests && !failure() && !cancelled() }}
     needs: [publish-nuget, build-and-scan-container]
     runs-on: ${{ inputs.runs-on }}
     

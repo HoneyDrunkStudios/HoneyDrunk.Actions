@@ -33,7 +33,7 @@ inputs:
 outputs:
   deployed-url:
     description: 'URL of the deployed App Service (slot URL if not swapped, production URL if swapped)'
-    value: ${{ steps.resolve-url.outputs.url }}
+    value: ${{ steps.post-swap-url.outputs.url || steps.resolve-url.outputs.url }}
   deployment-status:
     description: 'Final deployment status: succeeded, swapped, or failed'
     value: ${{ steps.final-status.outputs.status }}

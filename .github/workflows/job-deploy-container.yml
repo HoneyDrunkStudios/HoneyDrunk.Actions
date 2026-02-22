@@ -159,8 +159,20 @@ jobs:
           username: ${{ secrets.acr-username }}
           password: ${{ secrets.acr-password }}
 
+      - name: Check for Azure service principal credentials
+        id: check-sp
+        shell: bash
+        env:
+          CLIENT_ID: ${{ secrets.azure-client-id }}
+        run: |
+          if [ -n "$CLIENT_ID" ]; then
+            echo "has_sp=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_sp=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Azure Login (for App Service management)
-        if: ${{ secrets.azure-client-id != '' }}
+        if: steps.check-sp.outputs.has_sp == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.azure-client-id }}

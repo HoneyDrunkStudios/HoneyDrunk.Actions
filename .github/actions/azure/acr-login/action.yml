@@ -29,8 +29,15 @@ runs:
   steps:
     - name: Validate inputs
       shell: bash
+      env:
+        ACR_REGISTRY: ${{ inputs.registry }}
+        SP_CLIENT_ID: ${{ inputs.client-id }}
+        SP_CLIENT_SECRET: ${{ inputs.client-secret }}
+        SP_TENANT_ID: ${{ inputs.tenant-id }}
+        ADMIN_USERNAME: ${{ inputs.username }}
+        ADMIN_PASSWORD: ${{ inputs.password }}
       run: |
-        if [ -z "${{ inputs.registry }}" ]; then
+        if [ -z "$ACR_REGISTRY" ]; then
           echo "::error::ACR registry is required"
           exit 1
         fi
@@ -38,11 +45,11 @@ runs:
         HAS_SP="false"
         HAS_ADMIN="false"
 
-        if [ -n "${{ inputs.client-id }}" ] && [ -n "${{ inputs.client-secret }}" ] && [ -n "${{ inputs.tenant-id }}" ]; then
+        if [ -n "$SP_CLIENT_ID" ] && [ -n "$SP_CLIENT_SECRET" ] && [ -n "$SP_TENANT_ID" ]; then
           HAS_SP="true"
         fi
 
-        if [ -n "${{ inputs.username }}" ] && [ -n "${{ inputs.password }}" ]; then
+        if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
           HAS_ADMIN="true"
         fi
 

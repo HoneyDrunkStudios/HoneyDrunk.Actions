@@ -56,16 +56,30 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Download coverage reports
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.coverage-artifact-name }}
           path: ./coverage-reports
 
+      - name: Bail if no coverage artifact
+        if: steps.download.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Coverage artifact '${{ inputs.coverage-artifact-name }}' not found — skipping analysis"
+          echo "# Code Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "No coverage artifact found. Ensure the upstream test job uploads coverage reports." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
       - name: Install ReportGenerator
+        if: steps.download.outcome == 'success'
         shell: bash
         run: dotnet tool install --global dotnet-reportgenerator-globaltool 2>/dev/null || true
 
       - name: Generate coverage report
+        if: steps.download.outcome == 'success'
         shell: bash
         run: |
           reportgenerator \
@@ -76,6 +90,7 @@ jobs:
             || true
 
       - name: Evaluate coverage threshold
+        if: steps.download.outcome == 'success'
         id: threshold
         shell: bash
         run: |
@@ -99,6 +114,7 @@ jobs:
 
             THRESHOLD=${{ inputs.coverage-threshold }}
             LINE_INT=${LINE_COV%.*}
+            THRESHOLD_INT=${THRESHOLD%.*}
 
             echo ""
             echo "Line coverage:   ${LINE_COV}%"
@@ -106,7 +122,7 @@ jobs:
             echo "Threshold:       ${THRESHOLD}%"
             echo ""
 
-            if [ "$LINE_INT" -lt "$THRESHOLD" ]; then
+            if [ "$LINE_INT" -lt "$THRESHOLD_INT" ]; then
               echo "::warning::Line coverage ${LINE_COV}% is below threshold ${THRESHOLD}%"
               echo "passed=false" >> "$GITHUB_OUTPUT"
             else

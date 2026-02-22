@@ -247,6 +247,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Create reports directory
+        shell: bash
+        run: mkdir -p ./security-reports
+
       - name: Run gitleaks full-history scan
         id: gitleaks
         uses: gitleaks/gitleaks-action@v2
@@ -561,6 +565,9 @@ jobs:
             gh issue comment "$EXISTING" --body "$BODY"
           else
             echo "Creating new security issue"
+            # Ensure labels exist before creating issue
+            gh label create "security" --color "d93f0b" --description "Security findings" 2>/dev/null || true
+            gh label create "automated" --color "0e8a16" --description "Automated issue" 2>/dev/null || true
             gh issue create \
               --title "$TITLE" \
               --body "$BODY" \

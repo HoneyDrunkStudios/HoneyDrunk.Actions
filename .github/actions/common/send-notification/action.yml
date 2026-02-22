@@ -64,7 +64,7 @@ runs:
           *)       COLOR="#0078d4" EMOJI="ℹ️" ;;
         esac
 
-        # Build fields JSON array
+        # Build fields JSON array via env vars (safe from injection)
         FIELDS_JSON="[]"
         if [ -n "$FIELDS_INPUT" ]; then
           FIELDS_JSON=$(echo "$FIELDS_INPUT" | python3 -c "
@@ -79,19 +79,23 @@ runs:
         " 2>/dev/null || echo "[]")
         fi
 
-        # Build attachment
+        # Build attachment safely via env vars passed to Python
+        export SLACK_COLOR="$COLOR"
+        export SLACK_EMOJI="$EMOJI"
+        export SLACK_FIELDS="$FIELDS_JSON"
         ATTACHMENT=$(python3 -c "
-        import json
+        import json, os, time
         att = {
-            'color': '$COLOR',
-            'title': '$EMOJI $TITLE',
-            'text': '$MESSAGE',
-            'fields': $FIELDS_JSON,
+            'color': os.environ['SLACK_COLOR'],
+            'title': os.environ['SLACK_EMOJI'] + ' ' + os.environ['TITLE'],
+            'text': os.environ['MESSAGE'],
+            'fields': json.loads(os.environ['SLACK_FIELDS']),
             'footer': 'HoneyDrunk CI/CD',
-            'ts': $(date +%s)
+            'ts': int(time.time())
         }
-        if '$LINK_URL':
-            att['title_link'] = '$LINK_URL'
+        link = os.environ.get('LINK_URL', '')
+        if link:
+            att['title_link'] = link
         print(json.dumps({'attachments': [att]}))
         ")
 
@@ -120,7 +124,7 @@ runs:
           *)       COLOR="0078d4" ;;
         esac
 
-        # Build facts JSON array
+        # Build facts JSON array via stdin (safe from injection)
         FACTS_JSON="[]"
         if [ -n "$FIELDS_INPUT" ]; then
           FACTS_JSON=$(echo "$FIELDS_INPUT" | python3 -c "
@@ -135,30 +139,32 @@ runs:
         " 2>/dev/null || echo "[]")
         fi
 
-        # Build actions JSON
-        ACTIONS_JSON="[]"
-        if [ -n "$LINK_URL" ]; then
-          ACTIONS_JSON=$(python3 -c "
-        import json
-        print(json.dumps([{'@type': 'OpenUri', 'name': '$LINK_TEXT', 'targets': [{'os': 'default', 'uri': '$LINK_URL'}]}]))
-        ")
-        fi
-
+        # Build payload safely via env vars passed to Python
+        export TEAMS_COLOR="$COLOR"
+        export TEAMS_FACTS="$FACTS_JSON"
         CARD=$(python3 -c "
-        import json
+        import json, os
+        actions = []
+        link = os.environ.get('LINK_URL', '')
+        if link:
+            actions.append({
+                '@type': 'OpenUri',
+                'name': os.environ.get('LINK_TEXT', 'View Details'),
+                'targets': [{'os': 'default', 'uri': link}]
+            })
         card = {
             '@type': 'MessageCard',
             '@context': 'http://schema.org/extensions',
-            'themeColor': '$COLOR',
-            'summary': '$TITLE',
+            'themeColor': os.environ['TEAMS_COLOR'],
+            'summary': os.environ['TITLE'],
             'sections': [{
-                'activityTitle': '$TITLE',
+                'activityTitle': os.environ['TITLE'],
                 'activitySubtitle': 'HoneyDrunk CI/CD',
-                'facts': $FACTS_JSON,
+                'facts': json.loads(os.environ['TEAMS_FACTS']),
                 'markdown': True,
-                'text': '$MESSAGE'
+                'text': os.environ['MESSAGE']
             }],
-            'potentialAction': $ACTIONS_JSON
+            'potentialAction': actions
         }
         print(json.dumps(card))
         ")

@@ -158,19 +158,20 @@ runs:
           KV_SECRET=$(echo "$KV_SECRET" | xargs)
           ENV_NAME=$(echo "$ENV_NAME" | xargs)
 
-          # Fetch value (already cached in env from previous step)
-          SECRET_VALUE=$(az keyvault secret show \
-            --vault-name "$VAULT_NAME" \
-            --name "$KV_SECRET" \
-            --query "value" \
-            --output tsv 2>/dev/null)
+          # Read from the env var set by the fetch step (avoids re-fetching from Key Vault)
+          SECRET_VALUE="${!ENV_NAME}"
+          if [ -z "$SECRET_VALUE" ]; then
+            echo "::warning::No env var '$ENV_NAME' found for secret '$KV_SECRET' — skipping token substitution"
+            continue
+          fi
 
-          # Build token pattern and substitute
           TOKEN="${TOKEN_PREFIX}${ENV_NAME}${TOKEN_SUFFIX}"
 
           if grep -q "$TOKEN" "$CONFIG_FILE"; then
-            # Use perl for safe substitution (handles special chars in values)
-            perl -i -pe "s/\Q${TOKEN}\E/${SECRET_VALUE}/g" "$CONFIG_FILE"
+            # Use perl with env vars for safe substitution (handles $, \, @ in values)
+            export __KV_TOKEN="$TOKEN"
+            export __KV_VALUE="$SECRET_VALUE"
+            perl -i -pe 's/\Q$ENV{__KV_TOKEN}\E/$ENV{__KV_VALUE}/g' "$CONFIG_FILE"
             SUBSTITUTED=$((SUBSTITUTED + 1))
             echo "  Replaced token: $TOKEN"
           fi
