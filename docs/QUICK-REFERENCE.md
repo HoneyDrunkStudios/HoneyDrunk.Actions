@@ -50,6 +50,18 @@ Complete CI/CD flows in `.github/workflows/templates/stages/` - full pipelines y
 | Generate Summary | `.github/actions/pr/generate-summary` | Create PR summary |
 | Post Comment | `.github/actions/pr/post-comment` | Post PR comment |
 
+### Azure Actions
+| Action | Path | Purpose |
+|--------|------|---------|
+| ACR Login | `.github/actions/azure/acr-login` | Authenticate with Azure Container Registry |
+| Key Vault Fetch | `.github/actions/azure/keyvault-fetch` | Fetch secrets from Azure Key Vault |
+| Deploy App Service | `.github/actions/azure/deploy-app-service` | Deploy container to Azure App Service |
+
+### Common Actions
+| Action | Path | Purpose |
+|--------|------|---------|
+| Send Notification | `.github/actions/common/send-notification` | Send Slack/Teams webhook notifications |
+
 ---
 
 ## ?? Job-Level Workflows
@@ -61,6 +73,10 @@ Single-job reusable workflows for specific tasks:
 | Build and Test | `.github/workflows/templates/jobs/build-and-test.yml` | Complete build + test |
 | Code Quality | `.github/workflows/templates/jobs/code-quality.yml` | Quality checks |
 | Publish NuGet | `.github/workflows/templates/jobs/publish-nuget.yml` | Package publishing |
+| Deploy Container | `.github/workflows/job-deploy-container.yml` | Deploy container to Azure App Service |
+| Secret Scan | `.github/workflows/job-secret-scan.yml` | Scan for leaked secrets (gitleaks) |
+| Coverage Analysis | `.github/workflows/job-coverage-analysis.yml` | Coverage reporting + threshold check |
+| Nightly Security | `.github/workflows/nightly-security.yml` | Deep security scan (CodeQL, gitleaks, Trivy) |
 
 **Usage:**
 ```yaml

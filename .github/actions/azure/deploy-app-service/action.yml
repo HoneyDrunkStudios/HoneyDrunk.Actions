@@ -1,0 +1,150 @@
+name: 'Deploy Container to Azure App Service'
+description: 'Deploy a container image to Azure App Service with optional deployment slot and swap support'
+inputs:
+  app-name:
+    description: 'Azure App Service name'
+    required: true
+  resource-group:
+    description: 'Azure resource group containing the App Service'
+    required: true
+  container-image:
+    description: 'Full container image reference (e.g., myregistry.azurecr.io/app:v1.0.0)'
+    required: true
+  slot-name:
+    description: 'Deployment slot name. Use "production" for direct production deploy.'
+    required: false
+    default: 'staging'
+  swap-to-production:
+    description: 'Swap the deployed slot to production after deployment (ignored when slot-name is "production")'
+    required: false
+    default: 'true'
+  health-check-url:
+    description: 'URL to probe after deployment (relative path like /healthz, or full URL). Empty to skip.'
+    required: false
+    default: ''
+  health-check-timeout:
+    description: 'Maximum seconds to wait for health check to pass'
+    required: false
+    default: '120'
+  startup-wait:
+    description: 'Seconds to wait for container startup before health check'
+    required: false
+    default: '30'
+outputs:
+  deployed-url:
+    description: 'URL of the deployed App Service (slot URL if not swapped, production URL if swapped)'
+    value: ${{ steps.post-swap-url.outputs.url || steps.resolve-url.outputs.url }}
+  deployment-status:
+    description: 'Final deployment status: succeeded, swapped, or failed'
+    value: ${{ steps.final-status.outputs.status }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Deploy container to slot
+      id: deploy
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ inputs.app-name }}
+        slot-name: ${{ inputs.slot-name == 'production' && '' || inputs.slot-name }}
+        images: ${{ inputs.container-image }}
+
+    - name: Resolve deployed URL
+      id: resolve-url
+      shell: bash
+      run: |
+        set -euo pipefail
+        APP_NAME="${{ inputs.app-name }}"
+        SLOT="${{ inputs.slot-name }}"
+
+        if [ "$SLOT" == "production" ] || [ -z "$SLOT" ]; then
+          echo "url=https://${APP_NAME}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+        else
+          echo "url=https://${APP_NAME}-${SLOT}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Wait for container startup
+      if: ${{ inputs.health-check-url != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Waiting ${{ inputs.startup-wait }}s for container startup..."
+        sleep ${{ inputs.startup-wait }}
+
+    - name: Health check
+      id: health-check
+      if: ${{ inputs.health-check-url != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        BASE_URL="${{ steps.resolve-url.outputs.url }}"
+        HEALTH_PATH="${{ inputs.health-check-url }}"
+        TIMEOUT=${{ inputs.health-check-timeout }}
+
+        # Build full URL from relative path or use as-is
+        if [[ "$HEALTH_PATH" == http* ]]; then
+          HEALTH_URL="$HEALTH_PATH"
+        else
+          HEALTH_URL="${BASE_URL}${HEALTH_PATH}"
+        fi
+
+        echo "Probing ${HEALTH_URL} (timeout: ${TIMEOUT}s)..."
+
+        ELAPSED=0
+        INTERVAL=5
+        while [ $ELAPSED -lt $TIMEOUT ]; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+            echo "Health check passed (HTTP ${HTTP_CODE})"
+            echo "healthy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "  HTTP ${HTTP_CODE} — retrying in ${INTERVAL}s..."
+          sleep $INTERVAL
+          ELAPSED=$((ELAPSED + INTERVAL))
+        done
+
+        echo "::error::Health check failed after ${TIMEOUT}s"
+        echo "healthy=false" >> "$GITHUB_OUTPUT"
+        exit 1
+
+    - name: Swap slot to production
+      if: ${{ inputs.slot-name != 'production' && inputs.swap-to-production == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Swapping slot '${{ inputs.slot-name }}' → production..."
+        az webapp deployment slot swap \
+          --resource-group "${{ inputs.resource-group }}" \
+          --name "${{ inputs.app-name }}" \
+          --slot "${{ inputs.slot-name }}" \
+          --target-slot "production"
+        echo "Swap complete."
+
+    - name: Update URL after swap
+      if: ${{ inputs.slot-name != 'production' && inputs.swap-to-production == 'true' }}
+      id: post-swap-url
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "url=https://${{ inputs.app-name }}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+
+    - name: Final status
+      id: final-status
+      shell: bash
+      run: |
+        set -euo pipefail
+        SLOT="${{ inputs.slot-name }}"
+        SWAP="${{ inputs.swap-to-production }}"
+
+        if [ "$SLOT" == "production" ]; then
+          echo "status=succeeded" >> "$GITHUB_OUTPUT"
+          echo "✅ Deployed directly to production"
+        elif [ "$SWAP" == "true" ]; then
+          echo "status=swapped" >> "$GITHUB_OUTPUT"
+          echo "✅ Deployed to ${SLOT} and swapped to production"
+        else
+          echo "status=succeeded" >> "$GITHUB_OUTPUT"
+          echo "✅ Deployed to slot: ${SLOT}"
+        fi

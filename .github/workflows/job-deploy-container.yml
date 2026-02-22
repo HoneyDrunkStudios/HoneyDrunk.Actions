@@ -1,0 +1,269 @@
+# ==============================================================================
+# Deploy Container to Azure App Service
+# ==============================================================================
+# Purpose:
+#   Reusable job for deploying a container image to Azure App Service.
+#   Supports deployment slots with swap-to-production, health checks, and
+#   Azure Container Registry authentication.
+#
+# Responsibilities:
+#   - Authenticate with Azure Container Registry
+#   - Fetch secrets from Azure Key Vault and set as App Service config
+#   - Deploy container image to App Service (slot or production)
+#   - Run health checks against the deployed container
+#   - Optionally swap staging slot to production
+#
+# Target:
+#   Repos with containerized apps deploying to Azure App Service.
+#   Designed to run after the build-and-scan-container job in release.yml.
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Deploy Container to Azure App Service
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      container-image:
+        description: 'Full container image reference (e.g., myregistry.azurecr.io/app:v1.0.0)'
+        required: true
+        type: string
+
+      acr-registry:
+        description: 'ACR login server (e.g., myregistry.azurecr.io)'
+        required: true
+        type: string
+
+      app-name:
+        description: 'Azure App Service name'
+        required: true
+        type: string
+
+      resource-group:
+        description: 'Azure resource group containing the App Service'
+        required: true
+        type: string
+
+      slot-name:
+        description: 'Deployment slot name. Use "production" for direct production deploy.'
+        required: false
+        type: string
+        default: 'staging'
+
+      swap-to-production:
+        description: 'Swap the deployed slot to production after health check'
+        required: false
+        type: boolean
+        default: true
+
+      health-check-url:
+        description: 'Relative path (e.g., /healthz) or full URL to probe. Empty to skip.'
+        required: false
+        type: string
+        default: '/healthz'
+
+      health-check-timeout:
+        description: 'Max seconds to wait for health check to pass'
+        required: false
+        type: number
+        default: 120
+
+      startup-wait:
+        description: 'Seconds to wait for container startup before health check'
+        required: false
+        type: number
+        default: 30
+
+      keyvault-name:
+        description: 'Azure Key Vault name for secret fetching. Empty to skip.'
+        required: false
+        type: string
+        default: ''
+
+      keyvault-secrets:
+        description: >
+          Newline-separated secrets to fetch from Key Vault.
+          Format: SECRET_NAME or SECRET_NAME=ENV_VAR_NAME.
+          Values are set as App Service configuration on the target slot.
+          Empty to skip.
+        required: false
+        type: string
+        default: ''
+
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+    secrets:
+      azure-client-id:
+        description: 'Azure service principal client ID'
+        required: false
+      azure-client-secret:
+        description: 'Azure service principal client secret'
+        required: false
+      azure-tenant-id:
+        description: 'Azure AD tenant ID'
+        required: false
+      acr-username:
+        description: 'ACR username (alternative to service principal)'
+        required: false
+      acr-password:
+        description: 'ACR password or token (alternative to service principal)'
+        required: false
+
+    outputs:
+      deployed-url:
+        description: 'URL of the deployed App Service'
+        value: ${{ jobs.deploy.outputs.deployed-url }}
+      deployment-status:
+        description: 'Final deployment status'
+        value: ${{ jobs.deploy.outputs.deployment-status }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to App Service
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      deployed-url: ${{ steps.deploy.outputs.deployed-url }}
+      deployment-status: ${{ steps.deploy.outputs.deployment-status }}
+
+    steps:
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.actions-ref }}
+          path: .actions
+
+      - name: Login to ACR
+        uses: ./.actions/.github/actions/azure/acr-login
+        with:
+          registry: ${{ inputs.acr-registry }}
+          client-id: ${{ secrets.azure-client-id }}
+          client-secret: ${{ secrets.azure-client-secret }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+          username: ${{ secrets.acr-username }}
+          password: ${{ secrets.acr-password }}
+
+      - name: Check for Azure service principal credentials
+        id: check-sp
+        shell: bash
+        env:
+          CLIENT_ID: ${{ secrets.azure-client-id }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CLIENT_ID" ]; then
+            echo "has_sp=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_sp=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Azure Login (for App Service management)
+        if: steps.check-sp.outputs.has_sp == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure-client-id }}
+          client-secret: ${{ secrets.azure-client-secret }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+
+      - name: Validate Key Vault inputs
+        if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}
+        shell: bash
+        run: |
+          echo "::warning::Both 'keyvault-name' and 'keyvault-secrets' must be provided together. One is missing — skipping Key Vault integration."
+
+      - name: Fetch secrets from Key Vault
+        if: ${{ inputs.keyvault-name != '' && inputs.keyvault-secrets != '' }}
+        uses: ./.actions/.github/actions/azure/keyvault-fetch
+        with:
+          vault-name: ${{ inputs.keyvault-name }}
+          secrets: ${{ inputs.keyvault-secrets }}
+          export-as: 'env'
+
+      - name: Apply Key Vault secrets to App Service config
+        if: ${{ inputs.keyvault-name != '' && inputs.keyvault-secrets != '' }}
+        shell: bash
+        env:
+          SECRETS_INPUT: ${{ inputs.keyvault-secrets }}
+          APP_NAME: ${{ inputs.app-name }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          SLOT: ${{ inputs.slot-name }}
+        run: |
+          set -euo pipefail
+          SETTINGS_ARGS=()
+
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+            if [[ "$line" == *"="* ]]; then
+              ENV_NAME="${line#*=}"
+            else
+              ENV_NAME=$(echo "$line" | sed 's/--/__/g' | sed 's/-/_/g')
+            fi
+            ENV_NAME=$(echo "$ENV_NAME" | xargs)
+
+            SECRET_VALUE="${!ENV_NAME}"
+            if [ -n "$SECRET_VALUE" ]; then
+              SETTINGS_ARGS+=("${ENV_NAME}=${SECRET_VALUE}")
+            fi
+          done <<< "$SECRETS_INPUT"
+
+          if [ ${#SETTINGS_ARGS[@]} -gt 0 ]; then
+            SLOT_ARGS=()
+            if [ "$SLOT" != "production" ] && [ -n "$SLOT" ]; then
+              SLOT_ARGS=(--slot "$SLOT")
+            fi
+
+            az webapp config appsettings set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              "${SLOT_ARGS[@]}" \
+              --settings "${SETTINGS_ARGS[@]}" \
+              --output none
+
+            echo "Applied ${#SETTINGS_ARGS[@]} Key Vault secrets to App Service configuration"
+          fi
+
+      - name: Deploy to App Service
+        id: deploy
+        uses: ./.actions/.github/actions/azure/deploy-app-service
+        with:
+          app-name: ${{ inputs.app-name }}
+          resource-group: ${{ inputs.resource-group }}
+          container-image: ${{ inputs.container-image }}
+          slot-name: ${{ inputs.slot-name }}
+          swap-to-production: ${{ inputs.swap-to-production }}
+          health-check-url: ${{ inputs.health-check-url }}
+          health-check-timeout: ${{ inputs.health-check-timeout }}
+          startup-wait: ${{ inputs.startup-wait }}
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "# Container Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ inputs.container-image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **App Service** | ${{ inputs.app-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Slot** | ${{ inputs.slot-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Swapped** | ${{ inputs.swap-to-production }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Key Vault** | ${{ inputs.keyvault-name || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **URL** | ${{ steps.deploy.outputs.deployed-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ${{ steps.deploy.outputs.deployment-status }} |" >> $GITHUB_STEP_SUMMARY

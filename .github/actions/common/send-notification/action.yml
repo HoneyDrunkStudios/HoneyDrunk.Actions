@@ -1,0 +1,179 @@
+name: 'Send Notification'
+description: 'Send deployment or workflow notifications to Slack and/or Microsoft Teams via incoming webhooks'
+inputs:
+  slack-webhook-url:
+    description: 'Slack incoming webhook URL. Empty to skip Slack.'
+    required: false
+    default: ''
+  teams-webhook-url:
+    description: 'Microsoft Teams incoming webhook URL. Empty to skip Teams.'
+    required: false
+    default: ''
+  title:
+    description: 'Notification title'
+    required: true
+  message:
+    description: 'Notification body text'
+    required: true
+  status:
+    description: 'Status indicator: success, failure, warning, or info'
+    required: false
+    default: 'info'
+  fields:
+    description: >
+      Optional key-value pairs to include as fields (newline-separated KEY=VALUE).
+      Example:
+        Version=1.2.3
+        Environment=production
+    required: false
+    default: ''
+  url:
+    description: 'Optional link URL to include in the notification'
+    required: false
+    default: ''
+  url-text:
+    description: 'Link display text (used with url input)'
+    required: false
+    default: 'View Details'
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${{ inputs.slack-webhook-url }}" ] && [ -z "${{ inputs.teams-webhook-url }}" ]; then
+          echo "::warning::No webhook URL provided — skipping notification"
+        fi
+
+    - name: Send Slack notification
+      if: ${{ inputs.slack-webhook-url != '' }}
+      shell: bash
+      env:
+        SLACK_URL: ${{ inputs.slack-webhook-url }}
+        TITLE: ${{ inputs.title }}
+        MESSAGE: ${{ inputs.message }}
+        STATUS: ${{ inputs.status }}
+        FIELDS_INPUT: ${{ inputs.fields }}
+        LINK_URL: ${{ inputs.url }}
+        LINK_TEXT: ${{ inputs.url-text }}
+      run: |
+        set -euo pipefail
+        case "$STATUS" in
+          success) COLOR="#36a64f" EMOJI="✅" ;;
+          failure) COLOR="#dc3545" EMOJI="❌" ;;
+          warning) COLOR="#ffc107" EMOJI="⚠️" ;;
+          *)       COLOR="#0078d4" EMOJI="ℹ️" ;;
+        esac
+
+        # Build fields JSON array via env vars (safe from injection)
+        FIELDS_JSON="[]"
+        if [ -n "$FIELDS_INPUT" ]; then
+          FIELDS_JSON=$(echo "$FIELDS_INPUT" | python3 -c "
+        import json, sys
+        fields = []
+        for line in sys.stdin:
+            line = line.strip()
+            if '=' in line and line:
+                k, v = line.split('=', 1)
+                fields.append({'title': k.strip(), 'value': v.strip(), 'short': True})
+        print(json.dumps(fields))
+        " 2>/dev/null || echo "[]")
+        fi
+
+        # Build attachment safely via env vars passed to Python
+        export SLACK_COLOR="$COLOR"
+        export SLACK_EMOJI="$EMOJI"
+        export SLACK_FIELDS="$FIELDS_JSON"
+        ATTACHMENT=$(python3 -c "
+        import json, os, time
+        att = {
+            'color': os.environ['SLACK_COLOR'],
+            'title': os.environ['SLACK_EMOJI'] + ' ' + os.environ['TITLE'],
+            'text': os.environ['MESSAGE'],
+            'fields': json.loads(os.environ['SLACK_FIELDS']),
+            'footer': 'HoneyDrunk CI/CD',
+            'ts': int(time.time())
+        }
+        link = os.environ.get('LINK_URL', '')
+        if link:
+            att['title_link'] = link
+        print(json.dumps({'attachments': [att]}))
+        ")
+
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d "$ATTACHMENT" \
+          "$SLACK_URL" \
+          -o /dev/null -w "Slack: HTTP %{http_code}\n"
+
+    - name: Send Teams notification
+      if: ${{ inputs.teams-webhook-url != '' }}
+      shell: bash
+      env:
+        TEAMS_URL: ${{ inputs.teams-webhook-url }}
+        TITLE: ${{ inputs.title }}
+        MESSAGE: ${{ inputs.message }}
+        STATUS: ${{ inputs.status }}
+        FIELDS_INPUT: ${{ inputs.fields }}
+        LINK_URL: ${{ inputs.url }}
+        LINK_TEXT: ${{ inputs.url-text }}
+      run: |
+        set -euo pipefail
+        case "$STATUS" in
+          success) COLOR="00ff00" ;;
+          failure) COLOR="ff0000" ;;
+          warning) COLOR="ffff00" ;;
+          *)       COLOR="0078d4" ;;
+        esac
+
+        # Build facts JSON array via stdin (safe from injection)
+        FACTS_JSON="[]"
+        if [ -n "$FIELDS_INPUT" ]; then
+          FACTS_JSON=$(echo "$FIELDS_INPUT" | python3 -c "
+        import json, sys
+        facts = []
+        for line in sys.stdin:
+            line = line.strip()
+            if '=' in line and line:
+                k, v = line.split('=', 1)
+                facts.append({'name': k.strip(), 'value': v.strip()})
+        print(json.dumps(facts))
+        " 2>/dev/null || echo "[]")
+        fi
+
+        # Build payload safely via env vars passed to Python
+        export TEAMS_COLOR="$COLOR"
+        export TEAMS_FACTS="$FACTS_JSON"
+        CARD=$(python3 -c "
+        import json, os
+        actions = []
+        link = os.environ.get('LINK_URL', '')
+        if link:
+            actions.append({
+                '@type': 'OpenUri',
+                'name': os.environ.get('LINK_TEXT', 'View Details'),
+                'targets': [{'os': 'default', 'uri': link}]
+            })
+        card = {
+            '@type': 'MessageCard',
+            '@context': 'http://schema.org/extensions',
+            'themeColor': os.environ['TEAMS_COLOR'],
+            'summary': os.environ['TITLE'],
+            'sections': [{
+                'activityTitle': os.environ['TITLE'],
+                'activitySubtitle': 'HoneyDrunk CI/CD',
+                'facts': json.loads(os.environ['TEAMS_FACTS']),
+                'markdown': True,
+                'text': os.environ['MESSAGE']
+            }],
+            'potentialAction': actions
+        }
+        print(json.dumps(card))
+        ")
+
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d "$CARD" \
+          "$TEAMS_URL" \
+          -o /dev/null -w "Teams: HTTP %{http_code}\n"
