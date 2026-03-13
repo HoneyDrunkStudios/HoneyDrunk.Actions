@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Deploy Container to Azure App Service'
 description: 'Deploy a container image to Azure App Service with optional deployment slot and swap support'
 inputs:

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Checkout HoneyDrunk.Actions Repository'
 description: 'Composite action to checkout HoneyDrunk.Actions repo for reuse in workflows'
 inputs:

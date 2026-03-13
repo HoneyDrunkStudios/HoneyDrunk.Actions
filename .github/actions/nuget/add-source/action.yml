@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Add NuGet Source'
 description: 'Add a custom NuGet source to the configuration'
 inputs:

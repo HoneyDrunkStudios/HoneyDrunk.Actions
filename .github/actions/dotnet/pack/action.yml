@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Pack .NET Project'
 description: 'Create NuGet packages from .NET projects'
 inputs:

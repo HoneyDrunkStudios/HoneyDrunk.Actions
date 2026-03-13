@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Generate Report Artifact'
 description: 'Composite action to generate timestamped report artifacts with consistent naming'
 inputs:

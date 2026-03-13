@@ -242,6 +242,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
       
       - name: Start application server
+        id: serve
         shell: bash
         run: |
           echo "Starting application server..."
@@ -266,7 +267,7 @@ jobs:
           fi
           
           SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          echo "server_pid=$SERVER_PID" >> $GITHUB_OUTPUT
           
           # Wait for server to be ready
           echo "Waiting for server to start..."
@@ -329,9 +330,10 @@ jobs:
         if: always()
         shell: bash
         run: |
+          SERVER_PID="${{ steps.serve.outputs.server_pid }}"
           if [ -n "$SERVER_PID" ]; then
             echo "Stopping server (PID: $SERVER_PID)"
-            kill $SERVER_PID || true
+            kill "$SERVER_PID" || true
           fi
       
       - name: Analyze accessibility results

@@ -73,12 +73,6 @@ on:
         type: number
         default: 80
       
-      coverage-delta-threshold:
-        description: 'Maximum allowed coverage decrease percentage (0 = no enforcement)'
-        required: false
-        type: number
-        default: 5
-      
       enable-secret-scan:
         description: 'Run secret scanning on PR diff'
         required: false
@@ -133,7 +127,6 @@ jobs:
     with:
       runs-on: ${{ inputs.runs-on }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
-      coverage-delta-threshold: ${{ inputs.coverage-delta-threshold }}
       coverage-artifact-name: 'coverage-reports-${{ inputs.runs-on }}'
       actions-ref: ${{ inputs.actions-ref }}
     permissions:

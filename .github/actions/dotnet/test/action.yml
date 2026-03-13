@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Test .NET Project'
 description: 'Run tests for a .NET project with coverage and result reporting'
 inputs:
