@@ -56,7 +56,11 @@ runs:
           echo "::warning::Using service principal auth — consider switching to OIDC federation for zero-secret deployments"
           echo "method=sp" >> $GITHUB_OUTPUT
         elif [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
-          echo "::warning::Using ACR admin credentials — not recommended for production"
+          if [[ "$ACR_REGISTRY" == *.azurecr.io ]]; then
+            echo "::warning::Using ACR admin credentials — not recommended for production"
+          else
+            echo "::warning::Using registry username/password credentials — not recommended for production"
+          fi
           echo "method=admin" >> $GITHUB_OUTPUT
         else
           echo "::error::Provide one of: (1) client-id + tenant-id + subscription-id for OIDC, (2) client-id + tenant-id + client-secret for SP, or (3) username + password for admin auth"

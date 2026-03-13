@@ -136,7 +136,6 @@ jobs:
       project-path: './src/MyLibrary/MyLibrary.csproj'
       api-compat-baseline: './api-baseline.txt'
       coverage-threshold: 80
-      coverage-delta-threshold: 5
       enable-secret-scan: true
       post-pr-summary: true
     secrets:
@@ -267,8 +266,6 @@ jobs:
       publish-projects: 'MyWorker/MyWorker.csproj;MyApi/MyApi.csproj'
       publish-runtime: 'linux-x64'
       publish-self-contained: false
-    secrets:
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
 
 permissions:
   contents: read

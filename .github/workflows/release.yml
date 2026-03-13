@@ -197,10 +197,8 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: ./.github/actions/common/checkout-actions-repo
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Extract version from tag
@@ -283,10 +281,8 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: ./.github/actions/common/checkout-actions-repo
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
@@ -394,10 +390,8 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: ./.github/actions/common/checkout-actions-repo
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
@@ -457,10 +451,8 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: ./.github/actions/common/checkout-actions-repo
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
@@ -498,7 +490,7 @@ jobs:
             
             echo "Publishing $PROJECT_NAME..."
             
-            ARGS="$PROJECT --configuration ${{ inputs.configuration }} --output $OUTPUT_DIR /p:Version=$VERSION"
+            ARGS="$PROJECT --configuration ${{ inputs.configuration }} --no-restore --output $OUTPUT_DIR /p:Version=$VERSION"
             
             if [ -n "${{ inputs.publish-runtime }}" ]; then
               ARGS="$ARGS --runtime ${{ inputs.publish-runtime }}"
@@ -532,10 +524,8 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: ./.github/actions/common/checkout-actions-repo
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Validate container inputs
@@ -561,7 +551,7 @@ jobs:
           password: ${{ secrets.container-registry-password }}
       
       - name: Build and tag container image
-        id: container-tags
+        id: container_tags
         shell: bash
         run: |
           IMAGE_TAG="${{ inputs.container-registry }}/${{ inputs.container-image-name }}:${{ needs.build-and-test.outputs.version }}"
@@ -569,7 +559,7 @@ jobs:
           
           BUILD_CONTEXT="${{ inputs.docker-build-context }}"
           if [ -z "$BUILD_CONTEXT" ]; then
-            BUILD_CONTEXT="."
+            BUILD_CONTEXT="${{ inputs.working-directory }}"
           fi
           
           docker buildx build \
@@ -579,13 +569,13 @@ jobs:
             --load \
             "$BUILD_CONTEXT"
           
-          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
       
       - name: Scan container image for vulnerabilities
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ${{ steps.container-tags.outputs.image-tag }}
+          image-ref: ${{ steps.container_tags.outputs.image_tag }}
           format: 'sarif'
           output: 'container-scan.sarif'
           severity: 'HIGH,CRITICAL'
@@ -610,11 +600,11 @@ jobs:
       - name: Push container image
         shell: bash
         run: |
-          docker push "${{ steps.container-tags.outputs.image-tag }}"
-          docker push "${{ steps.container-tags.outputs.latest-tag }}"
+          docker push "${{ steps.container_tags.outputs.image_tag }}"
+          docker push "${{ steps.container_tags.outputs.latest_tag }}"
           echo "Pushed container images:"
-          echo "  - ${{ steps.container-tags.outputs.image-tag }}"
-          echo "  - ${{ steps.container-tags.outputs.latest-tag }}"
+          echo "  - ${{ steps.container_tags.outputs.image_tag }}"
+          echo "  - ${{ steps.container_tags.outputs.latest_tag }}"
   
   smoke-tests:
     name: Smoke Tests
