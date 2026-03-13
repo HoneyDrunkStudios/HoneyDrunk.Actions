@@ -155,18 +155,34 @@ on:
         description: 'API key for NuGet feed'
         required: false
       
+      azure-client-id:
+        description: 'Azure AD application (client) ID — for OIDC or SP auth to ACR'
+        required: false
+      
+      azure-tenant-id:
+        description: 'Azure AD tenant ID'
+        required: false
+      
+      azure-subscription-id:
+        description: 'Azure subscription ID (required for OIDC federation)'
+        required: false
+      
+      azure-client-secret:
+        description: 'Azure SP client secret (only for SP auth — prefer OIDC)'
+        required: false
+      
       container-registry-username:
-        description: 'Container registry username'
+        description: 'Container registry username (for non-Azure registries or admin auth)'
         required: false
       
       container-registry-password:
-        description: 'Container registry password or token'
+        description: 'Container registry password or token (for non-Azure registries or admin auth)'
         required: false
 
 permissions:
   contents: read
   packages: write
-  id-token: write  # For SBOM attestation
+  id-token: write  # Required for OIDC federation and SBOM attestation
   security-events: write  # For SARIF upload from container scan
 
 jobs:
@@ -515,6 +531,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
       - name: Validate container inputs
         shell: bash
         run: |
@@ -527,9 +550,13 @@ jobs:
         uses: docker/setup-buildx-action@v3
       
       - name: Log in to container registry
-        uses: docker/login-action@v3
+        uses: ./.github/actions-repo/.github/actions/azure/acr-login
         with:
           registry: ${{ inputs.container-registry }}
+          client-id: ${{ secrets.azure-client-id }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+          subscription-id: ${{ secrets.azure-subscription-id }}
+          client-secret: ${{ secrets.azure-client-secret }}
           username: ${{ secrets.container-registry-username }}
           password: ${{ secrets.container-registry-password }}
       

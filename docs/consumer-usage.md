@@ -301,13 +301,62 @@ jobs:
       container-image-name: 'honeydrunkstudios/pulse-collector'
     secrets:
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-      container-registry-username: ${{ secrets.ACR_USERNAME }}
-      container-registry-password: ${{ secrets.ACR_PASSWORD }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
 permissions:
   contents: read
   packages: write
   id-token: write
+```
+
+---
+
+## Azure Authentication
+
+HoneyDrunk.Actions supports three Azure auth methods, listed in order of preference:
+
+### 1. OIDC Federation (Recommended)
+
+No long-lived secrets. GitHub issues a short-lived token; Azure trusts it via a federated credential on an App Registration.
+
+**GitHub org variables (non-sensitive):**
+- `AZURE_CLIENT_ID` — App Registration client ID
+- `AZURE_TENANT_ID` — Azure AD tenant ID
+- `AZURE_SUBSCRIPTION_ID` — Target subscription
+
+**Azure side setup:**
+1. Create an App Registration
+2. Add a federated credential for `repo:HoneyDrunkStudios/<repo>:environment:<env>` (or `:ref:refs/tags/v*` for tag-based releases)
+3. Assign roles at narrowest scope: `AcrPush` on ACR, `Website Contributor` on App Service, `Key Vault Secrets User` if reading secrets
+
+```yaml
+    secrets:
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+```
+
+### 2. Service Principal (Fallback)
+
+Uses a client secret. Requires rotation. Use only if OIDC federation is not available.
+
+```yaml
+    secrets:
+      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+```
+
+### 3. ACR Admin Credentials (Not Recommended)
+
+Static username/password. No Azure CLI access (no slot swaps, no Key Vault).
+
+```yaml
+    secrets:
+      container-registry-username: ${{ secrets.ACR_USERNAME }}
+      container-registry-password: ${{ secrets.ACR_PASSWORD }}
 ```
 
 ---
@@ -318,7 +367,7 @@ permissions:
 
 **When to Use:** Repos with containerized apps targeting Azure App Service. Chains after the `build-and-scan-container` job in `release.yml`.
 
-### Basic Example (ACR + App Service with staging slot)
+### OIDC Example (Recommended)
 
 ```yaml
 name: Release and Deploy
@@ -337,8 +386,9 @@ jobs:
       container-registry: 'myregistry.azurecr.io'
       container-image-name: 'pulse-collector'
     secrets:
-      container-registry-username: ${{ secrets.ACR_USERNAME }}
-      container-registry-password: ${{ secrets.ACR_PASSWORD }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
   deploy:
     needs: release
@@ -346,17 +396,15 @@ jobs:
     with:
       acr-registry: 'myregistry.azurecr.io'
       container-image: 'myregistry.azurecr.io/pulse-collector:${{ github.ref_name }}'
-      app-name: 'my-pulse-collector'
-      resource-group: 'rg-honeydrunk-prod'
+      app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+      resource-group: ${{ vars.AZURE_RESOURCE_GROUP }}
       slot-name: 'staging'
       swap-to-production: true
       health-check-url: '/healthz'
     secrets:
-      acr-username: ${{ secrets.ACR_USERNAME }}
-      acr-password: ${{ secrets.ACR_PASSWORD }}
-      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
 permissions:
   contents: read
@@ -377,27 +425,9 @@ permissions:
       resource-group: 'rg-honeydrunk'
       slot-name: 'production'
     secrets:
-      acr-username: ${{ secrets.ACR_USERNAME }}
-      acr-password: ${{ secrets.ACR_PASSWORD }}
-```
-
-### Service Principal Authentication
-
-For full Azure CLI access (required for slot swaps), provide service principal credentials:
-
-```yaml
-    secrets:
-      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-```
-
-For ACR-only authentication (no slot swap), admin credentials suffice:
-
-```yaml
-    secrets:
-      acr-username: ${{ secrets.ACR_USERNAME }}
-      acr-password: ${{ secrets.ACR_PASSWORD }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 ```
 
 ### Deploy with Key Vault Secret Injection
@@ -420,11 +450,9 @@ Fetch secrets from Azure Key Vault and apply them as App Service configuration b
         Sentry--Dsn=SENTRY_DSN
         ApplicationInsights--ConnectionString
     secrets:
-      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-      acr-username: ${{ secrets.ACR_USERNAME }}
-      acr-password: ${{ secrets.ACR_PASSWORD }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 ```
 
 Secret name mapping:

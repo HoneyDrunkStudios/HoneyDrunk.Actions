@@ -106,19 +106,22 @@ on:
 
     secrets:
       azure-client-id:
-        description: 'Azure service principal client ID'
-        required: false
-      azure-client-secret:
-        description: 'Azure service principal client secret'
+        description: 'Azure AD application (client) ID — used for both OIDC and SP auth'
         required: false
       azure-tenant-id:
         description: 'Azure AD tenant ID'
         required: false
+      azure-subscription-id:
+        description: 'Azure subscription ID (required for OIDC federation)'
+        required: false
+      azure-client-secret:
+        description: 'Azure SP client secret (only for SP auth — prefer OIDC instead)'
+        required: false
       acr-username:
-        description: 'ACR username (alternative to service principal)'
+        description: 'ACR admin username (not recommended for production)'
         required: false
       acr-password:
-        description: 'ACR password or token (alternative to service principal)'
+        description: 'ACR admin password or token'
         required: false
 
     outputs:
@@ -154,13 +157,17 @@ jobs:
         with:
           registry: ${{ inputs.acr-registry }}
           client-id: ${{ secrets.azure-client-id }}
-          client-secret: ${{ secrets.azure-client-secret }}
           tenant-id: ${{ secrets.azure-tenant-id }}
+          subscription-id: ${{ secrets.azure-subscription-id }}
+          client-secret: ${{ secrets.azure-client-secret }}
           username: ${{ secrets.acr-username }}
           password: ${{ secrets.acr-password }}
 
-      - name: Build Azure credentials
+      # ACR login action already calls azure/login — for OIDC this is sufficient
+      # for App Service management (slot swaps, config). For SP fallback, build creds.
+      - name: Build Azure credentials (SP fallback)
         id: azure-creds
+        if: ${{ secrets.azure-client-secret != '' }}
         shell: bash
         env:
           CLIENT_ID: ${{ secrets.azure-client-id }}
@@ -168,18 +175,13 @@ jobs:
           TENANT_ID: ${{ secrets.azure-tenant-id }}
         run: |
           set -euo pipefail
-          if [ -n "$CLIENT_ID" ] && [ -n "$CLIENT_SECRET" ] && [ -n "$TENANT_ID" ]; then
-            echo "has_sp=true" >> $GITHUB_OUTPUT
-            CREDS=$(jq -nc --arg c "$CLIENT_ID" --arg s "$CLIENT_SECRET" --arg t "$TENANT_ID" \
-              '{clientId: $c, clientSecret: $s, tenantId: $t}')
-            echo "::add-mask::$CREDS"
-            echo "creds=$CREDS" >> $GITHUB_OUTPUT
-          else
-            echo "has_sp=false" >> $GITHUB_OUTPUT
-          fi
+          CREDS=$(jq -nc --arg c "$CLIENT_ID" --arg s "$CLIENT_SECRET" --arg t "$TENANT_ID" \
+            '{clientId: $c, clientSecret: $s, tenantId: $t}')
+          echo "::add-mask::$CREDS"
+          echo "creds=$CREDS" >> $GITHUB_OUTPUT
 
-      - name: Azure Login (for App Service management)
-        if: steps.azure-creds.outputs.has_sp == 'true'
+      - name: Azure Login (SP fallback for App Service management)
+        if: ${{ secrets.azure-client-secret != '' }}
         uses: azure/login@v2
         with:
           creds: ${{ steps.azure-creds.outputs.creds }}
