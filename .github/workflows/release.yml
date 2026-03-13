@@ -463,7 +463,15 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           VERSION="${{ needs.build-and-test.outputs.version }}"
-          IFS=';' read -ra PROJECTS <<< "${{ inputs.publish-projects }}"
+          
+          RAW_PROJECTS="${{ inputs.publish-projects }}"
+          CLEANED="$(echo "$RAW_PROJECTS" | tr -d '[:space:];')"
+          if [ -z "$CLEANED" ]; then
+            echo "::error::publish-projects is empty but enable-app-publish is true. Specify at least one project path (semicolon-separated)."
+            exit 1
+          fi
+          
+          IFS=';' read -ra PROJECTS <<< "$RAW_PROJECTS"
           
           for PROJECT in "${PROJECTS[@]}"; do
             PROJECT=$(echo "$PROJECT" | xargs)
@@ -534,7 +542,7 @@ jobs:
           
           BUILD_CONTEXT="${{ inputs.docker-build-context }}"
           if [ -z "$BUILD_CONTEXT" ]; then
-            BUILD_CONTEXT="${{ inputs.working-directory }}"
+            BUILD_CONTEXT="."
           fi
           
           docker buildx build \

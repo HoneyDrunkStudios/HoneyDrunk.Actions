@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Push NuGet Package'
 description: 'Push NuGet packages to a feed'
 inputs:

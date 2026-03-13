@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Send Notification'
 description: 'Send deployment or workflow notifications to Slack and/or Microsoft Teams via incoming webhooks'
 inputs:

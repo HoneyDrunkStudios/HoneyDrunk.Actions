@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Fetch Azure Key Vault Secrets'
 description: 'Retrieve secrets from Azure Key Vault and expose them as environment variables, outputs, or substitute into config files'
 inputs:

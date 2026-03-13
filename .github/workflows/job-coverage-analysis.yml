@@ -25,12 +25,6 @@ on:
         type: number
         default: 80
       
-      coverage-delta-threshold:
-        description: 'Maximum allowed coverage decrease percentage (0 = no enforcement)'
-        required: false
-        type: number
-        default: 5
-      
       coverage-artifact-name:
         description: 'Name of artifact containing coverage reports'
         required: false

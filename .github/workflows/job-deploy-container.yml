@@ -159,24 +159,30 @@ jobs:
           username: ${{ secrets.acr-username }}
           password: ${{ secrets.acr-password }}
 
-      - name: Check for Azure service principal credentials
-        id: check-sp
+      - name: Build Azure credentials
+        id: azure-creds
         shell: bash
         env:
           CLIENT_ID: ${{ secrets.azure-client-id }}
+          CLIENT_SECRET: ${{ secrets.azure-client-secret }}
+          TENANT_ID: ${{ secrets.azure-tenant-id }}
         run: |
           set -euo pipefail
-          if [ -n "$CLIENT_ID" ]; then
+          if [ -n "$CLIENT_ID" ] && [ -n "$CLIENT_SECRET" ] && [ -n "$TENANT_ID" ]; then
             echo "has_sp=true" >> $GITHUB_OUTPUT
+            CREDS=$(jq -nc --arg c "$CLIENT_ID" --arg s "$CLIENT_SECRET" --arg t "$TENANT_ID" \
+              '{clientId: $c, clientSecret: $s, tenantId: $t}')
+            echo "::add-mask::$CREDS"
+            echo "creds=$CREDS" >> $GITHUB_OUTPUT
           else
             echo "has_sp=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Azure Login (for App Service management)
-        if: steps.check-sp.outputs.has_sp == 'true'
+        if: steps.azure-creds.outputs.has_sp == 'true'
         uses: azure/login@v2
         with:
-          creds: '{"clientId":"${{ secrets.azure-client-id }}","clientSecret":"${{ secrets.azure-client-secret }}","tenantId":"${{ secrets.azure-tenant-id }}"}'
+          creds: ${{ steps.azure-creds.outputs.creds }}
 
       - name: Validate Key Vault inputs
         if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}
