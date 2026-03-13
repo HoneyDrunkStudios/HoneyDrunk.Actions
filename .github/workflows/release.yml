@@ -90,6 +90,12 @@ on:
         type: string
         default: './Dockerfile'
       
+      docker-build-context:
+        description: 'Docker build context directory (defaults to working-directory)'
+        required: false
+        type: string
+        default: ''
+      
       container-registry:
         description: 'Container registry (e.g., ghcr.io, docker.io)'
         required: false
@@ -101,6 +107,30 @@ on:
         required: false
         type: string
         default: ''
+      
+      enable-app-publish:
+        description: 'Publish deployable app artifacts (workers, web APIs)'
+        required: false
+        type: boolean
+        default: false
+      
+      publish-projects:
+        description: 'Semicolon-separated project paths to publish (e.g., src/Worker/Worker.csproj;src/Api/Api.csproj)'
+        required: false
+        type: string
+        default: ''
+      
+      publish-self-contained:
+        description: 'Create self-contained deployments for app publish'
+        required: false
+        type: boolean
+        default: false
+      
+      publish-runtime:
+        description: 'Target runtime for app publish (e.g., linux-x64, win-x64)'
+        required: false
+        type: string
+        default: 'linux-x64'
       
       enable-smoke-tests:
         description: 'Run smoke tests after deployment'
@@ -398,6 +428,75 @@ jobs:
           path: ${{ inputs.working-directory }}/artifacts/*.nupkg
           retention-days: 365
   
+  publish-app:
+    name: Publish Deployable Apps
+    if: ${{ inputs.enable-app-publish }}
+    needs: [build-and-test, security-compliance]
+    runs-on: ${{ inputs.runs-on }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+      
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+      
+      - name: Publish projects
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          VERSION="${{ needs.build-and-test.outputs.version }}"
+          IFS=';' read -ra PROJECTS <<< "${{ inputs.publish-projects }}"
+          
+          for PROJECT in "${PROJECTS[@]}"; do
+            PROJECT=$(echo "$PROJECT" | xargs)
+            if [ -z "$PROJECT" ]; then continue; fi
+            
+            PROJECT_NAME=$(basename "$PROJECT" .csproj)
+            OUTPUT_DIR="./publish-output/$PROJECT_NAME"
+            
+            echo "Publishing $PROJECT_NAME..."
+            
+            ARGS="$PROJECT --configuration ${{ inputs.configuration }} --output $OUTPUT_DIR /p:Version=$VERSION"
+            
+            if [ -n "${{ inputs.publish-runtime }}" ]; then
+              ARGS="$ARGS --runtime ${{ inputs.publish-runtime }}"
+            fi
+            
+            if [ "${{ inputs.publish-self-contained }}" == "true" ]; then
+              ARGS="$ARGS --self-contained"
+            else
+              ARGS="$ARGS --no-self-contained"
+            fi
+            
+            dotnet publish $ARGS
+            echo "  -> Published to $OUTPUT_DIR"
+          done
+      
+      - name: Upload published apps
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-apps
+          path: ${{ inputs.working-directory }}/publish-output/
+          retention-days: 90
+  
   build-and-scan-container:
     name: Build and Scan Container
     if: ${{ inputs.enable-container-build }}
@@ -427,25 +526,31 @@ jobs:
           password: ${{ secrets.container-registry-password }}
       
       - name: Build and tag container image
+        id: container-tags
         shell: bash
         run: |
           IMAGE_TAG="${{ inputs.container-registry }}/${{ inputs.container-image-name }}:${{ needs.build-and-test.outputs.version }}"
           LATEST_TAG="${{ inputs.container-registry }}/${{ inputs.container-image-name }}:latest"
+          
+          BUILD_CONTEXT="${{ inputs.docker-build-context }}"
+          if [ -z "$BUILD_CONTEXT" ]; then
+            BUILD_CONTEXT="${{ inputs.working-directory }}"
+          fi
           
           docker buildx build \
             --file ${{ inputs.dockerfile-path }} \
             --tag "$IMAGE_TAG" \
             --tag "$LATEST_TAG" \
             --load \
-            .
+            "$BUILD_CONTEXT"
           
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
       
       - name: Scan container image for vulnerabilities
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ${{ env.IMAGE_TAG }}
+          image-ref: ${{ steps.container-tags.outputs.image-tag }}
           format: 'sarif'
           output: 'container-scan.sarif'
           severity: 'HIGH,CRITICAL'
@@ -470,16 +575,16 @@ jobs:
       - name: Push container image
         shell: bash
         run: |
-          docker push "$IMAGE_TAG"
-          docker push "$LATEST_TAG"
+          docker push "${{ steps.container-tags.outputs.image-tag }}"
+          docker push "${{ steps.container-tags.outputs.latest-tag }}"
           echo "Pushed container images:"
-          echo "  - $IMAGE_TAG"
-          echo "  - $LATEST_TAG"
+          echo "  - ${{ steps.container-tags.outputs.image-tag }}"
+          echo "  - ${{ steps.container-tags.outputs.latest-tag }}"
   
   smoke-tests:
     name: Smoke Tests
     if: ${{ always() && inputs.enable-smoke-tests && !failure() && !cancelled() }}
-    needs: [publish-nuget, build-and-scan-container]
+    needs: [publish-nuget, publish-app, build-and-scan-container]
     runs-on: ${{ inputs.runs-on }}
     
     steps:
@@ -528,7 +633,7 @@ jobs:
   
   release-summary:
     name: Release Summary
-    needs: [build-and-test, security-compliance]
+    needs: [build-and-test, security-compliance, publish-nuget, publish-app, build-and-scan-container]
     if: always()
     runs-on: ${{ inputs.runs-on }}
     
@@ -546,3 +651,12 @@ jobs:
           echo "## Job Results" >> $GITHUB_STEP_SUMMARY
           echo "- Build and Test: ${{ needs.build-and-test.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Security and Compliance: ${{ needs.security-compliance.result }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.enable-nuget-publish }}" == "true" ]; then
+            echo "- NuGet Publish: ${{ needs.publish-nuget.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.enable-app-publish }}" == "true" ]; then
+            echo "- App Publish: ${{ needs.publish-app.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.enable-container-build }}" == "true" ]; then
+            echo "- Container Build: ${{ needs.build-and-scan-container.result }}" >> $GITHUB_STEP_SUMMARY
+          fi

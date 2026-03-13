@@ -246,6 +246,70 @@ permissions:
   id-token: write
 ```
 
+### Worker / Deployable App Release
+
+**When to Use:** Worker services, background processors, or web APIs that need `dotnet publish` artifacts (not NuGet packages, not containers).
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/release.yml@main
+    with:
+      project-path: './MyProject.slnx'
+      enable-app-publish: true
+      publish-projects: 'MyWorker/MyWorker.csproj;MyApi/MyApi.csproj'
+      publish-runtime: 'linux-x64'
+      publish-self-contained: false
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+```
+
+### Container with Custom Build Context
+
+**When to Use:** Repos where the Dockerfile is not at the repo root, or the build context differs from the working directory (e.g., solution root is a subdirectory).
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/release.yml@main
+    with:
+      project-path: 'HoneyDrunk.Pulse/HoneyDrunk.Pulse.slnx'
+      enable-nuget-publish: true
+      enable-container-build: true
+      dockerfile-path: 'HoneyDrunk.Pulse/Pulse.Collector/Dockerfile'
+      docker-build-context: 'HoneyDrunk.Pulse'
+      container-registry: 'myregistry.azurecr.io'
+      container-image-name: 'honeydrunkstudios/pulse-collector'
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+      container-registry-username: ${{ secrets.ACR_USERNAME }}
+      container-registry-password: ${{ secrets.ACR_PASSWORD }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+```
+
 ---
 
 ## Deploy Container to Azure App Service

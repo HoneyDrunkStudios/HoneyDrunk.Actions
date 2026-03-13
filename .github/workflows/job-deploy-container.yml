@@ -176,9 +176,7 @@ jobs:
         if: steps.check-sp.outputs.has_sp == 'true'
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.azure-client-id }}
-          client-secret: ${{ secrets.azure-client-secret }}
-          tenant-id: ${{ secrets.azure-tenant-id }}
+          creds: '{"clientId":"${{ secrets.azure-client-id }}","clientSecret":"${{ secrets.azure-client-secret }}","tenantId":"${{ secrets.azure-tenant-id }}"}'
 
       - name: Validate Key Vault inputs
         if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}

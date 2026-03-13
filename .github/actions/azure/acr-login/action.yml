@@ -63,9 +63,7 @@ runs:
       if: ${{ inputs.client-id != '' && inputs.client-secret != '' && inputs.tenant-id != '' }}
       uses: azure/login@v2
       with:
-        client-id: ${{ inputs.client-id }}
-        client-secret: ${{ inputs.client-secret }}
-        tenant-id: ${{ inputs.tenant-id }}
+        creds: '{"clientId":"${{ inputs.client-id }}","clientSecret":"${{ inputs.client-secret }}","tenantId":"${{ inputs.tenant-id }}"}'
 
     - name: Login to ACR (service principal)
       if: ${{ inputs.client-id != '' && inputs.client-secret != '' && inputs.tenant-id != '' }}
