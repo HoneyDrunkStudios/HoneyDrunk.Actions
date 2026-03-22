@@ -13,8 +13,8 @@ It does not contain application code. It defines **CI rituals** that other repos
 
 2. **Separation of concerns**  
    - This repo orchestrates CI behavior and schedules.  
-   - Heavy scanning logic and CLIs belong in other nodes, for example HoneyDrunk.Tools.  
-   - Actions should call external tools, not reimplement scanners in YAML.
+   - Keep complex scanning logic in composite actions, not inline YAML.  
+   - Prefer composable, testable actions over monolithic workflow steps.
 
 3. **Fast PRs, deep scheduled checks**  
    - PR workflows must be fast and minimal, only what is directly relevant to the diff.  
@@ -112,18 +112,15 @@ These workflows are intended to run on a **cron schedule**, not on PRs. They are
 - Use them for on demand heavy runs such as performance profiling, chaos tests, or targeted deep scans.  
 - Do not make them part of normal PR or release flows.
 
-## Integration with other nodes
+## Integration patterns
 
-When you need scanning logic, prefer calling tools from other nodes:
+When scanning logic is needed:
 
-- Use **HoneyDrunk.Tools** for CLIs that:  
-  - scan dependencies and emit JSON reports  
-  - run accessibility checks  
-  - run security or license scans  
+- Implement it as a **composite action** under `.github/actions/` within this repo.  
+- Workflows call composite actions — they do not contain inline scanning logic.  
+- Keep composite actions focused: one action per scanning concern (deps, accessibility, governance, etc.).
 
-Actions workflows should shell out to these tools instead of hard coding logic.
-
-If you are about to embed complex scanning behavior inside YAML, step back and consider moving it into HoneyDrunk.Tools or another appropriate node.
+If you are about to embed complex scanning behavior directly in a workflow YAML step, extract it into a composite action instead.
 
 ## How Copilot should behave in this repo
 

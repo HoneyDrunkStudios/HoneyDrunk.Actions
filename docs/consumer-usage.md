@@ -7,6 +7,8 @@ This document provides sample workflows for consuming repos to adopt the HoneyDr
 - [PR Core Workflow](#pr-core-workflow)
 - [PR SDK Workflow](#pr-sdk-workflow)
 - [Release Workflow](#release-workflow)
+- [Deploy Container to Azure App Service](#deploy-container-to-azure-app-service)
+- [Deploy Azure Function App](#deploy-azure-function-app)
 - [Nightly Security Workflow](#nightly-security-workflow)
 - [Nightly Dependencies Workflow](#nightly-dependencies-workflow)
 - [Nightly Accessibility Workflow](#nightly-accessibility-workflow)
@@ -470,6 +472,93 @@ The `azure/keyvault-fetch` action can be used independently in any workflow:
             MySecret=MY_ENV_VAR
           export-as: 'env'          # or 'output' or 'both'
           config-file: './appsettings.Production.json'  # optional token substitution
+```
+
+---
+
+## Deploy Azure Function App
+
+**Purpose:** Deploy a .NET Azure Function App after building with `release.yml` or a custom build job.
+
+**When to Use:** Repos with Azure Function Apps (queue-triggered, HTTP-triggered, timer-triggered, etc.). Chains after a build job that publishes the function app as an artifact.
+
+### Minimal Example
+
+```yaml
+name: Release and Deploy Function
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet publish MyProject.Functions/MyProject.Functions.csproj -c Release -o ./publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: function-app
+          path: ./publish
+
+  deploy:
+    needs: build
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-function.yml@main
+    with:
+      functions-app: 'my-function-app'
+      resource-group: 'rg-honeydrunk'
+    secrets:
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+permissions:
+  contents: read
+  id-token: write
+```
+
+### Deploy with Slot Swap
+
+```yaml
+  deploy:
+    needs: build
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-function.yml@main
+    with:
+      functions-app: 'my-function-app'
+      resource-group: 'rg-honeydrunk'
+      slot-name: 'staging'
+      swap-to-production: true
+      health-check-url: '/api/health'
+    secrets:
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+```
+
+### Deploy with Key Vault Secret Injection
+
+```yaml
+  deploy:
+    needs: build
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-function.yml@main
+    with:
+      functions-app: 'notify-dispatcher'
+      resource-group: 'rg-honeydrunk-prod'
+      keyvault-name: 'kv-honeydrunk-prod'
+      keyvault-secrets: |
+        NotifyQueueConnection=NOTIFY_QUEUE_CONNECTION
+        Resend--ApiKey=RESEND_API_KEY
+        Twilio--AccountSid=TWILIO_ACCOUNT_SID
+        Twilio--AuthToken=TWILIO_AUTH_TOKEN
+    secrets:
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 ```
 
 ---

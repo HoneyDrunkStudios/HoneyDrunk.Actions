@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Consolidate Dependency Reports'
+description: 'Merge .NET and npm dependency reports into a unified summary'
+inputs:
+  input-directory:
+    description: 'Directory containing downloaded dependency report artifacts'
+    required: false
+    default: './all-dependency-reports'
+  output-path:
+    description: 'Path for the consolidated JSON report'
+    required: false
+    default: './consolidated-dependency-report.json'
+outputs:
+  report-path:
+    description: 'Path to the consolidated report'
+    value: ${{ steps.consolidate.outputs.report-path }}
+  total-outdated:
+    description: 'Total number of outdated packages across all ecosystems'
+    value: ${{ steps.consolidate.outputs.total-outdated }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Consolidate reports
+      id: consolidate
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        INPUT_DIR="${{ inputs.input-directory }}"
+        OUTPUT_PATH="${{ inputs.output-path }}"
+        SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        DOTNET_PACKAGES="[]"
+        DOTNET_COUNT=0
+        NPM_PACKAGES="[]"
+        NPM_COUNT=0
+        DEPRECATED_PACKAGES="[]"
+        DEPRECATED_COUNT=0
+
+        # Find and merge .NET outdated reports
+        for report in $(find "$INPUT_DIR" -name "dotnet-outdated.json" -type f 2>/dev/null); do
+          PKGS=$(jq -r '.outdated_packages // []' "$report" 2>/dev/null || echo "[]")
+          COUNT=$(jq -r '.outdated_count // 0' "$report" 2>/dev/null || echo "0")
+          DOTNET_PACKAGES=$(echo "$DOTNET_PACKAGES" "$PKGS" | jq -s '.[0] + .[1] | unique_by(.name)')
+          DOTNET_COUNT=$((DOTNET_COUNT + COUNT))
+        done
+
+        # Find and merge npm outdated reports
+        for report in $(find "$INPUT_DIR" -name "npm-outdated.json" -type f 2>/dev/null); do
+          PKGS=$(jq -r '.outdated_packages // []' "$report" 2>/dev/null || echo "[]")
+          COUNT=$(jq -r '.outdated_count // 0' "$report" 2>/dev/null || echo "0")
+          NPM_PACKAGES=$(echo "$NPM_PACKAGES" "$PKGS" | jq -s '.[0] + .[1] | unique_by(.name)')
+          NPM_COUNT=$((NPM_COUNT + COUNT))
+        done
+
+        # Find and merge deprecated reports
+        for report in $(find "$INPUT_DIR" -name "deprecated-packages.json" -type f 2>/dev/null); do
+          PKGS=$(jq -r '.deprecated_packages // []' "$report" 2>/dev/null || echo "[]")
+          COUNT=$(jq -r '.deprecated_count // 0' "$report" 2>/dev/null || echo "0")
+          DEPRECATED_PACKAGES=$(echo "$DEPRECATED_PACKAGES" "$PKGS" | jq -s '.[0] + .[1] | unique_by(.name)')
+          DEPRECATED_COUNT=$((DEPRECATED_COUNT + COUNT))
+        done
+
+        TOTAL=$((DOTNET_COUNT + NPM_COUNT))
+
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --argjson total "$TOTAL" \
+          --argjson dotnet_count "$DOTNET_COUNT" \
+          --argjson npm_count "$NPM_COUNT" \
+          --argjson deprecated_count "$DEPRECATED_COUNT" \
+          --argjson dotnet "$DOTNET_PACKAGES" \
+          --argjson npm "$NPM_PACKAGES" \
+          --argjson deprecated "$DEPRECATED_PACKAGES" \
+          '{
+            scan_date: $scan_date,
+            summary: {
+              total_outdated: $total,
+              dotnet_outdated: $dotnet_count,
+              npm_outdated: $npm_count,
+              deprecated: $deprecated_count
+            },
+            dotnet_packages: $dotnet,
+            npm_packages: $npm,
+            deprecated_packages: $deprecated
+          }' > "$OUTPUT_PATH"
+
+        echo "report-path=$OUTPUT_PATH" >> $GITHUB_OUTPUT
+        echo "total-outdated=$TOTAL" >> $GITHUB_OUTPUT
+        echo "Consolidated: $DOTNET_COUNT .NET + $NPM_COUNT npm outdated, $DEPRECATED_COUNT deprecated"
