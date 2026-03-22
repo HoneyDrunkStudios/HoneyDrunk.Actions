@@ -187,11 +187,24 @@ jobs:
           tenant-id: ${{ secrets.azure-tenant-id }}
           subscription-id: ${{ secrets.azure-subscription-id }}
 
+      - name: Build Azure SP credentials JSON
+        if: steps.auth.outputs.method == 'sp'
+        id: sp-creds
+        shell: bash
+        run: |
+          CREDS=$(jq -nc \
+            --arg cid "${{ secrets.azure-client-id }}" \
+            --arg cs "${{ secrets.azure-client-secret }}" \
+            --arg tid "${{ secrets.azure-tenant-id }}" \
+            '{clientId: $cid, clientSecret: $cs, tenantId: $tid}')
+          echo "::add-mask::$CREDS"
+          echo "json=$CREDS" >> $GITHUB_OUTPUT
+
       - name: Azure Login (SP fallback)
         if: steps.auth.outputs.method == 'sp'
         uses: azure/login@v2
         with:
-          creds: '{"clientId":"${{ secrets.azure-client-id }}","clientSecret":"${{ secrets.azure-client-secret }}","tenantId":"${{ secrets.azure-tenant-id }}"}'
+          creds: ${{ steps.sp-creds.outputs.json }}
 
       - name: Validate Key Vault inputs
         if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}

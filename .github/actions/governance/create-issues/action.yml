@@ -37,13 +37,14 @@ runs:
         PREFIX="${{ inputs.issue-title-prefix }}"
         DRY_RUN="${{ inputs.dry-run }}"
         ISSUES_CREATED=0
-        SCAN_DATE=$(jq -r '.scan_date // "unknown"' "$REPORT")
 
         if [ ! -f "$REPORT" ]; then
           echo "::warning::Governance report not found at $REPORT"
           echo "issues-created=0" >> $GITHUB_OUTPUT
           exit 0
         fi
+
+        SCAN_DATE=$(jq -r '.scan_date // "unknown"' "$REPORT")
 
         # Build per-repo issue bodies by aggregating findings
         REPOS=$(jq -r '

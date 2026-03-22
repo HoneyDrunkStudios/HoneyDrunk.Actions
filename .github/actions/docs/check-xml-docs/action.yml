@@ -54,6 +54,12 @@ runs:
         BUILD_EXIT=$?
         set -e
 
+        if [ "$BUILD_EXIT" -ne 0 ]; then
+          echo "::error::dotnet build failed with exit code $BUILD_EXIT while checking XML documentation"
+          echo "$BUILD_OUTPUT"
+          exit "$BUILD_EXIT"
+        fi
+
         # Extract CS1591 warnings
         WARNINGS=$(echo "$BUILD_OUTPUT" | grep -E "warning CS1591:" || true)
         MISSING_COUNT=$(echo "$WARNINGS" | grep -c "CS1591" || echo "0")

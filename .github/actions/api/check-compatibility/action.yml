@@ -36,6 +36,10 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Install dotnet-ildasm
+      shell: bash
+      run: dotnet tool install -g dotnet-ildasm || dotnet tool update -g dotnet-ildasm
+
     - name: Compare API surface
       id: compare
       shell: bash
@@ -117,10 +121,7 @@ runs:
           dotnet restore "$BASELINE_TARGET" 2>/dev/null || true
           dotnet build "$BASELINE_TARGET" --configuration Release -o ./bin-baseline 2>/dev/null || true
 
-          for dll in $(find ./bin-baseline -name "*.dll" -not -name "System.*" -not -name "Microsoft.*" | sort); do
-            DLL_NAME=$(basename "$dll" .dll)
-            echo "## $DLL_NAME" >> "$BASELINE_APIS"
-          done
+          extract_public_api ./bin-baseline "$BASELINE_APIS"
 
           popd > /dev/null
           git worktree remove "$BASELINE_DIR" --force 2>/dev/null || true

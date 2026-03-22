@@ -83,6 +83,8 @@ runs:
               echo "Branch $BRANCH_NAME already exists — skipping PR creation"
             else
               git checkout -b "$BRANCH_NAME"
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
               # Commit an empty marker so the PR has a diff to review
               echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .dependency-update-marker
               git add .dependency-update-marker
