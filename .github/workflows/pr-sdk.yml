@@ -184,17 +184,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+
       - name: Check XML documentation completeness
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          echo "Checking XML documentation for public APIs..."
-          echo "This is a placeholder for HoneyDrunk.Tools documentation checker"
-          echo "Command: hd-tools docs check --project ${{ inputs.project-path }}"
-          echo "::notice::Documentation checking will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools docs check --project "${{ inputs.project-path }}" --fail-on-missing
+        uses: ./.github/actions-repo/.github/actions/docs/check-xml-docs
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          treat-as-error: 'true'
   
   # Job 7: PR Summary
   pr-summary:

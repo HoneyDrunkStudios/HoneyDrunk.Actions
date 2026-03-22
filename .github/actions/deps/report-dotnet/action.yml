@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Generate .NET Dependency Report'
+description: 'Parse dotnet list package output into a structured JSON report'
+inputs:
+  working-directory:
+    description: 'Working directory containing the project'
+    required: false
+    default: '.'
+  project-path:
+    description: 'Path to solution or project file'
+    required: false
+    default: ''
+  exclude-prerelease:
+    description: 'Exclude prerelease packages from the report'
+    required: false
+    default: 'false'
+  output-directory:
+    description: 'Directory for output report files'
+    required: false
+    default: './dependency-reports'
+outputs:
+  report-path:
+    description: 'Path to the generated JSON report'
+    value: ${{ steps.report.outputs.report-path }}
+  outdated-count:
+    description: 'Number of outdated packages found'
+    value: ${{ steps.report.outputs.outdated-count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate dependency report
+      id: report
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        TARGET="${{ inputs.project-path }}"
+        if [ -z "$TARGET" ]; then
+          SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+          TARGET="${SOLN:-.}"
+        fi
+
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        mkdir -p "$OUTPUT_DIR"
+
+        ARGS="--outdated --include-transitive"
+        if [ "${{ inputs.exclude-prerelease }}" == "true" ]; then
+          ARGS="$ARGS --highest-minor"
+        fi
+
+        RAW_OUTPUT=$(dotnet list "$TARGET" package $ARGS 2>&1 || true)
+        echo "$RAW_OUTPUT" > "$OUTPUT_DIR/dotnet-outdated-raw.txt"
+
+        # Parse the output into structured JSON
+        SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        PACKAGES_JSON="[]"
+        OUTDATED_COUNT=0
+
+        while IFS= read -r line; do
+          # Match lines like: > PackageName    1.0.0    1.0.0    2.0.0
+          if echo "$line" | grep -qE '^\s*>\s+\S+'; then
+            PKG_NAME=$(echo "$line" | awk '{print $2}')
+            CURRENT=$(echo "$line" | awk '{print $3}')
+            REQUESTED=$(echo "$line" | awk '{print $4}')
+            LATEST=$(echo "$line" | awk '{print $5}')
+
+            if [ -n "$PKG_NAME" ] && [ -n "$CURRENT" ] && [ -n "$LATEST" ]; then
+              PACKAGES_JSON=$(echo "$PACKAGES_JSON" | jq \
+                --arg name "$PKG_NAME" \
+                --arg current "${CURRENT:-unknown}" \
+                --arg requested "${REQUESTED:-$CURRENT}" \
+                --arg latest "${LATEST:-$CURRENT}" \
+                '. + [{"name": $name, "current": $current, "requested": $requested, "latest": $latest}]')
+              OUTDATED_COUNT=$((OUTDATED_COUNT + 1))
+            fi
+          fi
+        done <<< "$RAW_OUTPUT"
+
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --arg target "$TARGET" \
+          --argjson count "$OUTDATED_COUNT" \
+          --argjson packages "$PACKAGES_JSON" \
+          '{scan_date: $scan_date, target: $target, outdated_count: $count, outdated_packages: $packages}' \
+          > "$OUTPUT_DIR/dotnet-outdated.json"
+
+        echo "report-path=$OUTPUT_DIR/dotnet-outdated.json" >> $GITHUB_OUTPUT
+        echo "outdated-count=$OUTDATED_COUNT" >> $GITHUB_OUTPUT
+        echo "Found $OUTDATED_COUNT outdated .NET packages"

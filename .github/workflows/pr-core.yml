@@ -164,16 +164,20 @@ jobs:
           echo "::error::accessibility-url input is required when enable-accessibility-check is true"
           exit 1
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
       - name: Run minimal accessibility check
-        shell: bash
-        run: |
-          echo "Running minimal accessibility check on: ${{ inputs.accessibility-url }}"
-          echo "This is a placeholder for HoneyDrunk.Tools accessibility scanning CLI"
-          echo "Command: hd-tools accessibility scan --url ${{ inputs.accessibility-url }} --minimal"
-          echo "::notice::Accessibility scanning will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools accessibility scan --url "${{ inputs.accessibility-url }}" --minimal
+        uses: ./.github/actions-repo/.github/actions/accessibility/scan
+        with:
+          base-url: ${{ inputs.accessibility-url }}
+          routes: '/'
+          scan-mode: 'minimal'
+          wcag-level: 'AA'
   
   # Job 5: PR Summary
   pr-summary:

@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Consolidate Governance Reports'
+description: 'Merge individual governance scan reports into a unified governance report'
+inputs:
+  input-directory:
+    description: 'Directory containing downloaded governance report artifacts'
+    required: false
+    default: './governance-reports'
+  output-path:
+    description: 'Path for the consolidated JSON report'
+    required: false
+    default: './consolidated-governance-report.json'
+outputs:
+  report-path:
+    description: 'Path to the consolidated report'
+    value: ${{ steps.consolidate.outputs.report-path }}
+  total-issues:
+    description: 'Total number of governance issues found'
+    value: ${{ steps.consolidate.outputs.total-issues }}
+  non-compliant-repos:
+    description: 'Number of repos with at least one governance issue'
+    value: ${{ steps.consolidate.outputs.non-compliant-repos }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Consolidate governance reports
+      id: consolidate
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        INPUT_DIR="${{ inputs.input-directory }}"
+        OUTPUT_PATH="${{ inputs.output-path }}"
+        SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        CI_REPORT="${INPUT_DIR}/ci-check.json"
+        WORKFLOWS_REPORT="${INPUT_DIR}/required-workflows.json"
+        FILES_REPORT="${INPUT_DIR}/required-files.json"
+        SECURITY_REPORT="${INPUT_DIR}/security-policy.json"
+        BRANCHES_REPORT="${INPUT_DIR}/stale-branches.json"
+        PRS_REPORT="${INPUT_DIR}/stale-prs.json"
+
+        CI_REPOS=$(jq '.repos // []' "$CI_REPORT" 2>/dev/null || echo '[]')
+        WF_REPOS=$(jq '.repos // []' "$WORKFLOWS_REPORT" 2>/dev/null || echo '[]')
+        FILES_REPOS=$(jq '.repos // []' "$FILES_REPORT" 2>/dev/null || echo '[]')
+        SEC_REPOS=$(jq '.repos // []' "$SECURITY_REPORT" 2>/dev/null || echo '[]')
+
+        STALE_BRANCH_COUNT=0
+        STALE_PR_COUNT=0
+        STALE_BRANCHES="[]"
+        STALE_PRS="[]"
+
+        if [ -f "$BRANCHES_REPORT" ]; then
+          STALE_BRANCH_COUNT=$(jq '.stale_branch_count // 0' "$BRANCHES_REPORT" 2>/dev/null || echo 0)
+          STALE_BRANCHES=$(jq '.stale_branches // []' "$BRANCHES_REPORT" 2>/dev/null || echo '[]')
+        fi
+
+        if [ -f "$PRS_REPORT" ]; then
+          STALE_PR_COUNT=$(jq '.stale_pr_count // 0' "$PRS_REPORT" 2>/dev/null || echo 0)
+          STALE_PRS=$(jq '.stale_prs // []' "$PRS_REPORT" 2>/dev/null || echo '[]')
+        fi
+
+        # Collect all unique repos that have any issue
+        ALL_ISSUES=$(echo "$CI_REPOS" "$WF_REPOS" "$FILES_REPOS" "$SEC_REPOS" | jq -s 'add // []')
+        NON_COMPLIANT=$(echo "$ALL_ISSUES" | jq '[.[].repo // .[].name // empty] | unique | length')
+        TOTAL_ISSUES=$(echo "$ALL_ISSUES" | jq 'length')
+        TOTAL_ISSUES=$((TOTAL_ISSUES + STALE_BRANCH_COUNT + STALE_PR_COUNT))
+
+        TOTAL_REPOS=$(echo "$CI_REPOS" "$WF_REPOS" "$FILES_REPOS" "$SEC_REPOS" \
+          | jq -s '[add // [] | .[].repo // .[].name // empty] | unique | length')
+
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --argjson total_repos "$TOTAL_REPOS" \
+          --argjson non_compliant "$NON_COMPLIANT" \
+          --argjson total_issues "$TOTAL_ISSUES" \
+          --argjson stale_branch_count "$STALE_BRANCH_COUNT" \
+          --argjson stale_pr_count "$STALE_PR_COUNT" \
+          --argjson ci "$CI_REPOS" \
+          --argjson workflows "$WF_REPOS" \
+          --argjson files "$FILES_REPOS" \
+          --argjson security "$SEC_REPOS" \
+          --argjson stale_branches "$STALE_BRANCHES" \
+          --argjson stale_prs "$STALE_PRS" \
+          '{
+            scan_date: $scan_date,
+            summary: {
+              total_repos_scanned: $total_repos,
+              non_compliant_repos: $non_compliant,
+              total_issues: $total_issues,
+              stale_branches: $stale_branch_count,
+              stale_prs: $stale_pr_count
+            },
+            findings: {
+              missing_ci: $ci,
+              missing_required_workflows: $workflows,
+              missing_required_files: $files,
+              missing_security_policy: $security,
+              stale_branches: $stale_branches,
+              stale_prs: $stale_prs
+            }
+          }' > "$OUTPUT_PATH"
+
+        echo "report-path=$OUTPUT_PATH" >> $GITHUB_OUTPUT
+        echo "total-issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
+        echo "non-compliant-repos=$NON_COMPLIANT" >> $GITHUB_OUTPUT
+        echo "Consolidated: $TOTAL_ISSUES issues across $NON_COMPLIANT non-compliant repos"

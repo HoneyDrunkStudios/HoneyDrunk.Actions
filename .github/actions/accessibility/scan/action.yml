@@ -1,0 +1,157 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Accessibility Scan'
+description: 'Run WCAG accessibility scanning using pa11y-ci against configured routes'
+inputs:
+  base-url:
+    description: 'Base URL of the running application to scan'
+    required: true
+  routes:
+    description: 'Comma-separated routes to scan (e.g., /,/about,/contact)'
+    required: false
+    default: '/'
+  routes-file:
+    description: 'Path to a file containing routes (one per line). Overrides routes input.'
+    required: false
+    default: ''
+  wcag-level:
+    description: 'WCAG compliance level (A, AA, AAA)'
+    required: false
+    default: 'AA'
+  scan-mode:
+    description: 'Scan depth: minimal (fast, PR checks) or full (thorough, nightly)'
+    required: false
+    default: 'full'
+  output-directory:
+    description: 'Directory for scan result files'
+    required: false
+    default: './accessibility-reports'
+outputs:
+  report-path:
+    description: 'Path to the scan results JSON'
+    value: ${{ steps.scan.outputs.report-path }}
+  violation-count:
+    description: 'Total number of accessibility violations found'
+    value: ${{ steps.scan.outputs.violation-count }}
+  critical-count:
+    description: 'Number of critical/serious violations'
+    value: ${{ steps.scan.outputs.critical-count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Install pa11y-ci
+      shell: bash
+      run: npm install -g pa11y-ci pa11y
+
+    - name: Build route list
+      id: routes
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BASE="${{ inputs.base-url }}"
+        BASE="${BASE%/}"
+
+        if [ -n "${{ inputs.routes-file }}" ] && [ -f "${{ inputs.routes-file }}" ]; then
+          URLS=$(while IFS= read -r route; do
+            route=$(echo "$route" | xargs)
+            [ -z "$route" ] && continue
+            echo "${BASE}${route}"
+          done < "${{ inputs.routes-file }}" | paste -sd ',' -)
+        else
+          IFS=',' read -ra ROUTES <<< "${{ inputs.routes }}"
+          URLS=""
+          for route in "${ROUTES[@]}"; do
+            route=$(echo "$route" | xargs)
+            if [ -n "$URLS" ]; then URLS="${URLS},"; fi
+            URLS="${URLS}${BASE}${route}"
+          done
+        fi
+
+        echo "urls=$URLS" >> $GITHUB_OUTPUT
+        echo "Routes to scan: $URLS"
+
+    - name: Run accessibility scan
+      id: scan
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        mkdir -p "$OUTPUT_DIR"
+        REPORT_PATH="${OUTPUT_DIR}/scan-results.json"
+        WCAG="${{ inputs.wcag-level }}"
+        MODE="${{ inputs.scan-mode }}"
+
+        # Map WCAG level to pa11y standard
+        case "$WCAG" in
+          A)   STANDARD="WCAG2A" ;;
+          AAA) STANDARD="WCAG2AAA" ;;
+          *)   STANDARD="WCAG2AA" ;;
+        esac
+
+        # Build pa11y-ci config
+        IFS=',' read -ra URL_ARRAY <<< "${{ steps.routes.outputs.urls }}"
+
+        URLS_JSON=$(printf '%s\n' "${URL_ARRAY[@]}" | jq -R . | jq -s .)
+
+        PA11Y_THRESHOLD=0
+        if [ "$MODE" == "minimal" ]; then
+          PA11Y_THRESHOLD=50
+        fi
+
+        jq -n \
+          --argjson urls "$URLS_JSON" \
+          --arg standard "$STANDARD" \
+          --argjson threshold "$PA11Y_THRESHOLD" \
+          '{
+            defaults: {
+              standard: $standard,
+              timeout: 30000,
+              wait: 1000,
+              ignore: []
+            },
+            urls: $urls,
+            concurrency: 3
+          }' > .pa11yci.json
+
+        echo "pa11y-ci config:"
+        cat .pa11yci.json
+
+        # Run pa11y-ci and capture output
+        set +e
+        pa11y-ci --json --config .pa11yci.json > "$OUTPUT_DIR/raw-results.json" 2>&1
+        PA11Y_EXIT=$?
+        set -e
+
+        # Parse results into standardised format
+        if [ -f "$OUTPUT_DIR/raw-results.json" ] && jq empty "$OUTPUT_DIR/raw-results.json" 2>/dev/null; then
+          TOTAL=$(jq '[.results // {} | to_entries[].value | length] | add // 0' "$OUTPUT_DIR/raw-results.json")
+          CRITICAL=$(jq '[.results // {} | to_entries[].value[] | select(.type == "error")] | length' "$OUTPUT_DIR/raw-results.json")
+
+          jq --argjson total "$TOTAL" --argjson critical "$CRITICAL" \
+            --arg scan_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg wcag "$WCAG" \
+            --arg mode "$MODE" \
+            '. + {scan_date: $scan_date, wcag_level: $wcag, scan_mode: $mode, violation_count: $total, critical_count: $critical}' \
+            "$OUTPUT_DIR/raw-results.json" > "$REPORT_PATH"
+        else
+          jq -n \
+            --arg scan_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg wcag "$WCAG" \
+            --arg mode "$MODE" \
+            '{scan_date: $scan_date, wcag_level: $wcag, scan_mode: $mode, violation_count: 0, critical_count: 0, results: {}, error: "pa11y-ci produced no valid output"}' \
+            > "$REPORT_PATH"
+          TOTAL=0
+          CRITICAL=0
+        fi
+
+        echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
+        echo "violation-count=$TOTAL" >> $GITHUB_OUTPUT
+        echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
+
+        echo "Scan complete: $TOTAL violations ($CRITICAL critical)"
+
+        # In minimal mode, don't fail the build for violations
+        if [ "$MODE" == "full" ] && [ "$PA11Y_EXIT" -ne 0 ]; then
+          echo "::warning::Accessibility scan found violations"
+        fi

@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Check Deprecated .NET Packages'
+description: 'Detect deprecated or sunset NuGet packages in a project'
+inputs:
+  working-directory:
+    description: 'Working directory containing the project'
+    required: false
+    default: '.'
+  project-path:
+    description: 'Path to solution or project file'
+    required: false
+    default: ''
+  output-directory:
+    description: 'Directory for output report files'
+    required: false
+    default: './dependency-reports'
+outputs:
+  report-path:
+    description: 'Path to the generated JSON report'
+    value: ${{ steps.check.outputs.report-path }}
+  deprecated-count:
+    description: 'Number of deprecated packages found'
+    value: ${{ steps.check.outputs.deprecated-count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for deprecated packages
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        TARGET="${{ inputs.project-path }}"
+        if [ -z "$TARGET" ]; then
+          SOLN=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+          TARGET="${SOLN:-.}"
+        fi
+
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        mkdir -p "$OUTPUT_DIR"
+
+        RAW_OUTPUT=$(dotnet list "$TARGET" package --deprecated 2>&1 || true)
+        echo "$RAW_OUTPUT" > "$OUTPUT_DIR/deprecated-raw.txt"
+
+        SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        PACKAGES_JSON="[]"
+        DEPRECATED_COUNT=0
+
+        while IFS= read -r line; do
+          if echo "$line" | grep -qE '^\s*>\s+\S+'; then
+            PKG_NAME=$(echo "$line" | awk '{print $2}')
+            CURRENT=$(echo "$line" | awk '{print $3}')
+            # Reason is typically at end of the line after the versions
+            REASON=$(echo "$line" | sed -E 's/^.*[0-9]+\.[0-9]+\.[0-9]+[^ ]* *//' || echo "")
+
+            if [ -n "$PKG_NAME" ]; then
+              PACKAGES_JSON=$(echo "$PACKAGES_JSON" | jq \
+                --arg name "$PKG_NAME" \
+                --arg version "${CURRENT:-unknown}" \
+                --arg reason "${REASON:-Deprecated}" \
+                '. + [{"name": $name, "version": $version, "reason": $reason}]')
+              DEPRECATED_COUNT=$((DEPRECATED_COUNT + 1))
+            fi
+          fi
+        done <<< "$RAW_OUTPUT"
+
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --arg target "$TARGET" \
+          --argjson count "$DEPRECATED_COUNT" \
+          --argjson packages "$PACKAGES_JSON" \
+          '{scan_date: $scan_date, target: $target, deprecated_count: $count, deprecated_packages: $packages}' \
+          > "$OUTPUT_DIR/deprecated-packages.json"
+
+        echo "report-path=$OUTPUT_DIR/deprecated-packages.json" >> $GITHUB_OUTPUT
+        echo "deprecated-count=$DEPRECATED_COUNT" >> $GITHUB_OUTPUT
+
+        if [ "$DEPRECATED_COUNT" -gt 0 ]; then
+          echo "::warning::Found $DEPRECATED_COUNT deprecated packages"
+        else
+          echo "No deprecated packages found"
+        fi

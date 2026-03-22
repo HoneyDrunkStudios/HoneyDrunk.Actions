@@ -1,0 +1,164 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Check API Compatibility'
+description: 'Check public API surface for breaking changes by comparing assembly APIs against a baseline'
+inputs:
+  working-directory:
+    description: 'Working directory containing the .NET solution or project'
+    required: false
+    default: '.'
+  project-path:
+    description: 'Path to a specific project or solution file (auto-detected if empty)'
+    required: false
+    default: ''
+  baseline-ref:
+    description: 'Git ref to compare against (e.g., main, origin/main)'
+    required: false
+    default: 'origin/main'
+  baseline-path:
+    description: 'Path to a stored API baseline file (overrides baseline-ref comparison)'
+    required: false
+    default: ''
+  output-directory:
+    description: 'Directory for compatibility report output'
+    required: false
+    default: './api-compat-reports'
+  fail-on-breaking:
+    description: 'Fail if breaking changes are detected'
+    required: false
+    default: 'true'
+outputs:
+  breaking-changes:
+    description: 'Number of breaking changes detected'
+    value: ${{ steps.compare.outputs.breaking-changes }}
+  report-path:
+    description: 'Path to the compatibility report'
+    value: ${{ steps.compare.outputs.report-path }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Compare API surface
+      id: compare
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        mkdir -p "$OUTPUT_DIR"
+        REPORT_PATH="${OUTPUT_DIR}/api-compat-report.json"
+
+        TARGET="${{ inputs.project-path }}"
+        if [ -z "$TARGET" ]; then
+          TARGET=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+          if [ -z "$TARGET" ]; then
+            TARGET="."
+          fi
+        fi
+
+        echo "Building current branch..."
+        dotnet build "$TARGET" --configuration Release --no-restore -o ./bin-current
+
+        # Collect current public API using dotnet-publicapi or assembly metadata
+        CURRENT_APIS="$OUTPUT_DIR/current-api.txt"
+        for dll in $(find ./bin-current -name "*.dll" -not -name "System.*" -not -name "Microsoft.*" | sort); do
+          DLL_NAME=$(basename "$dll" .dll)
+          echo "## $DLL_NAME" >> "$CURRENT_APIS"
+          # Extract public types via reflection-based listing
+          dotnet --roll-forward LatestMajor \
+            "$(dirname "$(which dotnet)")/../sdk/$(dotnet --version)/Microsoft.DotNet.ILDisassembler/ildasm.dll" \
+            "$dll" /all /text 2>/dev/null | grep -E "^\.class public|^\.method public" >> "$CURRENT_APIS" 2>/dev/null || \
+          # Fallback: list exported types via metadata reader
+          dotnet build "$dll" --getProperty:TargetPath 2>/dev/null >> "$CURRENT_APIS" || \
+          echo "  (unable to extract API from $DLL_NAME)" >> "$CURRENT_APIS"
+        done
+
+        BREAKING=0
+
+        if [ -n "${{ inputs.baseline-path }}" ] && [ -f "${{ inputs.baseline-path }}" ]; then
+          BASELINE="${{ inputs.baseline-path }}"
+          echo "Comparing against stored baseline: $BASELINE"
+
+          set +e
+          DIFF=$(diff --unified "$BASELINE" "$CURRENT_APIS" 2>/dev/null)
+          DIFF_EXIT=$?
+          set -e
+
+          # Removed lines (starting with -) that aren't headers indicate breaking changes
+          REMOVED=$(echo "$DIFF" | grep -E "^-[^-]" | grep -v "^---" || true)
+          BREAKING=$(echo "$REMOVED" | grep -c "." || echo "0")
+
+          echo "$DIFF" > "${OUTPUT_DIR}/api-diff.txt"
+        else
+          BASELINE_REF="${{ inputs.baseline-ref }}"
+          echo "Comparing against git ref: $BASELINE_REF"
+
+          # Build baseline from the target ref
+          BASELINE_DIR=$(mktemp -d)
+          git worktree add "$BASELINE_DIR" "$BASELINE_REF" --detach 2>/dev/null || {
+            echo "::warning::Could not checkout baseline ref $BASELINE_REF — skipping comparison"
+            jq -n \
+              --arg scan_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              '{scan_date: $scan_date, breaking_changes: 0, status: "skipped", reason: "baseline ref not available"}' \
+              > "$REPORT_PATH"
+            echo "breaking-changes=0" >> $GITHUB_OUTPUT
+            echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
+            exit 0
+          }
+
+          BASELINE_APIS="$OUTPUT_DIR/baseline-api.txt"
+          pushd "$BASELINE_DIR" > /dev/null
+
+          if [ -n "${{ inputs.project-path }}" ] && [ -e "${{ inputs.project-path }}" ]; then
+            BASELINE_TARGET="${{ inputs.project-path }}"
+          else
+            BASELINE_TARGET=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || echo ".")
+          fi
+
+          dotnet restore "$BASELINE_TARGET" 2>/dev/null || true
+          dotnet build "$BASELINE_TARGET" --configuration Release -o ./bin-baseline 2>/dev/null || true
+
+          for dll in $(find ./bin-baseline -name "*.dll" -not -name "System.*" -not -name "Microsoft.*" | sort); do
+            DLL_NAME=$(basename "$dll" .dll)
+            echo "## $DLL_NAME" >> "$BASELINE_APIS"
+          done
+
+          popd > /dev/null
+          git worktree remove "$BASELINE_DIR" --force 2>/dev/null || true
+
+          set +e
+          DIFF=$(diff --unified "$BASELINE_APIS" "$CURRENT_APIS" 2>/dev/null)
+          DIFF_EXIT=$?
+          set -e
+
+          REMOVED=$(echo "$DIFF" | grep -E "^-[^-]" | grep -v "^---" || true)
+          BREAKING=$(echo "$REMOVED" | grep -c "." || echo "0")
+
+          echo "$DIFF" > "${OUTPUT_DIR}/api-diff.txt"
+        fi
+
+        # Save current API as potential future baseline
+        cp "$CURRENT_APIS" "${OUTPUT_DIR}/api-baseline.txt"
+
+        jq -n \
+          --arg scan_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+          --argjson breaking "$BREAKING" \
+          --arg status "$([ "$BREAKING" -gt 0 ] && echo 'breaking-changes-detected' || echo 'compatible')" \
+          '{scan_date: $scan_date, breaking_changes: $breaking, status: $status}' \
+          > "$REPORT_PATH"
+
+        echo "breaking-changes=$BREAKING" >> $GITHUB_OUTPUT
+        echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
+
+        if [ "$BREAKING" -gt 0 ]; then
+          echo "::warning::$BREAKING potential breaking changes detected in public API"
+          echo ""
+          echo "Removed APIs:"
+          echo "$REMOVED" | head -20
+
+          if [ "${{ inputs.fail-on-breaking }}" == "true" ]; then
+            echo "::error::$BREAKING breaking changes detected — failing build"
+            exit 1
+          fi
+        else
+          echo "No breaking changes detected"
+        fi

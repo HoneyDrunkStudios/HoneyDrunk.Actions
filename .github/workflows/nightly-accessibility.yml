@@ -302,29 +302,22 @@ jobs:
           echo "routes=$ROUTES" >> $GITHUB_OUTPUT
           echo "Routes to scan: $ROUTES"
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
       - name: Run comprehensive accessibility scan
-        shell: bash
-        run: |
-          echo "Running comprehensive accessibility scan..."
-          echo "Base URL: ${{ inputs.base-url }}"
-          echo "Routes: ${{ steps.routes.outputs.routes }}
-          echo "WCAG Level: ${{ inputs.wcag-level }}"
-          echo ""
-          echo "This is a placeholder for HoneyDrunk.Tools accessibility scanner"
-          echo "Command: hd-tools accessibility scan --full"
-          echo "::notice::Accessibility scanning will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools accessibility scan \
-          #   --base-url "${{ inputs.base-url }}" \
-          #   --routes "${{ steps.routes.outputs.routes }}" \
-          #   --wcag-level "${{ inputs.wcag-level }}" \
-          #   --full-scan \
-          #   --output-json "./accessibility-reports/scan-results.json" \
-          #   --output-html "./accessibility-reports/scan-results.html"
-          
-          mkdir -p ./accessibility-reports
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","violations":[]}' > ./accessibility-reports/scan-results.json
+        id: a11y-scan
+        uses: ./.github/actions-repo/.github/actions/accessibility/scan
+        with:
+          base-url: ${{ inputs.base-url }}
+          routes: ${{ steps.routes.outputs.routes }}
+          wcag-level: ${{ inputs.wcag-level }}
+          scan-mode: 'full'
+          output-directory: ./accessibility-reports
       
       - name: Stop application server
         if: always()
@@ -342,9 +335,13 @@ jobs:
         run: |
           echo "Analyzing accessibility scan results..."
           
-          # Placeholder analysis
-          VIOLATION_COUNT=0
-          CRITICAL_COUNT=0
+          if [ -f "./accessibility-reports/scan-results.json" ]; then
+            VIOLATION_COUNT=$(jq '.violation_count // 0' ./accessibility-reports/scan-results.json)
+            CRITICAL_COUNT=$(jq '.critical_count // 0' ./accessibility-reports/scan-results.json)
+          else
+            VIOLATION_COUNT=0
+            CRITICAL_COUNT=0
+          fi
           
           echo "violation_count=$VIOLATION_COUNT" >> $GITHUB_OUTPUT
           echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
@@ -381,22 +378,21 @@ jobs:
           name: accessibility-report
           path: ./accessibility-reports
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
       - name: Create or update accessibility issue
-        shell: bash
+        uses: ./.github/actions-repo/.github/actions/accessibility/create-issue
+        with:
+          report-path: ./accessibility-reports/scan-results.json
+          violation-threshold: ${{ inputs.violation-threshold }}
+          wcag-level: ${{ inputs.wcag-level }}
         env:
           GH_TOKEN: ${{ secrets.github-token || github.token }}
-        run: |
-          echo "Creating or updating accessibility tracking issue..."
-          echo "This is a placeholder for HoneyDrunk.Tools issue creator"
-          echo "Command: hd-tools github create-accessibility-issue"
-          echo "::notice::GitHub issue creation will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools github create-accessibility-issue \
-          #   --report "./accessibility-reports/scan-results.json" \
-          #   --title "Accessibility Violations Detected - $(date +%Y-%m-%d)" \
-          #   --labels "accessibility,automated,wcag-${{ inputs.wcag-level }}" \
-          #   --update-existing
   
   accessibility-summary:
     name: Generate Accessibility Summary

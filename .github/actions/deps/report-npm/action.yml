@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Generate npm Dependency Report'
+description: 'Parse npm outdated output into a structured JSON report'
+inputs:
+  working-directory:
+    description: 'Working directory containing package.json'
+    required: false
+    default: '.'
+  output-directory:
+    description: 'Directory for output report files'
+    required: false
+    default: './dependency-reports'
+outputs:
+  report-path:
+    description: 'Path to the generated JSON report'
+    value: ${{ steps.report.outputs.report-path }}
+  outdated-count:
+    description: 'Number of outdated packages found'
+    value: ${{ steps.report.outputs.outdated-count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate npm dependency report
+      id: report
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        mkdir -p "$OUTPUT_DIR"
+
+        SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        # npm outdated returns exit code 1 when outdated packages exist
+        NPM_RAW=$(npm outdated --json 2>/dev/null || true)
+
+        if [ -z "$NPM_RAW" ] || [ "$NPM_RAW" == "{}" ]; then
+          jq -n --arg scan_date "$SCAN_DATE" \
+            '{scan_date: $scan_date, outdated_count: 0, outdated_packages: []}' \
+            > "$OUTPUT_DIR/npm-outdated.json"
+          echo "report-path=$OUTPUT_DIR/npm-outdated.json" >> $GITHUB_OUTPUT
+          echo "outdated-count=0" >> $GITHUB_OUTPUT
+          echo "No outdated npm packages found"
+          exit 0
+        fi
+
+        # Transform npm outdated JSON into our standard format
+        PACKAGES_JSON=$(echo "$NPM_RAW" | jq '[to_entries[] | {
+          name: .key,
+          current: (.value.current // "missing"),
+          wanted: (.value.wanted // "unknown"),
+          latest: (.value.latest // "unknown"),
+          type: (.value.type // "dependencies")
+        }]')
+
+        OUTDATED_COUNT=$(echo "$PACKAGES_JSON" | jq 'length')
+
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --argjson count "$OUTDATED_COUNT" \
+          --argjson packages "$PACKAGES_JSON" \
+          '{scan_date: $scan_date, outdated_count: $count, outdated_packages: $packages}' \
+          > "$OUTPUT_DIR/npm-outdated.json"
+
+        echo "report-path=$OUTPUT_DIR/npm-outdated.json" >> $GITHUB_OUTPUT
+        echo "outdated-count=$OUTDATED_COUNT" >> $GITHUB_OUTPUT
+        echo "Found $OUTDATED_COUNT outdated npm packages"

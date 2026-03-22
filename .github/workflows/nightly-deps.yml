@@ -170,37 +170,19 @@ jobs:
           echo "Package scan complete. Results saved to outdated-packages.txt"
       
       - name: Generate dependency report
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          echo "Generating structured dependency report..."
-          echo "This is a placeholder for HoneyDrunk.Tools dependency reporter"
-          echo "Command: hd-tools deps report --format json"
-          echo "::notice::Dependency reporting will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools deps report \
-          #   --project "${{ inputs.project-path }}" \
-          #   --format json \
-          #   --exclude-prerelease ${{ inputs.exclude-prerelease }} \
-          #   --output "./dependency-reports/dotnet-outdated.json"
-          
-          mkdir -p ./dependency-reports
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","outdated_packages":[]}' > ./dependency-reports/dotnet-outdated.json
+        uses: ./.github/actions-repo/.github/actions/deps/report-dotnet
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          exclude-prerelease: ${{ inputs.exclude-prerelease }}
+          output-directory: ./dependency-reports
       
       - name: Check for deprecated packages
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          echo "Checking for deprecated packages..."
-          echo "This is a placeholder for HoneyDrunk.Tools deprecated package checker"
-          echo "Command: hd-tools deps check-deprecated"
-          echo "::notice::Deprecated package checking will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools deps check-deprecated \
-          #   --project "${{ inputs.project-path }}" \
-          #   --output "./dependency-reports/deprecated-packages.json"
+        uses: ./.github/actions-repo/.github/actions/deps/check-deprecated
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          output-directory: ./dependency-reports
       
       - name: Upload .NET dependency report
         uses: actions/upload-artifact@v4
@@ -219,6 +201,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
       
       - name: Check for package.json
         id: check-npm
@@ -248,21 +237,10 @@ jobs:
       
       - name: Generate npm dependency report
         if: steps.check-npm.outputs.has_npm == 'true'
-        shell: bash
-        run: |
-          echo "Generating structured npm dependency report..."
-          echo "This is a placeholder for HoneyDrunk.Tools npm dependency reporter"
-          echo "Command: hd-tools deps report-npm --format json"
-          echo "::notice::npm dependency reporting will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools deps report-npm \
-          #   --format json \
-          #   --exclude-prerelease ${{ inputs.exclude-prerelease }} \
-          #   --output "./dependency-reports/npm-outdated.json"
-          
-          mkdir -p ./dependency-reports
-          cp npm-outdated.json ./dependency-reports/npm-outdated.json
+        uses: ./.github/actions-repo/.github/actions/deps/report-npm
+        with:
+          working-directory: '.'
+          output-directory: ./dependency-reports
       
       - name: Upload npm dependency report
         if: steps.check-npm.outputs.has_npm == 'true'
@@ -311,26 +289,14 @@ jobs:
           node-version: ${{ inputs.node-version }}
       
       - name: Generate and apply dependency updates
-        shell: bash
+        uses: ./.github/actions-repo/.github/actions/deps/create-update-prs
+        with:
+          reports-directory: ./all-dependency-reports
+          branch-prefix: ${{ inputs.pr-branch-prefix }}
+          group-updates: ${{ inputs.group-updates }}
+          labels: 'dependencies,automated'
         env:
           GH_TOKEN: ${{ secrets.github-token || github.token }}
-        run: |
-          echo "Generating dependency update PRs..."
-          echo "This is a placeholder for HoneyDrunk.Tools dependency PR creator"
-          echo "Command: hd-tools deps create-pr"
-          echo "::notice::Dependency PR creation will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools deps create-pr \
-          #   --reports "./all-dependency-reports" \
-          #   --branch-prefix "${{ inputs.pr-branch-prefix }}" \
-          #   --group-updates ${{ inputs.group-updates }} \
-          #   --exclude-prerelease ${{ inputs.exclude-prerelease }} \
-          #   --auto-merge-patch
-          
-          echo "::notice::In production, this would create/update PRs for dependency upgrades"
-          echo "Branch prefix: ${{ inputs.pr-branch-prefix }}"
-          echo "Group updates: ${{ inputs.group-updates }}"
   
   consolidate-report:
     name: Consolidate Dependency Report
@@ -347,22 +313,18 @@ jobs:
         with:
           path: ./all-dependency-reports
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
       - name: Consolidate dependency findings
-        shell: bash
-        run: |
-          echo "Consolidating all dependency findings..."
-          echo "This is a placeholder for HoneyDrunk.Tools dependency report consolidator"
-          echo "Command: hd-tools deps consolidate-reports"
-          echo "::notice::Dependency report consolidation will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools deps consolidate-reports \
-          #   --input-dir "./all-dependency-reports" \
-          #   --output-json "./consolidated-dependency-report.json" \
-          #   --output-html "./consolidated-dependency-report.html" \
-          #   --output-markdown "./consolidated-dependency-report.md"
-          
-          echo '{"scan_date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","summary":{"total_outdated":0}}' > ./consolidated-dependency-report.json
+        uses: ./.github/actions-repo/.github/actions/deps/consolidate-reports
+        with:
+          input-directory: ./all-dependency-reports
+          output-path: ./consolidated-dependency-report.json
       
       - name: Generate summary
         shell: bash

@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Check XML Documentation'
+description: 'Validate that public APIs have XML documentation comments by enabling CS1591 warnings'
+inputs:
+  working-directory:
+    description: 'Working directory containing the .NET solution or project'
+    required: false
+    default: '.'
+  project-path:
+    description: 'Path to a specific project or solution file (auto-detected if empty)'
+    required: false
+    default: ''
+  treat-as-error:
+    description: 'Fail the step if undocumented public APIs are found'
+    required: false
+    default: 'true'
+outputs:
+  missing-count:
+    description: 'Number of public APIs missing XML documentation'
+    value: ${{ steps.check.outputs.missing-count }}
+  report-path:
+    description: 'Path to the warnings report'
+    value: ${{ steps.check.outputs.report-path }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Check XML documentation completeness
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        TARGET="${{ inputs.project-path }}"
+        if [ -z "$TARGET" ]; then
+          TARGET=$(find . -maxdepth 4 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1 || true)
+          if [ -z "$TARGET" ]; then
+            TARGET="."
+          fi
+        fi
+
+        echo "Checking XML documentation in: $TARGET"
+
+        # Build with DocumentationFile enabled and CS1591 as warning
+        # CS1591 = Missing XML comment for publicly visible type or member
+        set +e
+        BUILD_OUTPUT=$(dotnet build "$TARGET" \
+          --configuration Release \
+          --no-restore \
+          -p:GenerateDocumentationFile=true \
+          -p:NoWarn="" \
+          -warnaserror:CS1591- \
+          2>&1)
+        BUILD_EXIT=$?
+        set -e
+
+        # Extract CS1591 warnings
+        WARNINGS=$(echo "$BUILD_OUTPUT" | grep -E "warning CS1591:" || true)
+        MISSING_COUNT=$(echo "$WARNINGS" | grep -c "CS1591" || echo "0")
+
+        mkdir -p ./doc-reports
+        REPORT_PATH="./doc-reports/xml-doc-warnings.txt"
+        echo "$WARNINGS" > "$REPORT_PATH"
+
+        echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
+        echo "missing-count=$MISSING_COUNT" >> $GITHUB_OUTPUT
+
+        if [ "$MISSING_COUNT" -gt 0 ]; then
+          echo ""
+          echo "Found $MISSING_COUNT public APIs missing XML documentation:"
+          echo "$WARNINGS" | head -50
+          if [ "$MISSING_COUNT" -gt 50 ]; then
+            echo "... and $((MISSING_COUNT - 50)) more (see artifact for full list)"
+          fi
+          echo ""
+
+          if [ "${{ inputs.treat-as-error }}" == "true" ]; then
+            echo "::error::$MISSING_COUNT public APIs are missing XML documentation"
+            exit 1
+          else
+            echo "::warning::$MISSING_COUNT public APIs are missing XML documentation"
+          fi
+        else
+          echo "All public APIs have XML documentation"
+        fi

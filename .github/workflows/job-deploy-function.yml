@@ -1,0 +1,282 @@
+# ==============================================================================
+# Deploy Azure Function App
+# ==============================================================================
+# Purpose:
+#   Reusable job for deploying a .NET Azure Function App from a published
+#   artifact. Supports deployment slots with swap-to-production, health checks,
+#   and Azure Key Vault secret injection.
+#
+# Responsibilities:
+#   - Authenticate with Azure via OIDC or Service Principal
+#   - Fetch secrets from Azure Key Vault and set as Function App config
+#   - Deploy published function package to Function App (slot or production)
+#   - Run health checks against the deployed function
+#   - Optionally swap staging slot to production
+#
+# Target:
+#   Repos with Azure Function Apps. Designed to run after the build job
+#   in a release workflow, consuming a published artifact.
+#
+# Non-goals:
+#   - Building function code (release.yml handles that)
+#   - Container-based function deployments (use job-deploy-container.yml)
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Deploy Azure Function App
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      artifact-name:
+        description: 'Name of the uploaded artifact containing the published function app'
+        required: false
+        type: string
+        default: 'function-app'
+
+      package-path:
+        description: 'Path within the artifact to the publish output (directory or zip)'
+        required: false
+        type: string
+        default: './publish'
+
+      functions-app:
+        description: 'Azure Function App name'
+        required: true
+        type: string
+
+      resource-group:
+        description: 'Azure resource group containing the Function App'
+        required: true
+        type: string
+
+      slot-name:
+        description: 'Deployment slot name. Use "production" for direct production deploy.'
+        required: false
+        type: string
+        default: 'production'
+
+      swap-to-production:
+        description: 'Swap the deployed slot to production after health check'
+        required: false
+        type: boolean
+        default: false
+
+      health-check-url:
+        description: 'Relative path (e.g., /api/health) or full URL to probe. Empty to skip.'
+        required: false
+        type: string
+        default: ''
+
+      health-check-timeout:
+        description: 'Max seconds to wait for health check to pass'
+        required: false
+        type: number
+        default: 120
+
+      startup-wait:
+        description: 'Seconds to wait for function app startup before health check'
+        required: false
+        type: number
+        default: 30
+
+      keyvault-name:
+        description: 'Azure Key Vault name for secret fetching. Empty to skip.'
+        required: false
+        type: string
+        default: ''
+
+      keyvault-secrets:
+        description: >
+          Newline-separated secrets to fetch from Key Vault.
+          Format: SECRET_NAME or SECRET_NAME=ENV_VAR_NAME.
+          Values are set as Function App configuration on the target slot.
+          Empty to skip.
+        required: false
+        type: string
+        default: ''
+
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+    secrets:
+      azure-client-id:
+        description: 'Azure AD application (client) ID — used for both OIDC and SP auth'
+        required: false
+      azure-tenant-id:
+        description: 'Azure AD tenant ID'
+        required: false
+      azure-subscription-id:
+        description: 'Azure subscription ID (required for OIDC federation)'
+        required: false
+      azure-client-secret:
+        description: 'Azure SP client secret (only for SP auth — prefer OIDC instead)'
+        required: false
+
+    outputs:
+      deployed-url:
+        description: 'URL of the deployed Function App'
+        value: ${{ jobs.deploy.outputs.deployed-url }}
+      deployment-status:
+        description: 'Final deployment status'
+        value: ${{ jobs.deploy.outputs.deployment-status }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to Function App
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      deployed-url: ${{ steps.deploy-function.outputs.deployed-url }}
+      deployment-status: ${{ steps.deploy-function.outputs.deployment-status }}
+
+    steps:
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.actions-ref }}
+          path: .actions
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.package-path }}
+
+      - name: Detect auth method
+        id: auth
+        shell: bash
+        env:
+          CLIENT_ID: ${{ secrets.azure-client-id }}
+          TENANT_ID: ${{ secrets.azure-tenant-id }}
+          SUBSCRIPTION_ID: ${{ secrets.azure-subscription-id }}
+          CLIENT_SECRET: ${{ secrets.azure-client-secret }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$SUBSCRIPTION_ID" ] && [ -z "$CLIENT_SECRET" ]; then
+            echo "method=oidc" >> $GITHUB_OUTPUT
+            echo "Using OIDC federation"
+          elif [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$CLIENT_SECRET" ]; then
+            echo "method=sp" >> $GITHUB_OUTPUT
+            echo "::warning::Using Service Principal auth — prefer OIDC federation for production"
+          else
+            echo "::error::No valid Azure credentials provided. Supply client-id + tenant-id + subscription-id (OIDC) or client-id + tenant-id + client-secret (SP)."
+            exit 1
+          fi
+
+      - name: Azure Login (OIDC)
+        if: steps.auth.outputs.method == 'oidc'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure-client-id }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+          subscription-id: ${{ secrets.azure-subscription-id }}
+
+      - name: Azure Login (SP fallback)
+        if: steps.auth.outputs.method == 'sp'
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.azure-client-id }}","clientSecret":"${{ secrets.azure-client-secret }}","tenantId":"${{ secrets.azure-tenant-id }}"}'
+
+      - name: Validate Key Vault inputs
+        if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}
+        shell: bash
+        run: |
+          echo "::warning::Both 'keyvault-name' and 'keyvault-secrets' must be provided together. One is missing — skipping Key Vault integration."
+
+      - name: Fetch secrets from Key Vault
+        if: ${{ inputs.keyvault-name != '' && inputs.keyvault-secrets != '' }}
+        uses: ./.actions/.github/actions/azure/keyvault-fetch
+        with:
+          vault-name: ${{ inputs.keyvault-name }}
+          secrets: ${{ inputs.keyvault-secrets }}
+          export-as: 'env'
+
+      - name: Apply Key Vault secrets to Function App config
+        if: ${{ inputs.keyvault-name != '' && inputs.keyvault-secrets != '' }}
+        shell: bash
+        env:
+          SECRETS_INPUT: ${{ inputs.keyvault-secrets }}
+          APP_NAME: ${{ inputs.functions-app }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          SLOT: ${{ inputs.slot-name }}
+        run: |
+          set -euo pipefail
+          SETTINGS_ARGS=()
+
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+            if [[ "$line" == *"="* ]]; then
+              ENV_NAME="${line#*=}"
+            else
+              ENV_NAME=$(echo "$line" | sed 's/--/__/g' | sed 's/-/_/g')
+            fi
+            ENV_NAME=$(echo "$ENV_NAME" | xargs)
+
+            SECRET_VALUE="${!ENV_NAME}"
+            if [ -n "$SECRET_VALUE" ]; then
+              SETTINGS_ARGS+=("${ENV_NAME}=${SECRET_VALUE}")
+            fi
+          done <<< "$SECRETS_INPUT"
+
+          if [ ${#SETTINGS_ARGS[@]} -gt 0 ]; then
+            SLOT_ARGS=()
+            if [ "$SLOT" != "production" ] && [ -n "$SLOT" ]; then
+              SLOT_ARGS=(--slot "$SLOT")
+            fi
+
+            az functionapp config appsettings set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              "${SLOT_ARGS[@]}" \
+              --settings "${SETTINGS_ARGS[@]}" \
+              --output none
+
+            echo "Applied ${#SETTINGS_ARGS[@]} Key Vault secrets to Function App configuration"
+          fi
+
+      - name: Deploy to Function App
+        id: deploy-function
+        uses: ./.actions/.github/actions/azure/deploy-function
+        with:
+          app-name: ${{ inputs.functions-app }}
+          resource-group: ${{ inputs.resource-group }}
+          package-path: ${{ inputs.package-path }}
+          slot-name: ${{ inputs.slot-name }}
+          swap-to-production: ${{ inputs.swap-to-production }}
+          health-check-url: ${{ inputs.health-check-url }}
+          health-check-timeout: ${{ inputs.health-check-timeout }}
+          startup-wait: ${{ inputs.startup-wait }}
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "# Function App Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Function App** | ${{ inputs.functions-app }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Resource Group** | ${{ inputs.resource-group }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Slot** | ${{ inputs.slot-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Swapped** | ${{ inputs.swap-to-production }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Key Vault** | ${{ inputs.keyvault-name || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **URL** | ${{ steps.deploy-function.outputs.deployed-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ${{ steps.deploy-function.outputs.deployment-status }} |" >> $GITHUB_STEP_SUMMARY

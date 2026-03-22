@@ -1,0 +1,126 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Create Governance Issues'
+description: 'Create or update GitHub issues in non-compliant repositories based on governance scan results'
+inputs:
+  report-path:
+    description: 'Path to the consolidated governance report JSON'
+    required: true
+  issue-label:
+    description: 'Label to apply to governance issues'
+    required: false
+    default: 'governance'
+  issue-title-prefix:
+    description: 'Prefix for governance issue titles'
+    required: false
+    default: '[Governance]'
+  dry-run:
+    description: 'Log what would be created without actually creating issues'
+    required: false
+    default: 'false'
+outputs:
+  issues-created:
+    description: 'Number of issues created or updated'
+    value: ${{ steps.create.outputs.issues-created }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Create governance issues
+      id: create
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GH_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        REPORT="${{ inputs.report-path }}"
+        LABEL="${{ inputs.issue-label }}"
+        PREFIX="${{ inputs.issue-title-prefix }}"
+        DRY_RUN="${{ inputs.dry-run }}"
+        ISSUES_CREATED=0
+        SCAN_DATE=$(jq -r '.scan_date // "unknown"' "$REPORT")
+
+        if [ ! -f "$REPORT" ]; then
+          echo "::warning::Governance report not found at $REPORT"
+          echo "issues-created=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Build per-repo issue bodies by aggregating findings
+        REPOS=$(jq -r '
+          [
+            .findings.missing_ci[]?.repo,
+            .findings.missing_required_workflows[]?.repo,
+            .findings.missing_required_files[]?.repo,
+            .findings.missing_security_policy[]?.repo
+          ] | unique | .[]
+        ' "$REPORT" 2>/dev/null || true)
+
+        for repo in $REPOS; do
+          echo "Processing: $repo"
+
+          BODY="## Governance Scan Findings\n\n"
+          BODY+="**Scan Date:** ${SCAN_DATE}\n\n"
+          HAS_ISSUES=false
+
+          # Missing CI
+          CI=$(jq -r --arg r "$repo" '.findings.missing_ci[] | select(.repo == $r) | .detail // "No CI workflows found"' "$REPORT" 2>/dev/null || true)
+          if [ -n "$CI" ]; then
+            BODY+="### Missing CI Workflows\n- ${CI}\n\n"
+            HAS_ISSUES=true
+          fi
+
+          # Missing required workflows
+          WF=$(jq -r --arg r "$repo" '[.findings.missing_required_workflows[] | select(.repo == $r) | .workflow // .detail // empty] | join(", ")' "$REPORT" 2>/dev/null || true)
+          if [ -n "$WF" ]; then
+            BODY+="### Missing Required Workflows\n- ${WF}\n\n"
+            HAS_ISSUES=true
+          fi
+
+          # Missing required files
+          FILES=$(jq -r --arg r "$repo" '[.findings.missing_required_files[] | select(.repo == $r) | .file // .detail // empty] | join(", ")' "$REPORT" 2>/dev/null || true)
+          if [ -n "$FILES" ]; then
+            BODY+="### Missing Required Files\n- ${FILES}\n\n"
+            HAS_ISSUES=true
+          fi
+
+          # Missing security policy
+          SEC=$(jq -r --arg r "$repo" '.findings.missing_security_policy[] | select(.repo == $r) | .detail // "No SECURITY.md found"' "$REPORT" 2>/dev/null || true)
+          if [ -n "$SEC" ]; then
+            BODY+="### Missing Security Policy\n- ${SEC}\n\n"
+            HAS_ISSUES=true
+          fi
+
+          if [ "$HAS_ISSUES" != "true" ]; then
+            continue
+          fi
+
+          BODY+="---\n*This issue was automatically created by the weekly governance scan.*"
+          TITLE="${PREFIX} Compliance issues detected"
+
+          if [ "$DRY_RUN" == "true" ]; then
+            echo "[DRY RUN] Would create/update issue in $repo:"
+            echo "  Title: $TITLE"
+            echo -e "  Body: $BODY"
+            ISSUES_CREATED=$((ISSUES_CREATED + 1))
+            continue
+          fi
+
+          # Check for existing open governance issue
+          EXISTING=$(gh issue list --repo "$repo" --label "$LABEL" --state open --json number,title \
+            --jq ".[] | select(.title | startswith(\"${PREFIX}\")) | .number" 2>/dev/null | head -n 1 || true)
+
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing issue #$EXISTING in $repo"
+            echo -e "$BODY" | gh issue edit "$EXISTING" --repo "$repo" --body-file - 2>/dev/null || \
+              echo "::warning::Failed to update issue #$EXISTING in $repo"
+          else
+            echo "Creating new issue in $repo"
+            echo -e "$BODY" | gh issue create --repo "$repo" --title "$TITLE" --label "$LABEL" --body-file - 2>/dev/null || \
+              echo "::warning::Failed to create issue in $repo"
+          fi
+
+          ISSUES_CREATED=$((ISSUES_CREATED + 1))
+        done
+
+        echo "issues-created=$ISSUES_CREATED" >> $GITHUB_OUTPUT
+        echo "Created/updated $ISSUES_CREATED governance issues"

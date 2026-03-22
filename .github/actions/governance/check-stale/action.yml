@@ -1,0 +1,172 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Check Stale Branches and PRs'
+description: 'Detect stale branches and pull requests across org repositories using the GitHub CLI'
+inputs:
+  organization:
+    description: 'GitHub organization to scan'
+    required: true
+  check-branches:
+    description: 'Check for stale branches'
+    required: false
+    default: 'true'
+  stale-branch-days:
+    description: 'Days of inactivity before a branch is stale'
+    required: false
+    default: '90'
+  check-prs:
+    description: 'Check for stale pull requests'
+    required: false
+    default: 'true'
+  stale-pr-days:
+    description: 'Days of inactivity before a PR is stale'
+    required: false
+    default: '30'
+  exclude-repos:
+    description: 'Comma-separated repository names to skip'
+    required: false
+    default: ''
+  exclude-archived:
+    description: 'Skip archived repositories'
+    required: false
+    default: 'true'
+  output-directory:
+    description: 'Directory for output report files'
+    required: false
+    default: './governance-reports'
+outputs:
+  stale-branches-path:
+    description: 'Path to stale branches JSON report'
+    value: ${{ steps.scan.outputs.stale-branches-path }}
+  stale-prs-path:
+    description: 'Path to stale PRs JSON report'
+    value: ${{ steps.scan.outputs.stale-prs-path }}
+  stale-branch-count:
+    description: 'Total number of stale branches found'
+    value: ${{ steps.scan.outputs.stale-branch-count }}
+  stale-pr-count:
+    description: 'Total number of stale PRs found'
+    value: ${{ steps.scan.outputs.stale-pr-count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Scan for stale branches and PRs
+      id: scan
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GH_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        ORG="${{ inputs.organization }}"
+        BRANCH_DAYS=${{ inputs.stale-branch-days }}
+        PR_DAYS=${{ inputs.stale-pr-days }}
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        BRANCH_CUTOFF=$(date -u -d "${BRANCH_DAYS} days ago" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v-${BRANCH_DAYS}d +"%Y-%m-%dT%H:%M:%SZ")
+        PR_CUTOFF=$(date -u -d "${PR_DAYS} days ago" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v-${PR_DAYS}d +"%Y-%m-%dT%H:%M:%SZ")
+
+        mkdir -p "$OUTPUT_DIR"
+
+        # Fetch repo list
+        QUERY_FIELDS="name,isArchived"
+        REPOS_JSON=$(gh repo list "$ORG" --limit 1000 --json "$QUERY_FIELDS" 2>/dev/null || echo "[]")
+
+        if [ "${{ inputs.exclude-archived }}" == "true" ]; then
+          REPOS_JSON=$(echo "$REPOS_JSON" | jq '[.[] | select(.isArchived == false)]')
+        fi
+
+        # Filter exclusions
+        if [ -n "${{ inputs.exclude-repos }}" ]; then
+          IFS=',' read -ra EXCLUDED <<< "${{ inputs.exclude-repos }}"
+          for repo in "${EXCLUDED[@]}"; do
+            repo=$(echo "$repo" | xargs)
+            REPOS_JSON=$(echo "$REPOS_JSON" | jq --arg r "$repo" '[.[] | select(.name != $r)]')
+          done
+        fi
+
+        REPO_NAMES=$(echo "$REPOS_JSON" | jq -r '.[].name')
+
+        # --- Stale branches ---
+        STALE_BRANCH_COUNT=0
+        BRANCH_RESULTS="[]"
+
+        if [ "${{ inputs.check-branches }}" == "true" ]; then
+          echo "Scanning for stale branches (no commits in ${BRANCH_DAYS} days)..."
+
+          for repo in $REPO_NAMES; do
+            FULL="${ORG}/${repo}"
+
+            # Get branches with their last commit date
+            BRANCHES=$(gh api "repos/${FULL}/branches" --paginate --jq '.[].name' 2>/dev/null || echo "")
+            DEFAULT_BRANCH=$(gh api "repos/${FULL}" --jq '.default_branch' 2>/dev/null || echo "main")
+
+            for branch in $BRANCHES; do
+              if [ "$branch" == "$DEFAULT_BRANCH" ]; then
+                continue
+              fi
+
+              LAST_COMMIT_DATE=$(gh api "repos/${FULL}/branches/${branch}" --jq '.commit.commit.committer.date' 2>/dev/null || echo "")
+              if [ -z "$LAST_COMMIT_DATE" ]; then
+                continue
+              fi
+
+              if [[ "$LAST_COMMIT_DATE" < "$BRANCH_CUTOFF" ]]; then
+                STALE_BRANCH_COUNT=$((STALE_BRANCH_COUNT + 1))
+                BRANCH_RESULTS=$(echo "$BRANCH_RESULTS" | jq \
+                  --arg repo "$FULL" \
+                  --arg branch "$branch" \
+                  --arg last_commit "$LAST_COMMIT_DATE" \
+                  '. + [{"repo": $repo, "branch": $branch, "last_commit": $last_commit}]')
+              fi
+            done
+          done
+        fi
+
+        BRANCHES_PATH="${OUTPUT_DIR}/stale-branches.json"
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --argjson count "$STALE_BRANCH_COUNT" \
+          --argjson threshold "$BRANCH_DAYS" \
+          --argjson branches "$BRANCH_RESULTS" \
+          '{scan_date: $scan_date, stale_threshold_days: $threshold, stale_branch_count: $count, stale_branches: $branches}' \
+          > "$BRANCHES_PATH"
+
+        echo "stale-branches-path=$BRANCHES_PATH" >> $GITHUB_OUTPUT
+        echo "stale-branch-count=$STALE_BRANCH_COUNT" >> $GITHUB_OUTPUT
+        echo "Found $STALE_BRANCH_COUNT stale branches"
+
+        # --- Stale PRs ---
+        STALE_PR_COUNT=0
+        PR_RESULTS="[]"
+
+        if [ "${{ inputs.check-prs }}" == "true" ]; then
+          echo "Scanning for stale PRs (no activity in ${PR_DAYS} days)..."
+
+          for repo in $REPO_NAMES; do
+            FULL="${ORG}/${repo}"
+
+            OPEN_PRS=$(gh pr list --repo "$FULL" --state open --json number,title,updatedAt,author,url 2>/dev/null || echo "[]")
+
+            STALE=$(echo "$OPEN_PRS" | jq --arg cutoff "$PR_CUTOFF" '[.[] | select(.updatedAt < $cutoff)]')
+            STALE_COUNT=$(echo "$STALE" | jq 'length')
+
+            if [ "$STALE_COUNT" -gt 0 ]; then
+              STALE_PR_COUNT=$((STALE_PR_COUNT + STALE_COUNT))
+              PR_RESULTS=$(echo "$PR_RESULTS" "$STALE" | jq -s --arg repo "$FULL" \
+                '.[0] + [.[1][] | . + {"repo": $repo}]')
+            fi
+          done
+        fi
+
+        PRS_PATH="${OUTPUT_DIR}/stale-prs.json"
+        jq -n \
+          --arg scan_date "$SCAN_DATE" \
+          --argjson count "$STALE_PR_COUNT" \
+          --argjson threshold "$PR_DAYS" \
+          --argjson prs "$PR_RESULTS" \
+          '{scan_date: $scan_date, stale_threshold_days: $threshold, stale_pr_count: $count, stale_prs: $prs}' \
+          > "$PRS_PATH"
+
+        echo "stale-prs-path=$PRS_PATH" >> $GITHUB_OUTPUT
+        echo "stale-pr-count=$STALE_PR_COUNT" >> $GITHUB_OUTPUT
+        echo "Found $STALE_PR_COUNT stale PRs"

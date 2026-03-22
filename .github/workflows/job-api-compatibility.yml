@@ -90,25 +90,10 @@ jobs:
           project-path: ${{ inputs.project-path }}
       
       - name: Check API surface compatibility
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          echo "Checking public API surface for breaking changes..."
-          echo "This is a placeholder for HoneyDrunk.Tools API compatibility checker"
-          
-          if [ -n "${{ inputs.api-compat-baseline }}" ]; then
-            echo "Baseline: ${{ inputs.api-compat-baseline }}"
-            echo "Command: hd-tools api check --baseline ${{ inputs.api-compat-baseline }}"
-          else
-            echo "No baseline specified, comparing against base branch"
-            echo "Command: hd-tools api check --compare-branch ${{ github.event.pull_request.base.ref || 'main' }}"
-          fi
-          
-          echo "::notice::API compatibility checking will be implemented via HoneyDrunk.Tools CLI"
-          
-          # Placeholder exit - replace with actual tool invocation
-          # hd-tools api check \
-          #   --project "${{ inputs.project-path }}" \
-          #   --baseline "${{ inputs.api-compat-baseline }}" \
-          #   --fail-on-breaking \
-          #   --output "./api-compat-report.json"
+        uses: ./.github/actions-repo/.github/actions/api/check-compatibility
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          baseline-ref: ${{ github.event.pull_request.base.ref || 'main' }}
+          baseline-path: ${{ inputs.api-compat-baseline }}
+          fail-on-breaking: 'true'

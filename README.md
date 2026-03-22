@@ -25,7 +25,7 @@ HoneyDrunk.Actions provides standardized CI/CD workflows that can be reused acro
 ✅ **Deep Scheduled Scans** - Comprehensive analysis without blocking development  
 ✅ **.NET 10.0 Support** - Latest .NET with easy version customization  
 ✅ **Cross-Platform** - Linux, Windows, macOS support  
-✅ **HoneyDrunk.Tools Integration** - Designed to work with external scanning CLIs  
+✅ **Composite Actions** - Reusable scanning and deployment actions  
 ✅ **Versioned Contracts** - Semantic versioning for stability  
 
 ## 🏗️ Workflow Families
@@ -425,7 +425,7 @@ permissions:
 All workflows are designed to be consumed via `uses:` syntax. No repo-specific logic.
 
 ### 2. Separation of Concerns
-This repo orchestrates CI behavior. Heavy scanning logic belongs in HoneyDrunk.Tools CLI.
+This repo orchestrates CI behavior. Complex scanning logic is extracted into composite actions under `.github/actions/`.
 
 ### 3. Fast PRs, Deep Scheduled Checks
 - PR workflows: Fast and minimal, only relevant to the diff
@@ -437,18 +437,18 @@ Consistent workflow names and minimal configuration required.
 ### 5. Versioned Contracts
 Breaking changes bump workflow versions. Semantic versioning for stability.
 
-## 🔧 Integration with HoneyDrunk.Tools
+## 🔧 Composite Actions
 
-Many workflows call placeholder commands that will be implemented in the HoneyDrunk.Tools CLI:
+Scanning and deployment logic is implemented as composite actions under `.github/actions/`. Workflows call these actions instead of embedding complex logic inline:
 
-- `hd-tools deps scan` - Dependency scanning
-- `hd-tools security sast` - SAST analysis
-- `hd-tools accessibility scan` - Accessibility testing
-- `hd-tools api check` - API compatibility checking
-- `hd-tools sbom generate` - SBOM generation
-- `hd-tools governance check` - Governance checks
+- Dependency scanning and reporting
+- SAST analysis
+- Accessibility testing
+- API compatibility checking
+- SBOM generation
+- Governance checks
 
-These placeholders make it clear where external tools are needed without embedding complex logic in YAML.
+Some of these are still being implemented. Placeholder steps in workflows will be replaced as composite actions are built out.
 
 ## 📝 Versioning
 

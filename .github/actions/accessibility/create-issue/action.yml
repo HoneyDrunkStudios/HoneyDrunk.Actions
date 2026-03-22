@@ -1,0 +1,113 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Create Accessibility Issue'
+description: 'Create or update a GitHub tracking issue when accessibility violations exceed a threshold'
+inputs:
+  report-path:
+    description: 'Path to the accessibility scan results JSON'
+    required: true
+  violation-threshold:
+    description: 'Create issue when violations exceed this count (0 = always)'
+    required: false
+    default: '0'
+  issue-label:
+    description: 'Label to apply to the tracking issue'
+    required: false
+    default: 'accessibility'
+  wcag-level:
+    description: 'WCAG level scanned (for issue body context)'
+    required: false
+    default: 'AA'
+outputs:
+  issue-number:
+    description: 'Number of the created or updated issue'
+    value: ${{ steps.issue.outputs.issue-number }}
+  issue-url:
+    description: 'URL of the created or updated issue'
+    value: ${{ steps.issue.outputs.issue-url }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Create or update accessibility issue
+      id: issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GH_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        REPORT="${{ inputs.report-path }}"
+        THRESHOLD=${{ inputs.violation-threshold }}
+        LABEL="${{ inputs.issue-label }}"
+        WCAG="${{ inputs.wcag-level }}"
+
+        if [ ! -f "$REPORT" ]; then
+          echo "::warning::Accessibility report not found at $REPORT"
+          echo "issue-number=" >> $GITHUB_OUTPUT
+          echo "issue-url=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        VIOLATIONS=$(jq '.violation_count // 0' "$REPORT")
+        CRITICAL=$(jq '.critical_count // 0' "$REPORT")
+        SCAN_DATE=$(jq -r '.scan_date // "unknown"' "$REPORT")
+
+        if [ "$VIOLATIONS" -le "$THRESHOLD" ]; then
+          echo "Violations ($VIOLATIONS) at or below threshold ($THRESHOLD) — no issue needed"
+          echo "issue-number=" >> $GITHUB_OUTPUT
+          echo "issue-url=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        TITLE="[Accessibility] WCAG ${WCAG} violations detected"
+
+        # Build issue body with summary
+        BODY="## Accessibility Scan Results\n\n"
+        BODY+="**Scan Date:** ${SCAN_DATE}\n"
+        BODY+="**WCAG Level:** ${WCAG}\n"
+        BODY+="**Total Violations:** ${VIOLATIONS}\n"
+        BODY+="**Critical/Error Violations:** ${CRITICAL}\n\n"
+
+        # Extract top violations by URL (up to 20)
+        URL_SUMMARY=$(jq -r '
+          [.results // {} | to_entries[] | {url: .key, count: (.value | length)}]
+          | sort_by(-.count)
+          | .[:20]
+          | .[]
+          | "| \(.url) | \(.count) |"
+        ' "$REPORT" 2>/dev/null || echo "| No detailed results available | - |")
+
+        BODY+="### Violations by Page\n\n"
+        BODY+="| URL | Violations |\n"
+        BODY+="|-----|------------|\n"
+        BODY+="${URL_SUMMARY}\n\n"
+
+        # Extract sample violations (up to 10)
+        SAMPLES=$(jq -r '
+          [.results // {} | to_entries[].value[]] | .[:10] | .[] |
+          "- **\(.code // "unknown")** (\(.type // "warning")): \(.message // "no message" | .[0:120])"
+        ' "$REPORT" 2>/dev/null || echo "- No detailed violation data available")
+
+        BODY+="### Sample Violations\n\n"
+        BODY+="${SAMPLES}\n\n"
+        BODY+="---\n"
+        BODY+="*Download the full accessibility report artifact for complete details.*\n"
+        BODY+="*This issue is automatically created and updated by the nightly accessibility scan.*"
+
+        # Check for existing open issue
+        EXISTING=$(gh issue list --label "$LABEL" --state open --json number,title \
+          --jq ".[] | select(.title == \"${TITLE}\") | .number" 2>/dev/null | head -n 1 || true)
+
+        if [ -n "$EXISTING" ]; then
+          echo "Updating existing issue #$EXISTING"
+          echo -e "$BODY" | gh issue edit "$EXISTING" --body-file -
+          ISSUE_URL=$(gh issue view "$EXISTING" --json url --jq '.url')
+          echo "issue-number=$EXISTING" >> $GITHUB_OUTPUT
+          echo "issue-url=$ISSUE_URL" >> $GITHUB_OUTPUT
+        else
+          echo "Creating new accessibility issue"
+          RESULT=$(echo -e "$BODY" | gh issue create --title "$TITLE" --label "$LABEL" --body-file - --json number,url)
+          ISSUE_NUM=$(echo "$RESULT" | jq -r '.number')
+          ISSUE_URL=$(echo "$RESULT" | jq -r '.url')
+          echo "issue-number=$ISSUE_NUM" >> $GITHUB_OUTPUT
+          echo "issue-url=$ISSUE_URL" >> $GITHUB_OUTPUT
+        fi

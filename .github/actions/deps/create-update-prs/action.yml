@@ -1,0 +1,113 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Create Dependency Update PRs'
+description: 'Create or update pull requests for outdated dependencies using GitHub CLI'
+inputs:
+  reports-directory:
+    description: 'Directory containing dependency report artifacts'
+    required: false
+    default: './all-dependency-reports'
+  branch-prefix:
+    description: 'Branch name prefix for update PRs'
+    required: false
+    default: 'deps/auto-update'
+  group-updates:
+    description: 'Combine multiple dependency updates into a single PR'
+    required: false
+    default: 'true'
+  labels:
+    description: 'Comma-separated labels to apply to PRs'
+    required: false
+    default: 'dependencies,automated'
+outputs:
+  prs-created:
+    description: 'Number of PRs created or updated'
+    value: ${{ steps.create-prs.outputs.prs-created }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Create dependency update PRs
+      id: create-prs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GH_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        REPORTS_DIR="${{ inputs.reports-directory }}"
+        BRANCH_PREFIX="${{ inputs.branch-prefix }}"
+        GROUP="${{ inputs.group-updates }}"
+        LABELS="${{ inputs.labels }}"
+        PRS_CREATED=0
+
+        if [ ! -d "$REPORTS_DIR" ]; then
+          echo "No dependency reports found at $REPORTS_DIR"
+          echo "prs-created=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Collect all outdated packages from reports
+        OUTDATED_PACKAGES="[]"
+        for report in $(find "$REPORTS_DIR" -name "*-outdated.json" -type f 2>/dev/null); do
+          PACKAGES=$(jq -r '.outdated_packages // []' "$report" 2>/dev/null || echo "[]")
+          OUTDATED_PACKAGES=$(echo "$OUTDATED_PACKAGES" "$PACKAGES" | jq -s '.[0] + .[1]')
+        done
+
+        TOTAL=$(echo "$OUTDATED_PACKAGES" | jq 'length')
+        if [ "$TOTAL" -eq 0 ]; then
+          echo "No outdated packages to update"
+          echo "prs-created=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "Found $TOTAL outdated packages across all reports"
+
+        DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')
+
+        if [ "$GROUP" == "true" ]; then
+          BRANCH_NAME="${BRANCH_PREFIX}/$(date +%Y-%m-%d)"
+          EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+
+          # Build PR body
+          PR_BODY="## Automated Dependency Updates\n\n"
+          PR_BODY+="**Scan Date:** $(date -u +"%Y-%m-%d %H:%M UTC")\n\n"
+          PR_BODY+="| Package | Current | Latest |\n|---------|---------|--------|\n"
+          PR_BODY+=$(echo "$OUTDATED_PACKAGES" | jq -r '.[] | "| \(.name) | \(.current) | \(.latest // .wanted) |"')
+
+          if [ -n "$EXISTING_PR" ]; then
+            gh pr edit "$EXISTING_PR" --body "$(echo -e "$PR_BODY")"
+            echo "Updated existing PR #$EXISTING_PR"
+            PRS_CREATED=1
+          else
+            # Check if branch already exists
+            if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+              echo "Branch $BRANCH_NAME already exists — skipping PR creation"
+            else
+              git checkout -b "$BRANCH_NAME"
+              # Commit an empty marker so the PR has a diff to review
+              echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .dependency-update-marker
+              git add .dependency-update-marker
+              git commit -m "chore(deps): flag outdated dependencies $(date +%Y-%m-%d)"
+              git push origin "$BRANCH_NAME"
+
+              IFS=',' read -ra LABEL_ARRAY <<< "$LABELS"
+              LABEL_ARGS=""
+              for label in "${LABEL_ARRAY[@]}"; do
+                LABEL_ARGS="$LABEL_ARGS --label $(echo "$label" | xargs)"
+              done
+
+              gh pr create \
+                --base "$DEFAULT_BRANCH" \
+                --head "$BRANCH_NAME" \
+                --title "chore(deps): update outdated dependencies $(date +%Y-%m-%d)" \
+                --body "$(echo -e "$PR_BODY")" \
+                $LABEL_ARGS
+
+              PRS_CREATED=1
+            fi
+          fi
+        else
+          echo "Per-package PRs are not yet supported — use group-updates=true"
+        fi
+
+        echo "prs-created=$PRS_CREATED" >> $GITHUB_OUTPUT
+        echo "Created or updated $PRS_CREATED dependency PRs"
