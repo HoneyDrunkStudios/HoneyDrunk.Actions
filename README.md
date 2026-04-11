@@ -534,6 +534,7 @@ Inputs:
 - `project-owner` (default: `HoneyDrunkStudios`)
 - `project-number` (default: `4`)
 - `issue-url` (optional override for callers)
+- `actions-ref` (optional; defaults to the ref the workflow was pinned at via `GITHUB_WORKFLOW_REF`, so scripts and config automatically stay aligned with the pinned workflow version — only override if you need to test a different ref)
 
 Secret:
 - `HIVE_FIELD_MIRROR_TOKEN` (or pass as `hive-field-mirror-token` in `workflow_call`)
