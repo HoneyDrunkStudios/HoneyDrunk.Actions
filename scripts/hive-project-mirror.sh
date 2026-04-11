@@ -205,6 +205,8 @@ if [[ -n "$INITIATIVE_SLUG" ]]; then
   fi
 fi
 
-update_text "$ADR_FIELD_ID" "$ADR_TEXT" 'ADR'
+if [[ -n "$ADR_TEXT" ]]; then
+  update_text "$ADR_FIELD_ID" "$ADR_TEXT" 'ADR'
+fi
 
 echo "Mirrored fields for ${ISSUE_OWNER}/${ISSUE_REPO}#${ISSUE_NUMBER}"

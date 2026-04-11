@@ -57,14 +57,16 @@ jobs:
           PROJECT_OWNER: ${{ inputs.project-owner || 'HoneyDrunkStudios' }}
           PROJECT_NUMBER: ${{ inputs.project-number || 4 }}
           HIVE_FIELD_MIRROR_TOKEN: ${{ secrets.hive-field-mirror-token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
+          ISSUE_URL: ${{ steps.issue.outputs.issue_url }}
         run: |
           set -euo pipefail
           if [[ -z "${HIVE_FIELD_MIRROR_TOKEN}" ]]; then
             echo "HIVE_FIELD_MIRROR_TOKEN is not configured." >&2
             exit 1
           fi
+          # Token may come from workflow_call secret or repo/org secret fallback.
           ./scripts/hive-project-mirror.sh \
-            --url "${{ steps.issue.outputs.issue_url }}" \
+            --url "${ISSUE_URL}" \
             --project-owner "${PROJECT_OWNER}" \
             --project-number "${PROJECT_NUMBER}" \
             --mapping-file .github/config/repo-to-node.yml

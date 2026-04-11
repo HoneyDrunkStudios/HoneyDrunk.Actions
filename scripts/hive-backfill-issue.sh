@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_OWNER="HoneyDrunkStudios"
 PROJECT_NUMBER="4"
 ISSUE_URL=""
+MAPPING_FILE="${SCRIPT_DIR}/../.github/config/repo-to-node.yml"
 
 usage() {
   cat <<'USAGE'
@@ -34,4 +35,5 @@ fi
 "${SCRIPT_DIR}/hive-project-mirror.sh" \
   --url "$ISSUE_URL" \
   --project-owner "$PROJECT_OWNER" \
-  --project-number "$PROJECT_NUMBER"
+  --project-number "$PROJECT_NUMBER" \
+  --mapping-file "$MAPPING_FILE"
