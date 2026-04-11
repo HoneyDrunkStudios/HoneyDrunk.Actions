@@ -62,7 +62,7 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required" >&2
+  echo "python3 is required for repo-to-node mapping lookup" >&2
   exit 1
 fi
 
