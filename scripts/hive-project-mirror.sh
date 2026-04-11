@@ -136,20 +136,9 @@ else
 fi
 
 if [[ -z "$ITEM_ID" ]]; then
-  lookup_query='query($project: ID!, $after: String) { node(id: $project) { ... on ProjectV2 { items(first: 100, after: $after) { nodes { id content { ... on Issue { id } } } pageInfo { hasNextPage endCursor } } } } }'
-  HAS_NEXT_PAGE="true"
-  END_CURSOR=""
-  while [[ "$HAS_NEXT_PAGE" == "true" && -z "$ITEM_ID" ]]; do
-    if [[ -n "$END_CURSOR" ]]; then
-      LOOKUP_JSON="$(gh api graphql -f query="$lookup_query" -f project="$PROJECT_ID" -f after="$END_CURSOR")"
-    else
-      LOOKUP_JSON="$(gh api graphql -f query="$lookup_query" -f project="$PROJECT_ID")"
-    fi
-
-    ITEM_ID="$(jq -r --arg issue_id "$ISSUE_NODE_ID" '.data.node.items.nodes[] | select(.content.id == $issue_id) | .id' <<<"$LOOKUP_JSON" | head -n1)"
-    HAS_NEXT_PAGE="$(jq -r '.data.node.items.pageInfo.hasNextPage' <<<"$LOOKUP_JSON")"
-    END_CURSOR="$(jq -r '.data.node.items.pageInfo.endCursor // empty' <<<"$LOOKUP_JSON")"
-  done
+  lookup_query='query($issue: ID!) { node(id: $issue) { ... on Issue { projectItems(first: 100) { nodes { id project { id } } } } } }'
+  LOOKUP_JSON="$(gh api graphql -f query="$lookup_query" -f issue="$ISSUE_NODE_ID")"
+  ITEM_ID="$(jq -r --arg project_id "$PROJECT_ID" '.data.node.projectItems.nodes[] | select(.project.id == $project_id) | .id' <<<"$LOOKUP_JSON" | head -n1)"
 fi
 
 if [[ -z "$ITEM_ID" ]]; then
