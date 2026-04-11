@@ -509,3 +509,77 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 ---
 
 **HoneyDrunk Studios** - Building better CI/CD pipelines, one action at a time.
+
+## 🐝 The Hive Field Mirror (ADR-0008 D4)
+
+`hive-field-mirror.yml` is a reusable workflow that mirrors issue labels into custom fields on **The Hive** (GitHub Project v2 #4).
+
+### What it updates
+
+| Source | Project field | Behavior |
+| --- | --- | --- |
+| `wave-1`, `wave-2`, `wave-3` | `Wave` (single select) | Maps to `Wave 1`, `Wave 2`, `Wave 3`; if none present sets `N/A`. |
+| `adr-####` labels | `ADR` (text) | Writes uppercase, comma-separated labels (example: `ADR-0005, ADR-0008`). |
+| `tier-1`, `tier-2`, `tier-3` | `Tier` (single select) | Direct mapping when present. If absent, the workflow leaves Tier unchanged. |
+| Repository name | `Node` (single select) | Uses `.github/config/repo-to-node.yml` lookup. |
+| `initiative-<slug>` | `Initiative` (single select) | Optional. Set only when label exists and option exists on the field. |
+
+The workflow intentionally **does not modify `Status`**.
+
+### Reusable workflow contract
+
+Workflow: `.github/workflows/hive-field-mirror.yml`
+
+Inputs:
+- `project-owner` (default: `HoneyDrunkStudios`)
+- `project-number` (default: `4`)
+- `issue-url` (optional override for callers)
+- `actions-ref` (optional; defaults to the ref the workflow was pinned at via `GITHUB_WORKFLOW_REF`, so scripts and config automatically stay aligned with the pinned workflow version — only override if you need to test a different ref)
+
+Secret:
+- `HIVE_FIELD_MIRROR_TOKEN` (or pass as `hive-field-mirror-token` in `workflow_call`)
+
+### Enable in a consuming repo
+
+Add `.github/workflows/hive-mirror.yml`:
+
+```yaml
+name: Hive Mirror
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled, edited]
+
+jobs:
+  mirror:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/hive-field-mirror.yml@v1
+    secrets:
+      hive-field-mirror-token: ${{ secrets.HIVE_FIELD_MIRROR_TOKEN }}
+```
+
+### Node lookup maintenance
+
+Update `.github/config/repo-to-node.yml` whenever a new repo/node is introduced.
+
+Format:
+
+```yaml
+Repository.Name: node-option-slug
+```
+
+### Token rotation
+
+1. Create a new fine-grained GitHub App/PAT token with:
+   - Issues read access on target repos.
+   - Organization Projects write access on `HoneyDrunkStudios`.
+2. Replace org secret `HIVE_FIELD_MIRROR_TOKEN`.
+3. Trigger the mirror workflow on a test issue to verify updates.
+4. Revoke old token.
+
+### One-off backfill
+
+Use `scripts/hive-backfill-issue.sh` to mirror one issue manually:
+
+```bash
+HIVE_FIELD_MIRROR_TOKEN=*** ./scripts/hive-backfill-issue.sh --url https://github.com/HoneyDrunkStudios/HoneyDrunk.Actions/issues/123
+```
