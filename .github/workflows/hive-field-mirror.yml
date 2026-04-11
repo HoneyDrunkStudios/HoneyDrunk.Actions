@@ -41,13 +41,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          ref: ${{ inputs.actions-ref || 'main' }}
+          ref: ${{ github.event_name == 'workflow_call' && inputs.actions-ref || 'main' }}
           path: honeydrunk-actions
 
       - name: Resolve issue URL
         id: issue
         env:
-          INPUT_ISSUE_URL: ${{ inputs.issue-url || '' }}
+          INPUT_ISSUE_URL: ${{ github.event_name == 'workflow_call' && inputs.issue-url || '' }}
           EVENT_ISSUE_URL: ${{ github.event.issue.html_url || '' }}
         run: |
           set -euo pipefail
@@ -63,8 +63,8 @@ jobs:
 
       - name: Mirror labels to The Hive custom fields
         env:
-          PROJECT_OWNER: ${{ inputs.project-owner || 'HoneyDrunkStudios' }}
-          PROJECT_NUMBER: ${{ inputs.project-number || 4 }}
+          PROJECT_OWNER: ${{ github.event_name == 'workflow_call' && inputs.project-owner || 'HoneyDrunkStudios' }}
+          PROJECT_NUMBER: ${{ github.event_name == 'workflow_call' && inputs.project-number || 4 }}
           HIVE_FIELD_MIRROR_TOKEN: ${{ secrets.hive-field-mirror-token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
           ISSUE_URL: ${{ steps.issue.outputs.issue_url }}
         run: |

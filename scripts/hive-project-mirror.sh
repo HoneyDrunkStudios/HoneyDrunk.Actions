@@ -122,7 +122,43 @@ if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "null" ]]; then
 fi
 
 add_item_query='mutation($project:ID!, $content:ID!) { addProjectV2ItemById(input:{projectId:$project, contentId:$content}) { item { id } } }'
-ITEM_ID="$(gh api graphql -f query="$add_item_query" -f project="$PROJECT_ID" -f content="$ISSUE_NODE_ID" --jq '.data.addProjectV2ItemById.item.id')"
+
+ITEM_ID=""
+set +e
+ADD_ITEM_OUTPUT="$(gh api graphql -f query="$add_item_query" -f project="$PROJECT_ID" -f content="$ISSUE_NODE_ID" 2>&1)"
+ADD_ITEM_EXIT_CODE=$?
+set -e
+
+if [[ $ADD_ITEM_EXIT_CODE -eq 0 ]]; then
+  ITEM_ID="$(jq -r '.data.addProjectV2ItemById.item.id // empty' <<<"$ADD_ITEM_OUTPUT")"
+else
+  echo "::warning::addProjectV2ItemById failed; attempting existing item lookup."
+fi
+
+if [[ -z "$ITEM_ID" ]]; then
+  lookup_query='query($project: ID!, $after: String) { node(id: $project) { ... on ProjectV2 { items(first: 100, after: $after) { nodes { id content { ... on Issue { id } } } pageInfo { hasNextPage endCursor } } } } }'
+  HAS_NEXT_PAGE="true"
+  END_CURSOR=""
+  while [[ "$HAS_NEXT_PAGE" == "true" && -z "$ITEM_ID" ]]; do
+    if [[ -n "$END_CURSOR" ]]; then
+      LOOKUP_JSON="$(gh api graphql -f query="$lookup_query" -f project="$PROJECT_ID" -f after="$END_CURSOR")"
+    else
+      LOOKUP_JSON="$(gh api graphql -f query="$lookup_query" -f project="$PROJECT_ID")"
+    fi
+
+    ITEM_ID="$(jq -r --arg issue_id "$ISSUE_NODE_ID" '.data.node.items.nodes[] | select(.content.id == $issue_id) | .id' <<<"$LOOKUP_JSON" | head -n1)"
+    HAS_NEXT_PAGE="$(jq -r '.data.node.items.pageInfo.hasNextPage' <<<"$LOOKUP_JSON")"
+    END_CURSOR="$(jq -r '.data.node.items.pageInfo.endCursor // empty' <<<"$LOOKUP_JSON")"
+  done
+fi
+
+if [[ -z "$ITEM_ID" ]]; then
+  echo "Failed to resolve project item ID for issue node ${ISSUE_NODE_ID}" >&2
+  if [[ $ADD_ITEM_EXIT_CODE -ne 0 ]]; then
+    echo "addProjectV2ItemById error output: $ADD_ITEM_OUTPUT" >&2
+  fi
+  exit 1
+fi
 
 FIELDS_JSON="$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
 
