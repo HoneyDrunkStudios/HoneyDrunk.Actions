@@ -1,0 +1,70 @@
+name: Hive Field Mirror
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled, edited]
+  workflow_call:
+    inputs:
+      project-owner:
+        description: GitHub org/user that owns the project.
+        required: false
+        type: string
+        default: HoneyDrunkStudios
+      project-number:
+        description: Project v2 number.
+        required: false
+        type: number
+        default: 4
+      issue-url:
+        description: Optional issue URL override for manual dispatchers.
+        required: false
+        type: string
+    secrets:
+      hive-field-mirror-token:
+        description: Token with issues read + organization projects write scopes.
+        required: false
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout actions repository
+        uses: actions/checkout@v4
+
+      - name: Resolve issue URL
+        id: issue
+        env:
+          INPUT_ISSUE_URL: ${{ inputs.issue-url || '' }}
+          EVENT_ISSUE_URL: ${{ github.event.issue.html_url || '' }}
+        run: |
+          set -euo pipefail
+          ISSUE_URL="${INPUT_ISSUE_URL}"
+          if [[ -z "${ISSUE_URL}" ]]; then
+            ISSUE_URL="${EVENT_ISSUE_URL}"
+          fi
+          if [[ -z "${ISSUE_URL}" ]]; then
+            echo "No issue URL available from workflow_call input or issues event payload." >&2
+            exit 1
+          fi
+          echo "issue_url=${ISSUE_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Mirror labels to The Hive custom fields
+        env:
+          PROJECT_OWNER: ${{ inputs.project-owner || 'HoneyDrunkStudios' }}
+          PROJECT_NUMBER: ${{ inputs.project-number || 4 }}
+          HIVE_FIELD_MIRROR_TOKEN: ${{ secrets.hive-field-mirror-token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HIVE_FIELD_MIRROR_TOKEN}" ]]; then
+            echo "HIVE_FIELD_MIRROR_TOKEN is not configured." >&2
+            exit 1
+          fi
+          ./scripts/hive-project-mirror.sh \
+            --url "${{ steps.issue.outputs.issue_url }}" \
+            --project-owner "${PROJECT_OWNER}" \
+            --project-number "${PROJECT_NUMBER}" \
+            --mapping-file .github/config/repo-to-node.yml
