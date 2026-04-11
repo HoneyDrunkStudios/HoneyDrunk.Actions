@@ -27,7 +27,7 @@ on:
     secrets:
       hive-field-mirror-token:
         description: Token with issues read + organization projects write scopes.
-        required: false
+        required: true
 
 permissions:
   contents: read
