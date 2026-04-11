@@ -61,6 +61,11 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required" >&2
+  exit 1
+fi
+
 ISSUE_JSON="$(gh api "repos/${ISSUE_OWNER}/${ISSUE_REPO}/issues/${ISSUE_NUMBER}")"
 ISSUE_NODE_ID="$(jq -r '.node_id' <<<"$ISSUE_JSON")"
 if [[ -z "$ISSUE_NODE_ID" || "$ISSUE_NODE_ID" == "null" ]]; then
@@ -75,7 +80,7 @@ TIER_LABEL=""
 INITIATIVE_SLUG=""
 ADR_LABELS=()
 
-for label in "${LABELS[@]:-}"; do
+for label in "${LABELS[@]}"; do
   case "$label" in
     wave-1|wave-2|wave-3) WAVE_LABEL="$label" ;;
     tier-1|tier-2|tier-3) TIER_LABEL="$label" ;;

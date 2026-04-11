@@ -19,6 +19,11 @@ on:
         description: Optional issue URL override for manual dispatchers.
         required: false
         type: string
+      actions-ref:
+        description: Ref (branch/tag/SHA) of HoneyDrunk.Actions to checkout for scripts/config.
+        required: false
+        type: string
+        default: main
     secrets:
       hive-field-mirror-token:
         description: Token with issues read + organization projects write scopes.
@@ -32,8 +37,12 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout actions repository
+      - name: Checkout HoneyDrunk.Actions repository
         uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.actions-ref || 'main' }}
+          path: honeydrunk-actions
 
       - name: Resolve issue URL
         id: issue
@@ -65,8 +74,8 @@ jobs:
             exit 1
           fi
           # Token may come from workflow_call secret or repo/org secret fallback.
-          ./scripts/hive-project-mirror.sh \
+          ./honeydrunk-actions/scripts/hive-project-mirror.sh \
             --url "${ISSUE_URL}" \
             --project-owner "${PROJECT_OWNER}" \
             --project-number "${PROJECT_NUMBER}" \
-            --mapping-file .github/config/repo-to-node.yml
+            --mapping-file ./honeydrunk-actions/.github/config/repo-to-node.yml
