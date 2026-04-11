@@ -551,7 +551,7 @@ on:
 
 jobs:
   mirror:
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/hive-field-mirror.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/hive-field-mirror.yml@v1
     secrets:
       hive-field-mirror-token: ${{ secrets.HIVE_FIELD_MIRROR_TOKEN }}
 ```
