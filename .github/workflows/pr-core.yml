@@ -144,7 +144,7 @@ jobs:
     with:
       runs-on: ${{ inputs.runs-on }}
       scan-mode: 'diff-only'
-  
+
   # Job 4: Accessibility Check (Optional)
   accessibility-check:
     name: Minimal Accessibility Check
