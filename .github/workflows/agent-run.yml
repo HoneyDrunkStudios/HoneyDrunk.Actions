@@ -169,6 +169,7 @@ jobs:
         with:
           prompt: ${{ steps.resolve.outputs.prompt }}
           anthropic_api_key: ${{ secrets.anthropic-api-key }}
+          github_token: ${{ secrets.github-token }}
           claude_args: |
             --allowedTools ${{ inputs.allowed-tools }}
             --max-turns ${{ inputs.max-turns }}
