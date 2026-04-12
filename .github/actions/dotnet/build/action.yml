@@ -25,8 +25,26 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if [ "${{ inputs.no-restore }}" == "true" ]; then
-          dotnet build ${{ inputs.project-path }} --configuration ${{ inputs.configuration }} --no-restore
+        TARGET="${{ inputs.project-path }}"
+        if [ -n "$TARGET" ] && [ "$TARGET" != "." ]; then
+          if [ "${{ inputs.no-restore }}" == "true" ]; then
+            # Some .slnx-based repos still require an evaluation-time restore during build
+            # on clean runners, even after an explicit restore step has completed.
+            case "$TARGET" in
+              *.slnx)
+                dotnet build "$TARGET" --configuration ${{ inputs.configuration }}
+                ;;
+              *)
+                dotnet build "$TARGET" --configuration ${{ inputs.configuration }} --no-restore
+                ;;
+            esac
+          else
+            dotnet build "$TARGET" --configuration ${{ inputs.configuration }}
+          fi
         else
-          dotnet build ${{ inputs.project-path }} --configuration ${{ inputs.configuration }}
+          if [ "${{ inputs.no-restore }}" == "true" ]; then
+            dotnet build --configuration ${{ inputs.configuration }} --no-restore
+          else
+            dotnet build --configuration ${{ inputs.configuration }}
+          fi
         fi
