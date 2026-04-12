@@ -309,7 +309,7 @@ jobs:
       
       - name: Create artifacts directory
         shell: bash
-        run: mkdir -p ${{ inputs.working-directory }}/artifacts
+        run: mkdir -p "${{ inputs.working-directory }}/artifacts"
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
