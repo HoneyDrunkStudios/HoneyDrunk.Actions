@@ -197,8 +197,10 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: ./.github/actions/common/checkout-actions-repo
+        uses: actions/checkout@v4
         with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Extract version from tag
@@ -281,8 +283,10 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: ./.github/actions/common/checkout-actions-repo
+        uses: actions/checkout@v4
         with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
@@ -390,8 +394,10 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: ./.github/actions/common/checkout-actions-repo
+        uses: actions/checkout@v4
         with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
@@ -451,8 +457,10 @@ jobs:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: ./.github/actions/common/checkout-actions-repo
+        uses: actions/checkout@v4
         with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
@@ -524,8 +532,10 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Checkout HoneyDrunk.Actions
-        uses: ./.github/actions/common/checkout-actions-repo
+        uses: actions/checkout@v4
         with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
       
       - name: Validate container inputs
