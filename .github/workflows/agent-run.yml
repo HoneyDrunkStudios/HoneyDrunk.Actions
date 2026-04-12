@@ -76,6 +76,13 @@ on:
         required: false
         type: number
         default: 30
+      model:
+        description: >-
+          Claude model ID to use (e.g. claude-haiku-4-5-20251001,
+          claude-sonnet-4-6). Leave empty to use the action default (Sonnet).
+        required: false
+        type: string
+        default: ''
       architecture-ref:
         description: 'Git ref of HoneyDrunk.Architecture to checkout.'
         required: false
@@ -173,6 +180,7 @@ jobs:
           claude_args: |
             --allowedTools ${{ inputs.allowed-tools }}
             --max-turns ${{ inputs.max-turns }}
+            ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
 
       - name: Run agent — Codex
         if: ${{ inputs.provider == 'codex' }}
