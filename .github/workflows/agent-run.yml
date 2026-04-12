@@ -1,0 +1,181 @@
+# ==============================================================================
+# Agent Run — Generic Reusable AI Agent Workflow
+# ==============================================================================
+# Purpose:
+#   Reusable workflow that checks out HoneyDrunk.Architecture and invokes an
+#   AI agent (Claude Code Action or Codex) against it. Accepts either a named
+#   agent definition (resolved to .claude/agents/{agent}.md in Architecture)
+#   or a direct prompt string.
+#
+#   This is the single entrypoint for all agent-driven work in the Grid.
+#   D8 execution triggers, governance syncs, and any future agentic workflows
+#   call this workflow rather than wiring their own AI invocations.
+#
+# Usage example (named agent):
+#   jobs:
+#     sync:
+#       uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/agent-run.yml@main
+#       with:
+#         agent: initiatives-sync
+#         provider: claude
+#       secrets:
+#         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         github-token: ${{ secrets.INITIATIVES_SYNC_TOKEN }}
+#
+# Usage example (direct prompt):
+#   jobs:
+#     run:
+#       uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/agent-run.yml@main
+#       with:
+#         prompt: 'Read catalogs/grid-health.json and summarise Node health as a PR comment.'
+#       secrets:
+#         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         github-token: ${{ secrets.GITHUB_TOKEN }}
+# ==============================================================================
+
+name: Agent Run
+
+on:
+  workflow_call:
+    inputs:
+      provider:
+        description: 'AI provider: claude | codex. Default: claude.'
+        required: false
+        type: string
+        default: 'claude'
+      agent:
+        description: >-
+          Agent name. Resolves to .claude/agents/{agent}.md in the Architecture
+          repo. Mutually exclusive with prompt — agent takes precedence when
+          both are supplied.
+        required: false
+        type: string
+        default: ''
+      prompt:
+        description: >-
+          Direct prompt text. Used when agent is not set. Ignored if agent is
+          provided.
+        required: false
+        type: string
+        default: ''
+      checkout-target:
+        description: >-
+          Optional second repo to checkout alongside Architecture
+          (e.g. HoneyDrunkStudios/HoneyDrunk.Vault). Checked out at path
+          target-repo/ so the agent can read and write to it.
+        required: false
+        type: string
+        default: ''
+      allowed-tools:
+        description: 'Comma-separated list of tools the agent may use.'
+        required: false
+        type: string
+        default: 'Read,Grep,Glob,Edit,Write,Bash,TodoWrite'
+      max-turns:
+        description: 'Maximum agent turns before stopping.'
+        required: false
+        type: number
+        default: 30
+      architecture-ref:
+        description: 'Git ref of HoneyDrunk.Architecture to checkout.'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      anthropic-api-key:
+        description: 'Anthropic API key. Required when provider=claude.'
+        required: false
+      openai-api-key:
+        description: 'OpenAI API key. Required when provider=codex.'
+        required: false
+      github-token:
+        description: >-
+          Token with contents:write and pull-requests:write on Architecture,
+          plus issues:read on any repos whose issues the agent will query
+          via the gh CLI.
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Architecture
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Architecture
+          ref: ${{ inputs.architecture-ref }}
+          token: ${{ secrets.github-token }}
+
+      - name: Checkout target repo
+        if: ${{ inputs.checkout-target != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.checkout-target }}
+          token: ${{ secrets.github-token }}
+          path: target-repo
+
+      - name: Configure git identity
+        run: |
+          git config user.name "hd-agent[bot]"
+          git config user.email "hd-agent[bot]@honeydrunkstudios.dev"
+
+      - name: Validate inputs
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          AGENT: ${{ inputs.agent }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          set -euo pipefail
+          if [[ "${PROVIDER}" != "claude" && "${PROVIDER}" != "codex" ]]; then
+            echo "::error::Unsupported provider '${PROVIDER}'. Must be 'claude' or 'codex'."
+            exit 1
+          fi
+          if [[ -z "${AGENT}" && -z "${PROMPT}" ]]; then
+            echo "::error::Either 'agent' or 'prompt' must be provided."
+            exit 1
+          fi
+
+      - name: Resolve prompt
+        id: resolve
+        env:
+          AGENT: ${{ inputs.agent }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${AGENT}" ]]; then
+            {
+              echo "prompt<<EOF_PROMPT"
+              echo "You are the **${AGENT}** agent. Read your full instructions from \`.claude/agents/${AGENT}.md\` first, then execute your full workflow as described there."
+              echo "EOF_PROMPT"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "prompt<<EOF_PROMPT"
+              printf '%s' "${PROMPT}"
+              echo ""
+              echo "EOF_PROMPT"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run agent — Claude
+        if: ${{ inputs.provider == 'claude' || inputs.provider == '' }}
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        with:
+          prompt: ${{ steps.resolve.outputs.prompt }}
+          anthropic_api_key: ${{ secrets.anthropic-api-key }}
+          claude_args: |
+            --allowedTools ${{ inputs.allowed-tools }}
+            --max-turns ${{ inputs.max-turns }}
+
+      - name: Run agent — Codex
+        if: ${{ inputs.provider == 'codex' }}
+        run: |
+          # TODO: wire openai/codex-action once stable
+          echo "::error::Codex provider is not yet wired. Use provider: claude."
+          exit 1
