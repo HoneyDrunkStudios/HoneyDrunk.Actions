@@ -123,6 +123,22 @@ jobs:
           git config user.name "hd-agent[bot]"
           git config user.email "hd-agent[bot]@honeydrunkstudios.dev"
 
+      - name: Validate inputs
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          AGENT: ${{ inputs.agent }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          set -euo pipefail
+          if [[ "${PROVIDER}" != "claude" && "${PROVIDER}" != "codex" ]]; then
+            echo "::error::Unsupported provider '${PROVIDER}'. Must be 'claude' or 'codex'."
+            exit 1
+          fi
+          if [[ -z "${AGENT}" && -z "${PROMPT}" ]]; then
+            echo "::error::Either 'agent' or 'prompt' must be provided."
+            exit 1
+          fi
+
       - name: Resolve prompt
         id: resolve
         env:
