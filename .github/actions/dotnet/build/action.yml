@@ -25,6 +25,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        set -euo pipefail
         TARGET="${{ inputs.project-path }}"
         if [ -n "$TARGET" ] && [ "$TARGET" != "." ]; then
           if [ "${{ inputs.no-restore }}" == "true" ]; then
@@ -32,19 +33,29 @@ runs:
             # on clean runners, even after an explicit restore step has completed.
             case "$TARGET" in
               *.slnx)
-                dotnet build "$TARGET" --configuration ${{ inputs.configuration }}
+                dotnet build "$TARGET" --configuration "${{ inputs.configuration }}"
                 ;;
               *)
-                dotnet build "$TARGET" --configuration ${{ inputs.configuration }} --no-restore
+                dotnet build "$TARGET" --configuration "${{ inputs.configuration }}" --no-restore
                 ;;
             esac
           else
-            dotnet build "$TARGET" --configuration ${{ inputs.configuration }}
+            dotnet build "$TARGET" --configuration "${{ inputs.configuration }}"
           fi
         else
           if [ "${{ inputs.no-restore }}" == "true" ]; then
-            dotnet build --configuration ${{ inputs.configuration }} --no-restore
+            # When no explicit target is provided, dotnet may auto-select a .slnx
+            # from the working directory. Build it explicitly without --no-restore
+            # to avoid evaluation-time restore failures on clean runners.
+            shopt -s nullglob
+            slnx_files=( *.slnx )
+            shopt -u nullglob
+            if [ "${#slnx_files[@]}" -eq 1 ]; then
+              dotnet build "${slnx_files[0]}" --configuration "${{ inputs.configuration }}"
+            else
+              dotnet build --configuration "${{ inputs.configuration }}" --no-restore
+            fi
           else
-            dotnet build --configuration ${{ inputs.configuration }}
+            dotnet build --configuration "${{ inputs.configuration }}"
           fi
         fi
