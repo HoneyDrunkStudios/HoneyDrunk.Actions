@@ -6,10 +6,11 @@ PROJECT_NUMBER="4"
 ISSUE_URL=""
 TOKEN="${HIVE_FIELD_MIRROR_TOKEN:-${GH_TOKEN:-}}"
 MAPPING_FILE=".github/config/repo-to-node.yml"
+ACTOR=""
 
 usage() {
   cat <<'USAGE'
-Usage: hive-project-mirror.sh --url <issue-url> [--project-owner <owner>] [--project-number <number>] [--mapping-file <path>] [--token <token>]
+Usage: hive-project-mirror.sh --url <issue-url> [--actor <Agent|Human>] [--project-owner <owner>] [--project-number <number>] [--mapping-file <path>] [--token <token>]
 USAGE
 }
 
@@ -19,6 +20,7 @@ while [[ $# -gt 0 ]]; do
     --project-owner) PROJECT_OWNER="$2"; shift 2 ;;
     --project-number) PROJECT_NUMBER="$2"; shift 2 ;;
     --mapping-file) MAPPING_FILE="$2"; shift 2 ;;
+    --actor) ACTOR="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
@@ -237,6 +239,12 @@ fi
 
 if [[ -n "$ADR_TEXT" ]]; then
   update_text "$ADR_FIELD_ID" "$ADR_TEXT" 'ADR'
+fi
+
+if [[ -n "$ACTOR" ]]; then
+  ACTOR_FIELD_ID="$(get_field_id 'Actor')"
+  ACTOR_OPTION_ID="$(get_single_option_id 'Actor' "$ACTOR")"
+  update_single_select "$ACTOR_FIELD_ID" "$ACTOR_OPTION_ID" 'Actor'
 fi
 
 echo "Mirrored fields for ${ISSUE_OWNER}/${ISSUE_REPO}#${ISSUE_NUMBER}"
