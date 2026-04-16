@@ -92,7 +92,11 @@ on:
     
     secrets:
       github-token:
-        description: 'GitHub token for creating issues'
+        description: >-
+          PAT for creating/updating issues (the create-issues feature).
+          Falls back to github.token when not provided.
+          Note: the permissions block below scopes github.token only;
+          if a PAT is passed here, its scopes are managed at the token level.
         required: false
 
 permissions:
