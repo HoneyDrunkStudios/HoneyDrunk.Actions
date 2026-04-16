@@ -1,0 +1,12 @@
+# ==============================================================================
+# Gitleaks configuration
+# ==============================================================================
+# Auto-discovered by gitleaks when scanning this repo.
+# Extends the shared baseline at .github/config/gitleaks.toml.
+# Add repo-specific exceptions below only when genuinely needed.
+# ==============================================================================
+
+title = "HoneyDrunk gitleaks config"
+
+[extend]
+path = ".github/config/gitleaks.toml"

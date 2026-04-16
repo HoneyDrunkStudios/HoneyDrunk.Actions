@@ -112,8 +112,7 @@ on:
         required: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   detect-dotnet-outdated:
@@ -257,6 +256,9 @@ jobs:
     if: ${{ inputs.create-update-prs }}
     needs: [detect-dotnet-outdated, detect-npm-outdated]
     runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: write
+      pull-requests: write
     
     steps:
       - name: Checkout repository

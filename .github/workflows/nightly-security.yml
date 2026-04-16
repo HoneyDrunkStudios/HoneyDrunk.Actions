@@ -246,27 +246,69 @@ jobs:
     name: Full Codebase Secret Scan
     if: ${{ inputs.enable-secret-scan }}
     runs-on: ${{ inputs.runs-on }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Checkout HoneyDrunk.Actions (shared gitleaks config)
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
       - name: Create reports directory
         shell: bash
         run: mkdir -p ./security-reports
 
+      - name: Resolve gitleaks config
+        id: gitleaks-config
+        shell: bash
+        run: |
+          if [ -f ".gitleaks.toml" ]; then
+            echo "Using repo-local .gitleaks.toml"
+            echo "path=.gitleaks.toml" >> $GITHUB_OUTPUT
+          else
+            echo "Using shared HoneyDrunk.Actions gitleaks config"
+            echo "path=.github/actions-repo/.github/config/gitleaks.toml" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION="8.21.2"
+          GITLEAKS_TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          GITLEAKS_BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+
+          curl -sSfL "${GITLEAKS_BASE_URL}/${GITLEAKS_TARBALL}" -o "/tmp/${GITLEAKS_TARBALL}"
+          curl -sSfL "${GITLEAKS_BASE_URL}/checksums.txt" -o /tmp/gitleaks_checksums.txt
+
+          cd /tmp
+          grep "  ${GITLEAKS_TARBALL}$" gitleaks_checksums.txt | sha256sum -c -
+          tar -xzf "${GITLEAKS_TARBALL}" -C /tmp gitleaks
+          cd -
+
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
       - name: Run gitleaks full-history scan
-        id: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: --full-history --report-format sarif --report-path ./security-reports/secrets-scan.sarif
-        env:
-          GITLEAKS_LICENSE: ${{ secrets.github-token || github.token }}
+        shell: bash
+        run: |
+          gitleaks detect \
+            --source . \
+            --config "${{ steps.gitleaks-config.outputs.path }}" \
+            --report-format sarif \
+            --report-path ./security-reports/secrets-scan.sarif \
+            --redact \
+            --exit-code 0 \
+            --log-level info
 
       - name: Upload secrets SARIF to GitHub Security
-        if: always()
+        if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
@@ -280,7 +322,7 @@ jobs:
         run: |
           if [ -f "./security-reports/secrets-scan.sarif" ]; then
             FINDING_COUNT=$(python3 -c "
-          import json, sys
+          import json
           with open('./security-reports/secrets-scan.sarif') as f:
               sarif = json.load(f)
           total = sum(len(r.get('results', [])) for r in sarif.get('runs', []))
@@ -296,7 +338,7 @@ jobs:
           fi
 
       - name: Upload secret scan report
-        if: always()
+        if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
           name: secret-scan-report
