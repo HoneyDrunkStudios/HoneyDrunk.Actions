@@ -2,12 +2,32 @@
 # HoneyDrunk Grid — shared gitleaks configuration
 # ==============================================================================
 # Consumed by .github/workflows/nightly-security.yml across every repo in the
-# grid. Layers an allowlist for documentation placeholder secrets on top of the
+# grid. Adds allowlists for documentation placeholder secrets on top of the
 # gitleaks default ruleset.
 #
 # To add repo-specific exceptions, commit a `.gitleaks.toml` to the repo root
 # that sets `[extend] path = "<this-file>"` and adds its own allowlists. The
 # nightly-security workflow prefers a repo-local config if present.
+#
+# --- How gitleaks allowlists work ---
+#
+# An allowlist suppresses a finding when its conditions match. Each allowlist
+# entry can specify `paths`, `regexes`, `commits`, and `stopwords`:
+#
+#   paths   — matched against the file path of the finding
+#   regexes — matched against the EXTRACTED SECRET VALUE (not the full line
+#             or file content). Anchors like ^ and $ refer to the start/end
+#             of the secret string itself, so multiline mode is irrelevant.
+#   commits — matched against the commit SHA
+#
+# Within each group, entries are OR'd (any match satisfies the group).
+# The `condition` field controls how groups relate to each other:
+#   "AND" = all specified groups must match
+#   "OR"  = any group matching is sufficient (default)
+#
+# We use "AND" so both the path AND the secret value must match — a real
+# secret that happens to look like a placeholder is still caught if it
+# appears outside documentation.
 # ==============================================================================
 
 title = "HoneyDrunk Grid shared gitleaks config"
@@ -18,10 +38,10 @@ useDefault = true
 # ------------------------------------------------------------------------------
 # Documentation placeholders
 # ------------------------------------------------------------------------------
-# Code samples in README/docs use obvious fake values like "test-api-key-12345"
-# or "my-api-key-12345". Gitleaks' generic-api-key rule flags them. Scope the
-# allowlist to markdown/docs paths so a real secret leaking into source is still
-# caught.
+# Code samples in README and docs use obvious fake values like
+# "test-api-key-12345" or "my-api-key-12345". The generic-api-key rule flags
+# these. Scoped to markdown and docs paths so a real secret leaking into
+# source code is still caught.
 [[allowlists]]
 description = "Documentation placeholder API keys and secrets"
 condition = "AND"
@@ -38,8 +58,13 @@ regexes = [
 # ------------------------------------------------------------------------------
 # Hex identifiers in documentation
 # ------------------------------------------------------------------------------
-# Azure Key Vault secret versions are 32-char hex strings and are legitimately
-# shown in docs as example identifiers (not secrets). Allow only inside docs.
+# Azure Key Vault secret versions are 32-char hex strings shown in docs as
+# example identifiers (e.g. "3f92c96c7d9e4f1e9a5e2bb0a1b7e3a1"). These are
+# not secrets — they are opaque version pointers.
+#
+# The anchors (^ and $) ensure the extracted secret is exactly 32 lowercase
+# hex characters and nothing more. Because gitleaks matches `regexes` against
+# the extracted secret value (not the full line), multiline mode is not needed.
 [[allowlists]]
 description = "Hex identifiers in docs (e.g. AKV secret version IDs)"
 condition = "AND"
@@ -48,5 +73,5 @@ paths = [
   '''(?i)^docs/.*''',
 ]
 regexes = [
-  '''[a-f0-9]{32}''',
+  '''^[a-f0-9]{32}$''',
 ]
