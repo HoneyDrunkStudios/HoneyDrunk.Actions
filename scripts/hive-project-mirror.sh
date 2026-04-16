@@ -242,9 +242,19 @@ if [[ -n "$ADR_TEXT" ]]; then
 fi
 
 if [[ -n "$ACTOR" ]]; then
-  ACTOR_FIELD_ID="$(get_field_id 'Actor')"
-  ACTOR_OPTION_ID="$(get_single_option_id 'Actor' "$ACTOR")"
-  update_single_select "$ACTOR_FIELD_ID" "$ACTOR_OPTION_ID" 'Actor'
+  case "${ACTOR,,}" in
+    agent) ACTOR='Agent' ;;
+    human) ACTOR='Human' ;;
+    *)
+      echo "::warning::Invalid --actor value '${ACTOR}'. Allowed: Agent, Human"
+      ACTOR=''
+      ;;
+  esac
+  if [[ -n "$ACTOR" ]]; then
+    ACTOR_FIELD_ID="$(get_field_id 'Actor')"
+    ACTOR_OPTION_ID="$(get_single_option_id 'Actor' "$ACTOR")"
+    update_single_select "$ACTOR_FIELD_ID" "$ACTOR_OPTION_ID" 'Actor'
+  fi
 fi
 
 echo "Mirrored fields for ${ISSUE_OWNER}/${ISSUE_REPO}#${ISSUE_NUMBER}"
