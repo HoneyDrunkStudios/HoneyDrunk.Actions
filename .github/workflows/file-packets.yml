@@ -1,0 +1,128 @@
+name: File Issue Packets
+
+on:
+  workflow_call:
+    inputs:
+      architecture-ref:
+        description: Branch of HoneyDrunk.Architecture to checkout. Must be a branch ref (not a SHA) so the manifest commit can be pushed back. Defaults to the caller's branch.
+        required: false
+        type: string
+        default: ''
+      packets-dir:
+        description: Path (relative to Architecture repo root) to scan for active packet .md files.
+        required: false
+        type: string
+        default: generated/issue-packets/active
+      manifest-path:
+        description: Path (relative to Architecture repo root) of the filed-packets manifest.
+        required: false
+        type: string
+        default: generated/issue-packets/filed-packets.json
+      project-owner:
+        description: GitHub org/user that owns The Hive project.
+        required: false
+        type: string
+        default: HoneyDrunkStudios
+      project-number:
+        description: The Hive project v2 number.
+        required: false
+        type: number
+        default: 4
+      architecture-repo:
+        description: owner/name of the Architecture repo.
+        required: false
+        type: string
+        default: HoneyDrunkStudios/HoneyDrunk.Architecture
+      actions-ref:
+        description: Ref of HoneyDrunk.Actions to checkout for scripts/config. Defaults to the called workflow ref.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      hive-field-mirror-token:
+        description: Token with issues:write on target repos, projects:write on The Hive, and contents:write on the Architecture repo.
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: file-packets-${{ inputs.architecture-repo }}
+  cancel-in-progress: false
+
+jobs:
+  file:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve checkout refs
+        id: refs
+        env:
+          INPUT_ARCHITECTURE_REF: ${{ inputs.architecture-ref }}
+          INPUT_ACTIONS_REF: ${{ inputs.actions-ref }}
+          CALLER_REF_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_ARCHITECTURE_REF}" ]]; then
+            echo "architecture=${INPUT_ARCHITECTURE_REF}" >> "$GITHUB_OUTPUT"
+          else
+            echo "architecture=${CALLER_REF_NAME:-main}" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${INPUT_ACTIONS_REF}" ]]; then
+            echo "actions=${INPUT_ACTIONS_REF}" >> "$GITHUB_OUTPUT"
+          else
+            echo "actions=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout HoneyDrunk.Architecture
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.architecture-repo }}
+          ref: ${{ steps.refs.outputs.architecture }}
+          path: architecture
+          token: ${{ secrets.hive-field-mirror-token }}
+          persist-credentials: true
+
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ steps.refs.outputs.actions }}
+          path: honeydrunk-actions
+
+      - name: Install PyYAML
+        run: python3 -m pip install --user pyyaml
+
+      - name: File packets
+        env:
+          GH_TOKEN: ${{ secrets.hive-field-mirror-token }}
+          HIVE_FIELD_MIRROR_TOKEN: ${{ secrets.hive-field-mirror-token }}
+          PACKETS_DIR: architecture/${{ inputs.packets-dir }}
+          MANIFEST: architecture/${{ inputs.manifest-path }}
+          PROJECT_OWNER: ${{ inputs.project-owner }}
+          PROJECT_NUMBER: ${{ inputs.project-number }}
+          ARCHITECTURE_REPO: ${{ inputs.architecture-repo }}
+        run: |
+          set -euo pipefail
+          ./honeydrunk-actions/scripts/file-packets.sh \
+            --packets-dir "$PACKETS_DIR" \
+            --manifest "$MANIFEST" \
+            --project-owner "$PROJECT_OWNER" \
+            --project-number "$PROJECT_NUMBER" \
+            --architecture-repo "$ARCHITECTURE_REPO" \
+            --mapping-file ./honeydrunk-actions/.github/config/repo-to-node.yml
+
+      - name: Commit updated manifest
+        working-directory: architecture
+        env:
+          MANIFEST_PATH: ${{ inputs.manifest-path }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "$MANIFEST_PATH"; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$MANIFEST_PATH"
+          git commit -m "chore(packets): update filed-packets manifest [skip ci]"
+          git push
