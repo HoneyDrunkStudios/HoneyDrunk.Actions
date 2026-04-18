@@ -203,11 +203,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Detect repo-local CodeQL config
+        id: codeql-config
+        shell: bash
+        run: |
+          if [ -f "./.github/codeql/codeql-config.yml" ]; then
+            echo "path=./.github/codeql/codeql-config.yml" >> $GITHUB_OUTPUT
+          elif [ -f "./.github/codeql/codeql-config.yaml" ]; then
+            echo "path=./.github/codeql/codeql-config.yaml" >> $GITHUB_OUTPUT
+          else
+            echo "path=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: csharp
           queries: security-and-quality
+          config-file: ${{ steps.codeql-config.outputs.path }}
 
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v4
@@ -484,11 +497,17 @@ jobs:
       - name: Consolidate security findings
         id: consolidate
         shell: bash
+        env:
+          # Use github.token (not the PAT) for the API query — the workflow's
+          # permissions block grants security-events: write here, whereas the
+          # PAT is scoped for issue creation in the next step.
+          GH_TOKEN: ${{ github.token }}
         run: |
           SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           TOTAL_ISSUES=0
 
-          # Count vulnerability findings
+          # Count vulnerability findings (from `dotnet list --vulnerable`, not uploaded
+          # to Code Scanning — so raw count is the right source of truth here).
           VULN_COUNT=0
           if [ -f "./all-security-reports/vulnerability-report/vulnerabilities.json" ]; then
             VULN_COUNT=$(python3 -c "
@@ -499,41 +518,28 @@ jobs:
           " 2>/dev/null || echo "0")
           fi
 
-          # Count SAST findings from SARIF
-          SAST_COUNT=0
-          for sarif in ./all-security-reports/sast-report/*.sarif; do
-            if [ -f "$sarif" ]; then
-              COUNT=$(python3 -c "
-          import json
-          with open('$sarif') as f:
-              d = json.load(f)
-          print(sum(len(r.get('results', [])) for r in d.get('runs', [])))
-          " 2>/dev/null || echo "0")
-              SAST_COUNT=$((SAST_COUNT + COUNT))
+          # Count SAST/Secret/IaC findings from the GitHub Code Scanning API with
+          # state=open. This honors CodeQL query-filter exclusions (from a repo's
+          # .github/codeql/codeql-config.yml) AND user dismissals in the Security
+          # tab, so the summary reports what still needs attention rather than raw
+          # scanner output. Upload-sarif waits for processing by default, so the
+          # API reflects the just-uploaded state by the time we query here.
+          API_BASE="/repos/${{ github.repository }}/code-scanning/alerts?state=open&per_page=100"
+
+          count_open_alerts() {
+            local tool="$1"
+            local count
+            if count=$(gh api "${API_BASE}&tool_name=${tool}" --jq 'length' 2>&1); then
+              echo "$count"
+            else
+              echo "::warning::Failed to query Code Scanning API for ${tool} alerts: $count" >&2
+              echo "0"
             fi
-          done
+          }
 
-          # Count secret findings
-          SECRET_COUNT=0
-          if [ -f "./all-security-reports/secret-scan-report/secrets-scan.sarif" ]; then
-            SECRET_COUNT=$(python3 -c "
-          import json
-          with open('./all-security-reports/secret-scan-report/secrets-scan.sarif') as f:
-              d = json.load(f)
-          print(sum(len(r.get('results', [])) for r in d.get('runs', [])))
-          " 2>/dev/null || echo "0")
-          fi
-
-          # Count IaC findings
-          IAC_COUNT=0
-          if [ -f "./all-security-reports/iac-security-report/iac-trivy.sarif" ]; then
-            IAC_COUNT=$(python3 -c "
-          import json
-          with open('./all-security-reports/iac-security-report/iac-trivy.sarif') as f:
-              d = json.load(f)
-          print(sum(len(r.get('results', [])) for r in d.get('runs', [])))
-          " 2>/dev/null || echo "0")
-          fi
+          SAST_COUNT=$(count_open_alerts CodeQL)
+          SECRET_COUNT=$(count_open_alerts gitleaks)
+          IAC_COUNT=$(count_open_alerts Trivy)
 
           TOTAL_ISSUES=$((VULN_COUNT + SAST_COUNT + SECRET_COUNT + IAC_COUNT))
 
