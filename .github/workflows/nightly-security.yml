@@ -302,6 +302,7 @@ jobs:
       - name: Run gitleaks full-history scan
         shell: bash
         run: |
+          set -euo pipefail
           gitleaks detect \
             --source . \
             --config "${{ steps.gitleaks-config.outputs.path }}" \
@@ -313,7 +314,7 @@ jobs:
 
           # Gitleaks does not always emit a SARIF file when findings are zero;
           # write a valid empty-results SARIF so downstream upload/evaluate steps
-          # have a consistent input.
+          # have a consistent input. Only reached if gitleaks succeeded (set -e above).
           if [ ! -f ./security-reports/secrets-scan.sarif ]; then
             cat > ./security-reports/secrets-scan.sarif <<'SARIF'
           {
