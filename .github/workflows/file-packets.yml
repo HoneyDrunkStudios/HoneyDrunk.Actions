@@ -46,6 +46,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: file-packets-${{ inputs.architecture-repo }}
+  cancel-in-progress: false
+
 jobs:
   file:
     runs-on: ubuntu-latest
@@ -55,7 +59,7 @@ jobs:
         env:
           INPUT_ARCHITECTURE_REF: ${{ inputs.architecture-ref }}
           INPUT_ACTIONS_REF: ${{ inputs.actions-ref }}
-          CALLER_REF_NAME: ${{ github.ref_name }}
+          CALLER_REF_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
           if [[ -n "${INPUT_ARCHITECTURE_REF}" ]]; then

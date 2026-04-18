@@ -176,7 +176,9 @@ dep_lookup_url() {
 
 # Collected summary rows: "packet\turl\tblockers"
 SUMMARY_ROWS=()
-FILED_PATHS=()
+# Packets filed during THIS run; used to scope the dependency-linking pass so
+# re-runs do not repost "Blocked by" comments on already-linked issues.
+declare -A NEW_PACKETS=()
 
 shopt -s globstar nullglob
 
@@ -188,7 +190,6 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   if manifest_has "$rel"; then
     existing="$(manifest_get "$rel")"
     echo "skip  $rel -> already filed at $existing"
-    FILED_PATHS+=("$rel")
     continue
   fi
 
@@ -269,16 +270,18 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   "$MIRROR_SCRIPT" "${mirror_args[@]}"
 
   manifest_set "$rel" "$issue_url"
-  FILED_PATHS+=("$rel")
+  NEW_PACKETS["$rel"]=1
   SUMMARY_ROWS+=("${rel}"$'\t'"${issue_url}"$'\t')
 done
 
-# Dependency-linking pass
+# Dependency-linking pass — only for packets filed during THIS run, so re-runs
+# do not post duplicate "Blocked by" comments on issues we already linked.
 if [[ $LINK_DEPS -eq 1 ]]; then
   echo "Running dependency-linking pass"
   for packet in "$PACKETS_DIR_ABS"/**/*.md; do
     [[ -f "$packet" ]] || continue
     rel="${packet#"$REPO_ROOT/"}"
+    [[ -n "${NEW_PACKETS[$rel]:-}" ]] || continue
     packet_json="$(parse_packet "$packet")"
     mapfile -t deps < <(jq -r '.dependencies[]?' <<<"$packet_json")
     [[ ${#deps[@]} -eq 0 ]] && continue

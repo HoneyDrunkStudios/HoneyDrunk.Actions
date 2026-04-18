@@ -13,9 +13,9 @@ Central library of reusable GitHub Actions workflows and composite actions for t
 - [Contributing](#contributing)
 - [Additional Resources](#additional-resources)
 - [HoneyDrunk-Internal Workflows](#honeydrunk-internal-workflows)
-  - [Hive Field Mirror](#hive-field-mirror)
-  - [Packet Filing](#packet-filing)
-  - [Adapting this for your own org](#adapting-this-for-your-own-org)
+- [Hive Field Mirror](#hive-field-mirror)
+- [Packet Filing](#packet-filing)
+- [Adapting this for your own org](#adapting-this-for-your-own-org)
 
 ## 🎯 Overview
 
