@@ -311,6 +311,29 @@ jobs:
             --exit-code 0 \
             --log-level info
 
+          # Gitleaks does not always emit a SARIF file when findings are zero;
+          # write a valid empty-results SARIF so downstream upload/evaluate steps
+          # have a consistent input.
+          if [ ! -f ./security-reports/secrets-scan.sarif ]; then
+            cat > ./security-reports/secrets-scan.sarif <<'SARIF'
+          {
+            "version": "2.1.0",
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "runs": [
+              {
+                "tool": {
+                  "driver": {
+                    "name": "gitleaks",
+                    "informationUri": "https://github.com/gitleaks/gitleaks"
+                  }
+                },
+                "results": []
+              }
+            ]
+          }
+          SARIF
+          fi
+
       - name: Upload secrets SARIF to GitHub Security
         if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
         continue-on-error: true
