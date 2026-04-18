@@ -45,8 +45,20 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read  # broader writes are granted per-job (least privilege)
+
 jobs:
   pr-validation:
+    # security-events: write is scoped here because pr-core's CodeQL step
+    # uploads SARIF to GitHub Code Scanning. checks: write and
+    # pull-requests: write are scoped here too so additional jobs don't
+    # inherit them implicitly.
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
       dotnet-version: '10.0.x'
@@ -55,16 +67,16 @@ jobs:
       working-directory: '.'
       project-path: './src/MyProject.sln'
       enable-secret-scan: true
+      enable-dependency-scan: true
+      dependency-fail-on-severity: 'high'
+      enable-codeql: true
+      codeql-queries: 'security-and-quality'
+      codeql-fail-on-severity: 'note'   # any finding blocks; set 'warning' or 'error' to loosen
       enable-accessibility-check: false
       post-pr-summary: true
       actions-ref: 'main'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
 ```
 
 ### Web App with Accessibility Check
@@ -76,19 +88,22 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   pr-validation:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write  # CodeQL SARIF upload
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
       enable-accessibility-check: true
       accessibility-url: 'http://localhost:5000'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
 ```
 
 ---
@@ -108,16 +123,19 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   pr-sdk-validation:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write  # CodeQL SARIF upload
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
 ```
 
 ### Full Example with Coverage and API Baseline
@@ -129,8 +147,16 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
   pr-sdk-validation:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write  # CodeQL SARIF upload
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     with:
       dotnet-version: '10.0.x'
@@ -142,11 +168,6 @@ jobs:
       post-pr-summary: true
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
 ```
 
 ---
