@@ -528,13 +528,21 @@ jobs:
 
           count_open_alerts() {
             local tool="$1"
-            local count
-            if count=$(gh api "${API_BASE}&tool_name=${tool}" --jq 'length' 2>&1); then
-              echo "$count"
-            else
-              echo "::warning::Failed to query Code Scanning API for ${tool} alerts: $count" >&2
+            local raw count
+            # --paginate so repos with >100 open alerts per tool aren't undercounted.
+            if ! raw=$(gh api --paginate "${API_BASE}&tool_name=${tool}" 2>&1); then
+              echo "::warning::Failed to query Code Scanning API for ${tool} alerts: $raw" >&2
               echo "0"
+              return
             fi
+            # gh outputs one JSON array per page; `jq -s 'map(.[]) | length'` slurps
+            # all pages, flattens into a single array, and counts.
+            if ! count=$(printf '%s' "$raw" | jq -s 'map(.[]) | length' 2>&1); then
+              echo "::warning::Failed to parse ${tool} alerts JSON: $count" >&2
+              echo "0"
+              return
+            fi
+            echo "$count"
           }
 
           SAST_COUNT=$(count_open_alerts CodeQL)
