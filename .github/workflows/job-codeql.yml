@@ -177,72 +177,51 @@ jobs:
         id: evaluate
         if: always()
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
         env:
+          GH_TOKEN: ${{ github.token }}
           FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
+          CATEGORY: ${{ inputs.category }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
 
-          RESULTS_DIR=./codeql-results
-          if [ ! -d "$RESULTS_DIR" ]; then
-            echo "has-warnings=false" >> "$GITHUB_OUTPUT"
-            echo "warning-messages=" >> "$GITHUB_OUTPUT"
-            echo "findings-count=0" >> "$GITHUB_OUTPUT"
-            echo "error-count=0" >> "$GITHUB_OUTPUT"
-            echo "warning-count=0" >> "$GITHUB_OUTPUT"
-            echo "note-count=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::CodeQL produced no SARIF directory; treating as no findings."
-            exit 0
+          # Counts are sourced from the Code Scanning API (post-upload), not
+          # from the local SARIF — that way dismissed alerts (e.g. false
+          # positives, tests) are excluded from the PR gate and summary even
+          # though CodeQL still re-detects them on every run.
+
+          # Give GitHub a moment to ingest the just-uploaded SARIF and match
+          # it against existing alerts/dismissals before we query.
+          sleep 30
+
+          QUERY="state=open&tool_name=CodeQL&per_page=100"
+          if [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "pull_request_target" ]; then
+            QUERY="${QUERY}&pr=${PR_NUMBER}"
+          else
+            QUERY="${QUERY}&ref=${REF}"
           fi
 
-          COUNTS=$(python3 - "$RESULTS_DIR" <<'PY'
-          import json, pathlib, sys
-          from collections import Counter
+          ALERTS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?${QUERY}" 2>/dev/null || echo '[]')
 
-          root = pathlib.Path(sys.argv[1])
-          counts = Counter()
-          total = 0
+          # Filter to this category (CodeQL surfaces it on most_recent_instance).
+          FILTERED=$(echo "${ALERTS}" | jq --arg cat "${CATEGORY}" '[.[] | select(.most_recent_instance.category == $cat)]')
 
-          for sarif_path in root.rglob("*.sarif"):
-              try:
-                  data = json.loads(sarif_path.read_text())
-              except Exception:
-                  continue
-              for run in data.get("runs", []):
-                  # Build a rule id -> default severity map so we can fall back
-                  # when a result omits its level (CodeQL usually emits it).
-                  rule_levels = {}
-                  tool = run.get("tool", {}).get("driver", {})
-                  for rule in tool.get("rules", []) or []:
-                      rid = rule.get("id")
-                      level = (rule.get("defaultConfiguration") or {}).get("level")
-                      if rid and level:
-                          rule_levels[rid] = level
+          TOTAL=$(echo "${FILTERED}" | jq 'length')
+          ERROR=$(echo "${FILTERED}" | jq '[.[] | select(.rule.severity == "error")] | length')
+          WARNING=$(echo "${FILTERED}" | jq '[.[] | select(.rule.severity == "warning")] | length')
+          NOTE=$(echo "${FILTERED}" | jq '[.[] | select(.rule.severity == "note")] | length')
 
-                  for result in run.get("results", []):
-                      level = result.get("level")
-                      if not level:
-                          level = rule_levels.get(result.get("ruleId"), "warning")
-                      counts[level] += 1
-                      total += 1
-
-          print(f"TOTAL={total}")
-          for sev in ("error", "warning", "note"):
-              print(f"{sev.upper()}={counts[sev]}")
-          PY
-          )
-
-          eval "$COUNTS"
-
-          echo "findings-count=${TOTAL}" >> "$GITHUB_OUTPUT"
-          echo "error-count=${ERROR}"   >> "$GITHUB_OUTPUT"
-          echo "warning-count=${WARNING}" >> "$GITHUB_OUTPUT"
-          echo "note-count=${NOTE}"     >> "$GITHUB_OUTPUT"
+          echo "findings-count=${TOTAL}"   >> "$GITHUB_OUTPUT"
+          echo "error-count=${ERROR}"      >> "$GITHUB_OUTPUT"
+          echo "warning-count=${WARNING}"  >> "$GITHUB_OUTPUT"
+          echo "note-count=${NOTE}"        >> "$GITHUB_OUTPUT"
 
           if [ "${TOTAL}" -eq 0 ]; then
             echo "has-warnings=false" >> "$GITHUB_OUTPUT"
             echo "warning-messages=" >> "$GITHUB_OUTPUT"
-            echo "✅ No CodeQL findings."
+            echo "✅ No open CodeQL findings for category '${CATEGORY}'."
             exit 0
           fi
 
@@ -252,7 +231,7 @@ jobs:
           [ "${NOTE}"    -gt 0 ] && PARTS+=("${NOTE} note")
           BREAKDOWN=$(IFS=', '; echo "${PARTS[*]}")
 
-          MSG="CodeQL found ${TOTAL} finding(s): ${BREAKDOWN}. See Code Scanning alerts (category '${{ inputs.category }}') or the sast-report artifact for detail."
+          MSG="CodeQL found ${TOTAL} open finding(s): ${BREAKDOWN}. See Code Scanning alerts (category '${CATEGORY}') or the sast-report artifact for detail."
           echo "has-warnings=true"       >> "$GITHUB_OUTPUT"
           echo "warning-messages=${MSG}" >> "$GITHUB_OUTPUT"
           echo "::warning::${MSG}"
@@ -272,7 +251,7 @@ jobs:
           esac
 
           if [ "${GATE}" -gt 0 ]; then
-            echo "::error::Failing PR — ${GATE} CodeQL finding(s) at or above '${FAIL_ON_SEVERITY}' severity."
+            echo "::error::Failing PR — ${GATE} open CodeQL finding(s) at or above '${FAIL_ON_SEVERITY}' severity."
             exit 1
           fi
 
