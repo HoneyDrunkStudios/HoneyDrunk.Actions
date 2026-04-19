@@ -7,7 +7,7 @@ inputs:
     required: false
     default: '.'
   pattern:
-    description: 'Regex pattern for test file names (also implicitly accepts common support suffixes: Helper, Fixture, Builder, Factory, Fake, Mock, Stub, TestBase, TestData, TestConstants, Assertions)'
+    description: 'POSIX extended regex for accepted test file names. The default also accepts common support suffixes (Helper, Fixture, Builder, Factory, Fake, Mock, Stub, TestBase, TestData, TestConstants, Assertions). If you override this, supply the full allow-list.'
     required: false
     default: '.*(Tests?|TestBase|TestData|TestConstants|Fixture|Fixtures|Helper|Helpers|Builder|Builders|Factory|Factories|Fake|Fakes|Mock|Mocks|Stub|Stubs|Assertion|Assertions)\.cs$'
   strict:
@@ -31,7 +31,11 @@ runs:
         # accepted-names pattern. Exclude common support-code subdirectories so
         # helpers/fixtures/fakes don't get wrongly flagged even when named
         # without the Tests suffix.
-        INVALID_FILES=$(find . -type f -name "*.cs" -path "*/Test*/*" \
+        # GNU find defaults -regex to Emacs syntax; the default pattern is
+        # POSIX ERE, so select the matching regextype explicitly. Callers
+        # overriding `pattern` should supply POSIX-extended regex too.
+        INVALID_FILES=$(find . -regextype posix-extended \
+          -type f -name "*.cs" -path "*/Test*/*" \
           -not -path "*/TestHelpers/*" \
           -not -path "*/Helpers/*" \
           -not -path "*/Fixtures/*" \
