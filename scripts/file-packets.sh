@@ -193,6 +193,24 @@ SUMMARY_ROWS=()
 # re-runs do not repost "Blocked by" comments on already-linked issues.
 declare -A NEW_PACKETS=()
 
+# Repo-existence cache — avoids one `gh repo view` per packet for the same
+# target repo. Values: "1" = exists, "0" = 404 / no access.
+declare -A REPO_EXISTS=()
+
+repo_exists() {
+  local repo="$1"
+  if [[ -n "${REPO_EXISTS[$repo]:-}" ]]; then
+    [[ "${REPO_EXISTS[$repo]}" == "1" ]]
+    return
+  fi
+  if gh repo view "$repo" --json name >/dev/null 2>&1; then
+    REPO_EXISTS[$repo]=1
+    return 0
+  fi
+  REPO_EXISTS[$repo]=0
+  return 1
+}
+
 # Label cache — avoids one `gh label view` call per (packet, label). First
 # encounter of a target repo lists its labels once; subsequent checks are
 # in-memory. `LABELS_LISTED[repo]=1` marks a repo as fetched.
@@ -255,6 +273,14 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   if [[ -z "$title" ]]; then
     echo "::error::Packet $rel has no h1 title"
     exit 1
+  fi
+
+  # Target repo must exist and be accessible. A packet that names a future /
+  # not-yet-created repo is a legitimate state (standup packets land before
+  # their repos do). Skip with a warning instead of erroring the whole run.
+  if ! repo_exists "$target_repo"; then
+    echo "::warning::skip  $rel -> target repo $target_repo does not exist (or no access); will retry on future runs"
+    continue
   fi
 
   # Synthesize labels: frontmatter labels + initiative-<slug>
