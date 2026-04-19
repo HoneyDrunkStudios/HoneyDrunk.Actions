@@ -180,6 +180,29 @@ SUMMARY_ROWS=()
 # re-runs do not repost "Blocked by" comments on already-linked issues.
 declare -A NEW_PACKETS=()
 
+# Label cache — avoids one `gh label view` call per (packet, label). First
+# encounter of a target repo lists its labels once; subsequent checks are
+# in-memory. `LABELS_LISTED[repo]=1` marks a repo as fetched.
+# `LABELS_KNOWN[repo|name]=1` marks a label as present on that repo.
+declare -A LABELS_LISTED=()
+declare -A LABELS_KNOWN=()
+
+ensure_label() {
+  local repo="$1" name="$2"
+  if [[ -z "${LABELS_LISTED[$repo]:-}" ]]; then
+    local existing
+    while IFS= read -r existing; do
+      [[ -z "$existing" ]] && continue
+      LABELS_KNOWN["$repo|$existing"]=1
+    done < <(gh label list --repo "$repo" --limit 200 --json name -q '.[].name')
+    LABELS_LISTED["$repo"]=1
+  fi
+  if [[ -z "${LABELS_KNOWN[$repo|$name]:-}" ]]; then
+    gh label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-packets"
+    LABELS_KNOWN["$repo|$name"]=1
+  fi
+}
+
 shopt -s globstar nullglob
 
 echo "Scanning packets under: $PACKETS_DIR_ABS"
@@ -244,10 +267,7 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   label_args=()
   for l in "${all_labels[@]}"; do
     [[ -z "$l" ]] && continue
-    # Ensure label exists on the target repo; auto-create with neutral defaults
-    # if missing. `gh label create` exits non-zero when the label already exists
-    # — that's the no-op path. Stderr is suppressed to keep logs clean on re-runs.
-    gh label create "$l" --repo "$target_repo" --color "ededed" --description "Auto-created by file-packets" 2>/dev/null || true
+    ensure_label "$target_repo" "$l"
     label_args+=("--label" "$l")
   done
 
