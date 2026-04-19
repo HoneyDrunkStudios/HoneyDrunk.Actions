@@ -114,7 +114,17 @@ body = raw
 has_frontmatter = False
 m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n(.*)$", raw, re.DOTALL)
 if m:
-    fm = yaml.safe_load(m.group(1)) or {}
+    loaded = yaml.safe_load(m.group(1))
+    if loaded is None:
+        fm = {}
+    elif isinstance(loaded, dict):
+        fm = loaded
+    else:
+        print(
+            f"Frontmatter in {path} is not a YAML mapping (got {type(loaded).__name__})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     body = m.group(2).lstrip("\n")
     has_frontmatter = True
 
