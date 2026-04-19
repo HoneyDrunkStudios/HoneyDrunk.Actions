@@ -440,7 +440,7 @@ jobs:
           echo "Running Trivy filesystem scan for IaC misconfigurations..."
           docker run --rm \
             -v "$(pwd):/workspace" \
-            aquasec/trivy:latest fs /workspace \
+            aquasec/trivy:0.69.3 fs /workspace \
             --scanners misconfig \
             --format sarif \
             --output /workspace/security-reports/iac-trivy.sarif \
