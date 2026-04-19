@@ -75,7 +75,7 @@ if [[ -z "$ISSUE_NODE_ID" || "$ISSUE_NODE_ID" == "null" ]]; then
   exit 1
 fi
 
-mapfile -t LABELS < <(jq -r '.labels[].name' <<<"$ISSUE_JSON" | tr '[:upper:]' '[:lower:]')
+mapfile -t LABELS < <(jq -r '.labels[].name' <<<"$ISSUE_JSON" | tr -d '\r' | tr '[:upper:]' '[:lower:]')
 
 WAVE_LABEL=""
 TIER_LABEL=""
@@ -170,6 +170,41 @@ get_single_option_id() {
   ' <<<"$FIELDS_JSON" | head -n1
 }
 
+# Append a new option to a single-select field via GraphQL. Echoes the new
+# option id on success, empty on failure. Existing options are preserved with
+# their original color and description (gh field-list omits these, so we query
+# them via GraphQL).
+ensure_single_select_option() {
+  local field_name="$1"
+  local option_name="$2"
+  local existing
+  if ! existing="$(gh api graphql \
+    -f query='query($p:ID!,$f:String!){node(id:$p){... on ProjectV2{field(name:$f){... on ProjectV2SingleSelectField{id options{name color description}}}}}}' \
+    -f p="$PROJECT_ID" -f f="$field_name" 2>&1)"; then
+    echo "ensure_single_select_option: query failed for field '$field_name': $existing" >&2
+    return 1
+  fi
+  local field_id
+  field_id="$(jq -r '.data.node.field.id // empty' <<<"$existing")"
+  if [[ -z "$field_id" ]]; then
+    return 1
+  fi
+  local options_literal
+  options_literal="$(jq -r --arg name "$option_name" '
+    (.data.node.field.options + [{name:$name, color:"GRAY", description:""}])
+    | map("{name:" + (.name | tojson) + ",color:" + .color + ",description:" + ((.description // "") | tojson) + "}")
+    | "[" + join(",") + "]"
+  ' <<<"$existing")"
+  local mutate
+  mutate="mutation{updateProjectV2Field(input:{fieldId:\"${field_id}\",singleSelectOptions:${options_literal}}){projectV2Field{... on ProjectV2SingleSelectField{options{id name}}}}}"
+  local result
+  if ! result="$(gh api graphql -f query="$mutate" 2>&1)"; then
+    echo "ensure_single_select_option: mutation failed for field '$field_name' option '$option_name': $result" >&2
+    return 1
+  fi
+  jq -r --arg name "$option_name" '.data.updateProjectV2Field.projectV2Field.options[]? | select(.name == $name) | .id' <<<"$result"
+}
+
 update_single_select() {
   local field_id="$1"
   local option_id="$2"
@@ -230,10 +265,14 @@ if [[ -n "$INITIATIVE_SLUG" ]]; then
   if [[ -z "$INITIATIVE_OPTION_ID" ]]; then
     INITIATIVE_OPTION_ID="$(get_single_option_id 'Initiative' "Initiative ${INITIATIVE_SLUG}")"
   fi
+  if [[ -z "$INITIATIVE_OPTION_ID" ]]; then
+    echo "Auto-creating Initiative option: ${INITIATIVE_SLUG}"
+    INITIATIVE_OPTION_ID="$(ensure_single_select_option 'Initiative' "$INITIATIVE_SLUG")"
+  fi
   if [[ -n "$INITIATIVE_OPTION_ID" ]]; then
     update_single_select "$INITIATIVE_FIELD_ID" "$INITIATIVE_OPTION_ID" 'Initiative'
   else
-    echo "::warning::No Initiative option matched label initiative-${INITIATIVE_SLUG}"
+    echo "::warning::Failed to resolve or create Initiative option: ${INITIATIVE_SLUG}"
   fi
 fi
 
