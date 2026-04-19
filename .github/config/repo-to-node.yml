@@ -1,7 +1,7 @@
 HoneyDrunk.Kernel: honeydrunk-kernel
 HoneyDrunk.Transport: honeydrunk-transport
 HoneyDrunk.Vault: honeydrunk-vault
-HoneyDrunk.Vault.Rotation: honeydrunk-vault
+HoneyDrunk.Vault.Rotation: honeydrunk-vault-rotation
 HoneyDrunk.Auth: honeydrunk-auth
 HoneyDrunk.Web.Rest: honeydrunk-web-rest
 HoneyDrunk.Data: honeydrunk-data
@@ -11,3 +11,10 @@ HoneyDrunk.Actions: honeydrunk-actions
 HoneyDrunk.Architecture: honeydrunk-architecture
 HoneyDrunkStudios: honeydrunk-studios
 HoneyDrunk.Lore: honeydrunk-lore
+HoneyDrunk.Agents: honeydrunk-agents
+HoneyDrunk.AI: honeydrunk-ai
+HoneyDrunk.Memory: honeydrunk-memory
+HoneyDrunk.Knowledge: honeydrunk-knowledge
+HoneyDrunk.Capabilities: honeydrunk-capabilities
+HoneyDrunk.Flow: honeydrunk-flow
+HoneyDrunk.Operator: honeydrunk-operator

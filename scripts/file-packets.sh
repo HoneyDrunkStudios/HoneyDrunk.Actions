@@ -175,14 +175,18 @@ manifest_set() {
   mv "$tmp" "$MANIFEST"
 }
 
-# Look up a dependency issue URL by basename of the dependency path.
+# Look up a dependency issue URL by basename of the dependency path. Accepts
+# either the full packet filename ("01-foo.md") or its bare slug ("foo") by
+# normalizing both sides: strip a leading "NN-" prefix and trailing ".md".
 dep_lookup_url() {
   local dep="$1"
   local base
   base="$(basename "$dep")"
   jq -r --arg b "$base" '
+    def norm: sub("^[0-9]+-"; "") | sub("[.]md$"; "");
     to_entries
-    | map(select((.key | split("/") | last) == $b))
+    | map(.key |= (split("/") | last))
+    | map(select(.key == $b or (.key | norm) == ($b | norm)))
     | .[0].value // empty
   ' "$MANIFEST"
 }
