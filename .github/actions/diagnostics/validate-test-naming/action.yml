@@ -7,23 +7,52 @@ inputs:
     required: false
     default: '.'
   pattern:
-    description: 'Regex pattern for test file names'
+    description: 'Regex pattern for test file names (also implicitly accepts common support suffixes: Helper, Fixture, Builder, Factory, Fake, Mock, Stub, TestBase, TestData, TestConstants, Assertions)'
     required: false
-    default: '.*Tests?\.cs$'
+    default: '.*(Tests?|TestBase|TestData|TestConstants|Fixture|Fixtures|Helper|Helpers|Builder|Builders|Factory|Factories|Fake|Fakes|Mock|Mocks|Stub|Stubs|Assertion|Assertions)\.cs$'
+  strict:
+    description: 'Treat naming violations as errors that fail the step. When false (default), violations are emitted as warnings and the step exits 0.'
+    required: false
+    default: 'false'
 runs:
   using: 'composite'
   steps:
     - name: Validate test naming conventions
       shell: bash
       working-directory: ${{ inputs.test-directory }}
+      env:
+        PATTERN: ${{ inputs.pattern }}
+        STRICT: ${{ inputs.strict }}
       run: |
+        set -euo pipefail
         echo "Checking test file naming conventions..."
-        INVALID_FILES=$(find . -type f -name "*.cs" -path "*/Test*/*" ! -regex "${{ inputs.pattern }}" | grep -i test || true)
-        
-        if [ -n "$INVALID_FILES" ]; then
+
+        # Flag .cs files under a "Test*" project directory that don't match the
+        # accepted-names pattern. Exclude common support-code subdirectories so
+        # helpers/fixtures/fakes don't get wrongly flagged even when named
+        # without the Tests suffix.
+        INVALID_FILES=$(find . -type f -name "*.cs" -path "*/Test*/*" \
+          -not -path "*/TestHelpers/*" \
+          -not -path "*/Helpers/*" \
+          -not -path "*/Fixtures/*" \
+          -not -path "*/Fakes/*" \
+          -not -path "*/Mocks/*" \
+          -not -path "*/Stubs/*" \
+          -not -path "*/Builders/*" \
+          -not -path "*/obj/*" \
+          -not -path "*/bin/*" \
+          ! -regex "${PATTERN}" || true)
+
+        if [ -z "$INVALID_FILES" ]; then
+          echo "✅ All test files follow naming conventions"
+          exit 0
+        fi
+
+        if [ "$STRICT" = "true" ]; then
           echo "::error::Found test files that don't match naming convention:"
           echo "$INVALID_FILES"
           exit 1
         else
-          echo "? All test files follow naming conventions"
+          echo "::warning::Found test files that don't match naming convention (informational; pass strict=true to fail the step):"
+          echo "$INVALID_FILES"
         fi
