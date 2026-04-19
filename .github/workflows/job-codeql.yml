@@ -114,16 +114,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Detect repo-local CodeQL config
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
+      - name: Resolve CodeQL config
         id: codeql-config
         shell: bash
         run: |
+          # Prefer a repo-local config if the consuming repo ships one; otherwise
+          # fall back to the shared default shipped by HoneyDrunk.Actions.
           if [ -f "./.github/codeql/codeql-config.yml" ]; then
             echo "path=./.github/codeql/codeql-config.yml" >> $GITHUB_OUTPUT
           elif [ -f "./.github/codeql/codeql-config.yaml" ]; then
             echo "path=./.github/codeql/codeql-config.yaml" >> $GITHUB_OUTPUT
           else
-            echo "path=" >> $GITHUB_OUTPUT
+            echo "path=./.github/actions-repo/.github/codeql/codeql-config.yml" >> $GITHUB_OUTPUT
           fi
 
       - name: Initialize CodeQL
@@ -132,13 +141,6 @@ jobs:
           languages: ${{ inputs.languages }}
           queries: ${{ inputs.queries }}
           config-file: ${{ steps.codeql-config.outputs.path }}
-
-      - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
-        with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          path: .github/actions-repo
-          ref: ${{ inputs.actions-ref }}
 
       - name: Setup .NET SDK
         uses: ./.github/actions-repo/.github/actions/dotnet/setup

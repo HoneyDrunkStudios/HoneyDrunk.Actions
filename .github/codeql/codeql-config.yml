@@ -1,0 +1,12 @@
+name: HoneyDrunk Grid default CodeQL config
+
+# Shared CodeQL configuration used by job-codeql.yml when a consuming repo
+# does not ship its own ./.github/codeql/codeql-config.yml. Repos can override
+# by creating that file locally.
+
+paths-ignore:
+  - '**/obj/**'
+  - '**/bin/**'
+  - '**/*.g.cs'
+  - '**/*.Designer.cs'
+  - '**/*.AssemblyInfo.cs'
