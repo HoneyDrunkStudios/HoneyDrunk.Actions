@@ -178,9 +178,12 @@ ensure_single_select_option() {
   local field_name="$1"
   local option_name="$2"
   local existing
-  existing="$(gh api graphql \
+  if ! existing="$(gh api graphql \
     -f query='query($p:ID!,$f:String!){node(id:$p){... on ProjectV2{field(name:$f){... on ProjectV2SingleSelectField{id options{name color description}}}}}}' \
-    -f p="$PROJECT_ID" -f f="$field_name" 2>/dev/null)"
+    -f p="$PROJECT_ID" -f f="$field_name" 2>&1)"; then
+    echo "ensure_single_select_option: query failed for field '$field_name': $existing" >&2
+    return 1
+  fi
   local field_id
   field_id="$(jq -r '.data.node.field.id // empty' <<<"$existing")"
   if [[ -z "$field_id" ]]; then
@@ -195,7 +198,10 @@ ensure_single_select_option() {
   local mutate
   mutate="mutation{updateProjectV2Field(input:{fieldId:\"${field_id}\",singleSelectOptions:${options_literal}}){projectV2Field{... on ProjectV2SingleSelectField{options{id name}}}}}"
   local result
-  result="$(gh api graphql -f query="$mutate" 2>/dev/null)"
+  if ! result="$(gh api graphql -f query="$mutate" 2>&1)"; then
+    echo "ensure_single_select_option: mutation failed for field '$field_name' option '$option_name': $result" >&2
+    return 1
+  fi
   jq -r --arg name "$option_name" '.data.updateProjectV2Field.projectV2Field.options[]? | select(.name == $name) | .id' <<<"$result"
 }
 

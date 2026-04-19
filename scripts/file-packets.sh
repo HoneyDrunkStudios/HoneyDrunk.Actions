@@ -231,7 +231,10 @@ repo_exists() {
     REPO_EXISTS[$repo]=0
     return 1
   fi
-  echo "::error::gh repo view failed for $repo with non-404 error: $stderr_content" >&2
+  # Plain stderr, not ::error::, because $repo (packet frontmatter) and
+  # $stderr_content (gh output) are untrusted and could contain workflow-command
+  # syntax that would otherwise inject into the runner log stream.
+  echo "gh repo view failed for $repo with non-404 error: $stderr_content" >&2
   exit 1
 }
 
