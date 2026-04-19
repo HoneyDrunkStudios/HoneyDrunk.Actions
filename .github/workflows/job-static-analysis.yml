@@ -2,8 +2,8 @@
 # Static Analysis Job
 # ==============================================================================
 # Purpose:
-#   Run static analysis checks including code formatting, vulnerability scanning,
-#   and test naming validation.
+#   Run static analysis checks: code formatting and test naming validation.
+#   Vulnerable-package scanning lives in job-dependency-scan.yml.
 #
 # Single Responsibility:
 #   Static code analysis only - no building or testing
@@ -49,12 +49,6 @@ on:
         required: false
         type: boolean
         default: false
-      
-      fail-on-severity:
-        description: 'Minimum vulnerability severity to fail (low, moderate, high, critical)'
-        required: false
-        type: string
-        default: 'high'
       
       validate-test-naming:
         description: 'Validate test naming conventions'
@@ -129,13 +123,6 @@ jobs:
           else
             echo "has-issue=false" >> $GITHUB_OUTPUT
           fi
-      
-      - name: Run vulnerability scan
-        uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
-        with:
-          working-directory: ${{ inputs.working-directory }}
-          project-path: ${{ inputs.project-path }}
-          fail-on-severity: ${{ inputs.fail-on-severity }}
       
       - name: Validate test naming conventions
         if: ${{ inputs.validate-test-naming }}

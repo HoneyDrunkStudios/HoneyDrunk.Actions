@@ -39,15 +39,20 @@ Fast validation for pull requests:
 
 - **[pr-core.yml](.github/workflows/pr-core.yml)** - Basic PR validation for most repos
   - Build and unit tests
-  - Fast static analysis
+  - Fast static analysis (formatting, test naming)
   - Diff-only secret scanning
+  - Vulnerable-package scan (`dotnet list package --vulnerable --include-transitive --format json`)
+  - CodeQL SAST + code-quality (`security-and-quality` query pack)
   - Optional minimal accessibility check
-  
+  - Consolidated PR summary comment with per-job severity breakdowns
+
 - **[pr-sdk.yml](.github/workflows/pr-sdk.yml)** - Extended validation for SDK repos
-  - Everything in pr-core
+  - Everything in pr-core (incl. dependency scan + CodeQL)
   - API compatibility checks
   - Code coverage with delta reporting
   - Documentation completeness validation
+
+> **Consumer permission note:** both PR workflows upload SARIF to GitHub Code Scanning, which requires `security-events: write`. For least privilege, scope it on the calling job instead of the whole workflow — see [Quick Start](#quick-start) for the exact shape.
 
 ### Release Workflows
 
@@ -100,16 +105,19 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   pr-validation:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write  # CodeQL SARIF upload
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
 ```
 
 ### SDK/Library PR Workflow
@@ -123,18 +131,21 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   pr-sdk-validation:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write  # CodeQL SARIF upload
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     with:
       coverage-threshold: 80
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
 ```
 
 ### Release Workflow

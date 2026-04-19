@@ -5,6 +5,18 @@ All notable changes to the GitHub Actions template library will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-04-18
+
+### Added
+- `job-dependency-scan.yml`: PR-time vulnerable-package scan (`dotnet list package --vulnerable --include-transitive`). Emits severity counts, uploads JSON report artifact, fails on configurable severity threshold.
+- `pr-core.yml`: wired in the dependency-scan job as optional (default on), with `enable-dependency-scan` and `dependency-fail-on-severity` inputs. Results appear in the PR summary comment alongside existing jobs.
+- `pr-sdk.yml`: same dependency-scan wiring for SDK/library repos; findings + severity breakdown show up in the SDK PR comment.
+- `job-codeql.yml`: PR-time CodeQL SAST + code-quality scan using the `security-and-quality` query pack (same suite nightly runs). Uploads SARIF to Code Scanning under a `pr-sast` category, emits severity counts, and fails the PR at or above a configurable SARIF level (default: any finding).
+- `pr-core.yml` and `pr-sdk.yml`: wired in the CodeQL job as optional (default on) with `enable-codeql`, `codeql-queries`, and `codeql-fail-on-severity` inputs. Findings + severity breakdown appear in the PR summary comment.
+
+### Changed
+- `job-static-analysis.yml`: removed the vulnerability scan step (now owned by `job-dependency-scan.yml`) and dropped its `fail-on-severity` input. `pr-core.yml` and `pr-sdk.yml` no longer pass that input.
+
 ## [1.0.0] - 2025-01-07
 
 ### Added

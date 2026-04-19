@@ -66,7 +66,37 @@ on:
         required: false
         type: boolean
         default: true
-      
+
+      enable-dependency-scan:
+        description: 'Run vulnerable-package scan (dotnet list <target> package --vulnerable --include-transitive --format json)'
+        required: false
+        type: boolean
+        default: true
+
+      dependency-fail-on-severity:
+        description: 'Minimum vulnerability severity that fails the PR (critical, high, moderate, low, none)'
+        required: false
+        type: string
+        default: 'high'
+
+      enable-codeql:
+        description: 'Run CodeQL SAST / code-quality scan on the PR'
+        required: false
+        type: boolean
+        default: true
+
+      codeql-queries:
+        description: 'CodeQL query suite to run (security-and-quality, security-extended, security)'
+        required: false
+        type: string
+        default: 'security-and-quality'
+
+      codeql-fail-on-severity:
+        description: 'Lowest SARIF severity that fails the PR (error, warning, note, none)'
+        required: false
+        type: string
+        default: 'note'
+
       enable-accessibility-check:
         description: 'Run minimal accessibility check (opt-in)'
         required: false
@@ -130,7 +160,6 @@ jobs:
       project-path: ${{ inputs.project-path }}
       check-formatting: true
       fail-on-formatting-issues: false  # Warn only in PR
-      fail-on-severity: 'high'
       validate-test-naming: true
       actions-ref: ${{ inputs.actions-ref }}
     permissions:
@@ -145,7 +174,39 @@ jobs:
       runs-on: ${{ inputs.runs-on }}
       scan-mode: 'diff-only'
 
-  # Job 4: Accessibility Check (Optional)
+  # Job 4: Dependency Vulnerability Scan (Optional)
+  dependency-scan:
+    name: Dependency Scan
+    if: ${{ inputs.enable-dependency-scan }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-dependency-scan.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      fail-on-severity: ${{ inputs.dependency-fail-on-severity }}
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+
+  # Job 5: CodeQL SAST / Code-Quality (Optional)
+  codeql:
+    name: CodeQL
+    if: ${{ inputs.enable-codeql }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-codeql.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      queries: ${{ inputs.codeql-queries }}
+      fail-on-severity: ${{ inputs.codeql-fail-on-severity }}
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+      security-events: write
+
+  # Job 6: Accessibility Check (Optional)
   accessibility-check:
     name: Minimal Accessibility Check
     if: ${{ inputs.enable-accessibility-check }}
@@ -177,10 +238,10 @@ jobs:
           scan-mode: 'minimal'
           wcag-level: 'AA'
   
-  # Job 5: PR Summary
+  # Job 7: PR Summary
   pr-summary:
     name: PR Summary
-    needs: [build-and-test, static-analysis, secret-scan]
+    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql]
     if: ${{ always() && inputs.post-pr-summary }}
     runs-on: ${{ inputs.runs-on }}
     
@@ -225,28 +286,34 @@ jobs:
           BUILD_RESULT="${{ needs.build-and-test.result }}"
           ANALYSIS_RESULT="${{ needs.static-analysis.result }}"
           SECRETS_RESULT="${{ needs.secret-scan.result }}"
-          
+          DEPS_RESULT="${{ needs.dependency-scan.result }}"
+          CODEQL_RESULT="${{ needs.codeql.result }}"
+
           # Collect warnings - use empty defaults for skipped jobs
           BUILD_WARNINGS="${{ needs.build-and-test.outputs.has-warnings }}"
           ANALYSIS_WARNINGS="${{ needs.static-analysis.outputs.has-warnings }}"
           SECRETS_WARNINGS="${{ needs.secret-scan.outputs.has-warnings || 'false' }}"
-          
+          DEPS_WARNINGS="${{ needs.dependency-scan.outputs.has-warnings || 'false' }}"
+          CODEQL_WARNINGS="${{ needs.codeql.outputs.has-warnings || 'false' }}"
+
           BUILD_WARNING_MSG="${{ needs.build-and-test.outputs.warning-messages }}"
           ANALYSIS_WARNING_MSG="${{ needs.static-analysis.outputs.warning-messages }}"
           SECRETS_WARNING_MSG="${{ needs.secret-scan.outputs.warning-messages }}"
-          
+          DEPS_WARNING_MSG="${{ needs.dependency-scan.outputs.warning-messages }}"
+          CODEQL_WARNING_MSG="${{ needs.codeql.outputs.warning-messages }}"
+
           # Determine status - don't fail on skipped jobs
-          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" ]]; then
+          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" || "$DEPS_RESULT" == "failure" || "$CODEQL_RESULT" == "failure" ]]; then
             echo "icon=:x:" >> $GITHUB_OUTPUT
             echo "status=Failed" >> $GITHUB_OUTPUT
-          elif [[ "$BUILD_WARNINGS" == "true" || "$ANALYSIS_WARNINGS" == "true" || "$SECRETS_WARNINGS" == "true" ]]; then
+          elif [[ "$BUILD_WARNINGS" == "true" || "$ANALYSIS_WARNINGS" == "true" || "$SECRETS_WARNINGS" == "true" || "$DEPS_WARNINGS" == "true" || "$CODEQL_WARNINGS" == "true" ]]; then
             echo "icon=:warning:" >> $GITHUB_OUTPUT
             echo "status=Passed with Warnings" >> $GITHUB_OUTPUT
           else
             echo "icon=:white_check_mark:" >> $GITHUB_OUTPUT
             echo "status=Success" >> $GITHUB_OUTPUT
           fi
-          
+
           # Build warnings section
           WARNINGS_SECTION=""
           if [[ "$BUILD_WARNINGS" == "true" && -n "$BUILD_WARNING_MSG" ]]; then
@@ -261,7 +328,15 @@ jobs:
             WARNINGS_SECTION="${WARNINGS_SECTION}
           - :warning: **Secret Scan:** $SECRETS_WARNING_MSG"
           fi
-          
+          if [[ "$DEPS_WARNINGS" == "true" && -n "$DEPS_WARNING_MSG" ]]; then
+            WARNINGS_SECTION="${WARNINGS_SECTION}
+          - :warning: **Dependency Scan:** $DEPS_WARNING_MSG"
+          fi
+          if [[ "$CODEQL_WARNINGS" == "true" && -n "$CODEQL_WARNING_MSG" ]]; then
+            WARNINGS_SECTION="${WARNINGS_SECTION}
+          - :warning: **CodeQL:** $CODEQL_WARNING_MSG"
+          fi
+
           # Save to output
           {
             echo "warnings<<EOF"
@@ -276,6 +351,17 @@ jobs:
           JOB_BUILD_RESULT: ${{ needs.build-and-test.result }}
           JOB_STATIC_RESULT: ${{ needs.static-analysis.result }}
           JOB_SECRET_RESULT: ${{ needs.secret-scan.result }}
+          JOB_DEPS_RESULT: ${{ needs.dependency-scan.result }}
+          DEPS_FINDINGS: ${{ needs.dependency-scan.outputs.findings-count }}
+          DEPS_CRITICAL: ${{ needs.dependency-scan.outputs.critical-count }}
+          DEPS_HIGH: ${{ needs.dependency-scan.outputs.high-count }}
+          DEPS_MODERATE: ${{ needs.dependency-scan.outputs.moderate-count }}
+          DEPS_LOW: ${{ needs.dependency-scan.outputs.low-count }}
+          JOB_CODEQL_RESULT: ${{ needs.codeql.result }}
+          CODEQL_FINDINGS: ${{ needs.codeql.outputs.findings-count }}
+          CODEQL_ERROR: ${{ needs.codeql.outputs.error-count }}
+          CODEQL_WARNING: ${{ needs.codeql.outputs.warning-count }}
+          CODEQL_NOTE: ${{ needs.codeql.outputs.note-count }}
           WARNINGS_BLOCK: ${{ steps.status.outputs.warnings }}
           BUILD_CONFIGURATION: ${{ inputs.configuration }}
           RUNS_ON: ${{ inputs.runs-on }}
@@ -296,6 +382,35 @@ jobs:
 
           if [ "$JOB_SECRET_RESULT" != "skipped" ]; then
             echo "- **Secret Scan:** $JOB_SECRET_RESULT" >> message.md
+          fi
+
+          if [ "$JOB_DEPS_RESULT" != "skipped" ]; then
+            FINDINGS="${DEPS_FINDINGS:-0}"
+            if [ "$FINDINGS" -gt 0 ]; then
+              BREAKDOWN_PARTS=()
+              [ "${DEPS_CRITICAL:-0}" -gt 0 ] && BREAKDOWN_PARTS+=("${DEPS_CRITICAL} critical")
+              [ "${DEPS_HIGH:-0}"     -gt 0 ] && BREAKDOWN_PARTS+=("${DEPS_HIGH} high")
+              [ "${DEPS_MODERATE:-0}" -gt 0 ] && BREAKDOWN_PARTS+=("${DEPS_MODERATE} moderate")
+              [ "${DEPS_LOW:-0}"      -gt 0 ] && BREAKDOWN_PARTS+=("${DEPS_LOW} low")
+              BREAKDOWN=$(IFS=', '; echo "${BREAKDOWN_PARTS[*]}")
+              echo "- **Dependency Scan:** $JOB_DEPS_RESULT — ${FINDINGS} vulnerabilities (${BREAKDOWN})" >> message.md
+            else
+              echo "- **Dependency Scan:** $JOB_DEPS_RESULT — no vulnerabilities" >> message.md
+            fi
+          fi
+
+          if [ "$JOB_CODEQL_RESULT" != "skipped" ]; then
+            CQ_FINDINGS="${CODEQL_FINDINGS:-0}"
+            if [ "$CQ_FINDINGS" -gt 0 ]; then
+              CQ_PARTS=()
+              [ "${CODEQL_ERROR:-0}"   -gt 0 ] && CQ_PARTS+=("${CODEQL_ERROR} error")
+              [ "${CODEQL_WARNING:-0}" -gt 0 ] && CQ_PARTS+=("${CODEQL_WARNING} warning")
+              [ "${CODEQL_NOTE:-0}"    -gt 0 ] && CQ_PARTS+=("${CODEQL_NOTE} note")
+              CQ_BREAKDOWN=$(IFS=', '; echo "${CQ_PARTS[*]}")
+              echo "- **CodeQL:** $JOB_CODEQL_RESULT — ${CQ_FINDINGS} finding(s) (${CQ_BREAKDOWN})" >> message.md
+            else
+              echo "- **CodeQL:** $JOB_CODEQL_RESULT — no findings" >> message.md
+            fi
           fi
 
           if [ -n "$WARNINGS_BLOCK" ]; then

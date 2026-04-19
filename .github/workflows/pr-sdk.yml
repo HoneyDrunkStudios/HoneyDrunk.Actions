@@ -78,7 +78,37 @@ on:
         required: false
         type: boolean
         default: true
-      
+
+      enable-dependency-scan:
+        description: 'Run vulnerable-package scan (dotnet list <target> package --vulnerable --include-transitive --format json)'
+        required: false
+        type: boolean
+        default: true
+
+      dependency-fail-on-severity:
+        description: 'Minimum vulnerability severity that fails the PR (critical, high, moderate, low, none)'
+        required: false
+        type: string
+        default: 'high'
+
+      enable-codeql:
+        description: 'Run CodeQL SAST / code-quality scan on the PR'
+        required: false
+        type: boolean
+        default: true
+
+      codeql-queries:
+        description: 'CodeQL query suite to run (security-and-quality, security-extended, security)'
+        required: false
+        type: string
+        default: 'security-and-quality'
+
+      codeql-fail-on-severity:
+        description: 'Lowest SARIF severity that fails the PR (error, warning, note, none)'
+        required: false
+        type: string
+        default: 'note'
+
       post-pr-summary:
         description: 'Post results summary to PR as comment'
         required: false
@@ -157,7 +187,6 @@ jobs:
       project-path: ${{ inputs.project-path }}
       check-formatting: true
       fail-on-formatting-issues: false  # Warn only in PR
-      fail-on-severity: 'high'
       validate-test-naming: true
       actions-ref: ${{ inputs.actions-ref }}
     permissions:
@@ -174,8 +203,40 @@ jobs:
       actions-ref: ${{ inputs.actions-ref }}
     permissions:
       contents: read
-  
-  # Job 6: Documentation Check
+
+  # Job 6: Dependency Vulnerability Scan (Optional)
+  dependency-scan:
+    name: Dependency Scan
+    if: ${{ inputs.enable-dependency-scan }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-dependency-scan.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      fail-on-severity: ${{ inputs.dependency-fail-on-severity }}
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+
+  # Job 7: CodeQL SAST / Code-Quality (Optional)
+  codeql:
+    name: CodeQL
+    if: ${{ inputs.enable-codeql }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-codeql.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      queries: ${{ inputs.codeql-queries }}
+      fail-on-severity: ${{ inputs.codeql-fail-on-severity }}
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+      security-events: write
+
+  # Job 8: Documentation Check
   documentation-check:
     name: Documentation Check
     runs-on: ${{ inputs.runs-on }}
@@ -209,42 +270,106 @@ jobs:
           project-path: ${{ inputs.project-path }}
           treat-as-error: 'true'
   
-  # Job 7: PR Summary
+  # Job 9: PR Summary
   pr-summary:
     name: PR Summary
-    needs: [build-and-test, coverage-analysis, api-compatibility, static-analysis]
+    needs: [build-and-test, coverage-analysis, api-compatibility, static-analysis, dependency-scan, codeql]
     if: ${{ always() && inputs.post-pr-summary }}
     runs-on: ${{ inputs.runs-on }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v4
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
-      
+
       - name: Generate PR summary
         uses: ./.github/actions-repo/.github/actions/pr/generate-summary
-      
+
       - name: Determine job status
         id: status
         shell: bash
         run: |
+          DEPS_RESULT="${{ needs.dependency-scan.result }}"
+          CODEQL_RESULT="${{ needs.codeql.result }}"
           if [[ "${{ needs.build-and-test.result }}" == "success" && \
                 "${{ needs.coverage-analysis.result }}" == "success" && \
                 "${{ needs.api-compatibility.result }}" == "success" && \
-                "${{ needs.static-analysis.result }}" == "success" ]]; then
+                "${{ needs.static-analysis.result }}" == "success" && \
+                ("$DEPS_RESULT" == "success" || "$DEPS_RESULT" == "skipped") && \
+                ("$CODEQL_RESULT" == "success" || "$CODEQL_RESULT" == "skipped") ]]; then
             echo "icon=:white_check_mark:" >> $GITHUB_OUTPUT
             echo "status=Success" >> $GITHUB_OUTPUT
           else
             echo "icon=:x:" >> $GITHUB_OUTPUT
             echo "status=Failed" >> $GITHUB_OUTPUT
           fi
-      
+
+      - name: Build dependency-scan line
+        id: deps-line
+        shell: bash
+        env:
+          JOB_DEPS_RESULT: ${{ needs.dependency-scan.result }}
+          DEPS_FINDINGS: ${{ needs.dependency-scan.outputs.findings-count }}
+          DEPS_CRITICAL: ${{ needs.dependency-scan.outputs.critical-count }}
+          DEPS_HIGH: ${{ needs.dependency-scan.outputs.high-count }}
+          DEPS_MODERATE: ${{ needs.dependency-scan.outputs.moderate-count }}
+          DEPS_LOW: ${{ needs.dependency-scan.outputs.low-count }}
+        run: |
+          set -euo pipefail
+
+          if [ "$JOB_DEPS_RESULT" = "skipped" ]; then
+            echo "line=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          FINDINGS="${DEPS_FINDINGS:-0}"
+          if [ "$FINDINGS" -gt 0 ]; then
+            PARTS=()
+            [ "${DEPS_CRITICAL:-0}" -gt 0 ] && PARTS+=("${DEPS_CRITICAL} critical")
+            [ "${DEPS_HIGH:-0}"     -gt 0 ] && PARTS+=("${DEPS_HIGH} high")
+            [ "${DEPS_MODERATE:-0}" -gt 0 ] && PARTS+=("${DEPS_MODERATE} moderate")
+            [ "${DEPS_LOW:-0}"      -gt 0 ] && PARTS+=("${DEPS_LOW} low")
+            BREAKDOWN=$(IFS=', '; echo "${PARTS[*]}")
+            echo "line=**Dependency Scan:** ${JOB_DEPS_RESULT} — ${FINDINGS} vulnerabilities (${BREAKDOWN})" >> "$GITHUB_OUTPUT"
+          else
+            echo "line=**Dependency Scan:** ${JOB_DEPS_RESULT} — no vulnerabilities" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build codeql line
+        id: codeql-line
+        shell: bash
+        env:
+          JOB_CODEQL_RESULT: ${{ needs.codeql.result }}
+          CODEQL_FINDINGS: ${{ needs.codeql.outputs.findings-count }}
+          CODEQL_ERROR: ${{ needs.codeql.outputs.error-count }}
+          CODEQL_WARNING: ${{ needs.codeql.outputs.warning-count }}
+          CODEQL_NOTE: ${{ needs.codeql.outputs.note-count }}
+        run: |
+          set -euo pipefail
+
+          if [ "$JOB_CODEQL_RESULT" = "skipped" ]; then
+            echo "line=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          FINDINGS="${CODEQL_FINDINGS:-0}"
+          if [ "$FINDINGS" -gt 0 ]; then
+            PARTS=()
+            [ "${CODEQL_ERROR:-0}"   -gt 0 ] && PARTS+=("${CODEQL_ERROR} error")
+            [ "${CODEQL_WARNING:-0}" -gt 0 ] && PARTS+=("${CODEQL_WARNING} warning")
+            [ "${CODEQL_NOTE:-0}"    -gt 0 ] && PARTS+=("${CODEQL_NOTE} note")
+            BREAKDOWN=$(IFS=', '; echo "${PARTS[*]}")
+            echo "line=**CodeQL:** ${JOB_CODEQL_RESULT} — ${FINDINGS} finding(s) (${BREAKDOWN})" >> "$GITHUB_OUTPUT"
+          else
+            echo "line=**CodeQL:** ${JOB_CODEQL_RESULT} — no findings" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Post PR comment
         continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/pr/post-comment
@@ -252,12 +377,14 @@ jobs:
           github-token: ${{ secrets.github-token || github.token }}
           message: |
             ## ${{ steps.status.outputs.icon }} PR SDK Validation ${{ steps.status.outputs.status }}
-            
+
             **Build and Test:** ${{ needs.build-and-test.result }}
             **Coverage Analysis:** ${{ needs.coverage-analysis.result }}
             **API Compatibility:** ${{ needs.api-compatibility.result }}
             **Static Analysis:** ${{ needs.static-analysis.result }}
-            
+            ${{ steps.deps-line.outputs.line }}
+            ${{ steps.codeql-line.outputs.line }}
+
             **Configuration:** ${{ inputs.configuration }}
             **Coverage Threshold:** ${{ inputs.coverage-threshold }}%
             **Runner:** ${{ inputs.runs-on }}
