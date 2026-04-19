@@ -194,21 +194,41 @@ SUMMARY_ROWS=()
 declare -A NEW_PACKETS=()
 
 # Repo-existence cache — avoids one `gh repo view` per packet for the same
-# target repo. Values: "1" = exists, "0" = 404 / no access.
+# target repo. Values: "1" = exists, "0" = confirmed 404 / no access.
+# Transient failures (rate limit, network, 5xx) are NOT cached and propagate
+# so the run fails fast rather than silently skipping every subsequent packet.
 declare -A REPO_EXISTS=()
 
 repo_exists() {
   local repo="$1"
   if [[ -n "${REPO_EXISTS[$repo]:-}" ]]; then
-    [[ "${REPO_EXISTS[$repo]}" == "1" ]]
-    return
+    if [[ "${REPO_EXISTS[$repo]}" == "1" ]]; then
+      return 0
+    fi
+    return 1
   fi
-  if gh repo view "$repo" --json name >/dev/null 2>&1; then
+  local stderr_file
+  stderr_file="$(mktemp)"
+  if gh repo view "$repo" --json name >/dev/null 2>"$stderr_file"; then
+    rm -f "$stderr_file"
     REPO_EXISTS[$repo]=1
     return 0
   fi
-  REPO_EXISTS[$repo]=0
-  return 1
+  local stderr_content
+  stderr_content="$(<"$stderr_file")"
+  rm -f "$stderr_file"
+  # Only cache negative when gh clearly reports the repo doesn't exist or is
+  # inaccessible. Everything else (rate limits, network errors, 5xx) is
+  # surfaced so the caller can decide whether to abort.
+  if [[ "$stderr_content" == *"Could not resolve"* ]] \
+    || [[ "$stderr_content" == *"HTTP 404"* ]] \
+    || [[ "$stderr_content" == *"Not Found"* ]] \
+    || [[ "$stderr_content" == *"could not find any repository"* ]]; then
+    REPO_EXISTS[$repo]=0
+    return 1
+  fi
+  echo "::error::gh repo view failed for $repo with non-404 error: $stderr_content" >&2
+  exit 1
 }
 
 # Label cache — avoids one `gh label view` call per (packet, label). First
@@ -277,9 +297,11 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
 
   # Target repo must exist and be accessible. A packet that names a future /
   # not-yet-created repo is a legitimate state (standup packets land before
-  # their repos do). Skip with a warning instead of erroring the whole run.
+  # their repos do). Skip with a plain log line instead of erroring the whole
+  # run. Plain echo (not ::warning::) matches the existing skip-log style and
+  # avoids interpolating untrusted values into a workflow command.
   if ! repo_exists "$target_repo"; then
-    echo "::warning::skip  $rel -> target repo $target_repo does not exist (or no access); will retry on future runs"
+    echo "skip  $rel -> target repo $target_repo does not exist (or no access); will retry on future runs"
     continue
   fi
 
