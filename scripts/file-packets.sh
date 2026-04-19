@@ -244,6 +244,10 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   label_args=()
   for l in "${all_labels[@]}"; do
     [[ -z "$l" ]] && continue
+    # Ensure label exists on the target repo; auto-create with neutral defaults
+    # if missing. `gh label create` exits non-zero when the label already exists
+    # — that's the no-op path. Stderr is suppressed to keep logs clean on re-runs.
+    gh label create "$l" --repo "$target_repo" --color "ededed" --description "Auto-created by file-packets" 2>/dev/null || true
     label_args+=("--label" "$l")
   done
 
