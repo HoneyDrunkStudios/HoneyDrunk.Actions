@@ -68,7 +68,7 @@ on:
         default: true
 
       enable-dependency-scan:
-        description: 'Run vulnerable-package scan (dotnet list --vulnerable)'
+        description: 'Run vulnerable-package scan (dotnet list <target> package --vulnerable --include-transitive --format json)'
         required: false
         type: boolean
         default: true
@@ -206,7 +206,7 @@ jobs:
       contents: read
       security-events: write
 
-  # Job 7: Accessibility Check (Optional)
+  # Job 6: Accessibility Check (Optional)
   accessibility-check:
     name: Minimal Accessibility Check
     if: ${{ inputs.enable-accessibility-check }}
@@ -238,7 +238,7 @@ jobs:
           scan-mode: 'minimal'
           wcag-level: 'AA'
   
-  # Job 8: PR Summary
+  # Job 7: PR Summary
   pr-summary:
     name: PR Summary
     needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql]
@@ -393,9 +393,9 @@ jobs:
               [ "${DEPS_MODERATE:-0}" -gt 0 ] && BREAKDOWN_PARTS+=("${DEPS_MODERATE} moderate")
               [ "${DEPS_LOW:-0}"      -gt 0 ] && BREAKDOWN_PARTS+=("${DEPS_LOW} low")
               BREAKDOWN=$(IFS=', '; echo "${BREAKDOWN_PARTS[*]}")
-              echo "- **Dependency Scan:** $JOB_DEPS_RESULT — ${FINDINGS} vulnerable package(s) (${BREAKDOWN})" >> message.md
+              echo "- **Dependency Scan:** $JOB_DEPS_RESULT — ${FINDINGS} vulnerabilities (${BREAKDOWN})" >> message.md
             else
-              echo "- **Dependency Scan:** $JOB_DEPS_RESULT — no vulnerable packages" >> message.md
+              echo "- **Dependency Scan:** $JOB_DEPS_RESULT — no vulnerabilities" >> message.md
             fi
           fi
 

@@ -59,13 +59,13 @@ on:
 
     outputs:
       has-warnings:
-        description: 'Whether any vulnerable packages were found (regardless of severity gate)'
+        description: 'Whether any vulnerabilities were found (regardless of severity gate)'
         value: ${{ jobs.dependency-scan.outputs.has-warnings }}
       warning-messages:
         description: 'Human-readable summary of findings'
         value: ${{ jobs.dependency-scan.outputs.warning-messages }}
       findings-count:
-        description: 'Total number of vulnerable packages (direct + transitive)'
+        description: 'Total number of vulnerabilities found across direct + transitive packages'
         value: ${{ jobs.dependency-scan.outputs.findings-count }}
       critical-count:
         description: 'Number of critical-severity vulnerabilities'
@@ -127,7 +127,10 @@ jobs:
 
           TARGET="${{ inputs.project-path }}"
           if [ -z "$TARGET" ]; then
-            TARGET=$(find . -maxdepth 4 \( -name '*.slnx' -o -name '*.sln' \) | head -n 1 || true)
+            TARGET=$(find . -maxdepth 4 \( -name '*.slnx' -o -name '*.sln' \) | sort | head -n 1 || true)
+          fi
+          if [ -z "$TARGET" ]; then
+            TARGET=$(find . -maxdepth 4 \( -name '*.csproj' -o -name '*.fsproj' -o -name '*.vbproj' \) | sort | head -n 1 || true)
           fi
 
           if [ -z "$TARGET" ]; then
@@ -138,27 +141,33 @@ jobs:
           fi
 
           mkdir -p ./security-reports
+          JSON_REPORT=./security-reports/vulnerable-packages.json
+          ERROR_REPORT=./security-reports/vulnerable-packages.err
 
-          # --format json was added in .NET SDK 9. Projects on SDK 9+ get a
-          # structured report; older SDKs will error out on --format, so we
-          # fall back to the text format and let the evaluator handle it.
+          # JSON output is required by downstream evaluation. If the scan fails
+          # or does not produce JSON, fail the job so we do not report a false
+          # clean result. Requires .NET SDK 9+ (default 10.0.x).
           SCAN_ARGS=(package --vulnerable --include-transitive --format json)
 
+          set +e
           if [ -n "$TARGET" ]; then
-            dotnet list "$TARGET" "${SCAN_ARGS[@]}" \
-              > ./security-reports/vulnerable-packages.json \
-              2> ./security-reports/vulnerable-packages.err || true
+            dotnet list "$TARGET" "${SCAN_ARGS[@]}" > "$JSON_REPORT" 2> "$ERROR_REPORT"
           else
-            dotnet list "${SCAN_ARGS[@]}" \
-              > ./security-reports/vulnerable-packages.json \
-              2> ./security-reports/vulnerable-packages.err || true
+            dotnet list "${SCAN_ARGS[@]}" > "$JSON_REPORT" 2> "$ERROR_REPORT"
+          fi
+          SCAN_EXIT_CODE=$?
+          set -e
+
+          if [ "$SCAN_EXIT_CODE" -ne 0 ]; then
+            echo "::error::dotnet list package scan failed with exit code $SCAN_EXIT_CODE."
+            cat "$ERROR_REPORT" || true
+            exit "$SCAN_EXIT_CODE"
           fi
 
-          if [ ! -s ./security-reports/vulnerable-packages.json ]; then
-            echo "::warning::dotnet list did not produce JSON output; see error log artifact."
-            cat ./security-reports/vulnerable-packages.err || true
-            # Write an empty-results JSON so downstream steps have a consistent input.
-            echo '{"projects":[]}' > ./security-reports/vulnerable-packages.json
+          if [ ! -s "$JSON_REPORT" ]; then
+            echo "::error::dotnet list completed without producing JSON output."
+            cat "$ERROR_REPORT" || true
+            exit 1
           fi
 
       - name: Evaluate findings
@@ -221,7 +230,7 @@ jobs:
           if [ "${TOTAL}" -eq 0 ]; then
             echo "has-warnings=false" >> "$GITHUB_OUTPUT"
             echo "warning-messages=" >> "$GITHUB_OUTPUT"
-            echo "✅ No vulnerable packages found."
+            echo "✅ No vulnerabilities found."
             exit 0
           fi
 
@@ -234,7 +243,7 @@ jobs:
           [ "${UNKNOWN}"  -gt 0 ] && PARTS+=("${UNKNOWN} unknown")
           BREAKDOWN=$(IFS=', '; echo "${PARTS[*]}")
 
-          MSG="Found ${TOTAL} vulnerable package(s): ${BREAKDOWN}. See vulnerable-packages artifact for detail."
+          MSG="Found ${TOTAL} vulnerabilities: ${BREAKDOWN}. See vulnerable-packages artifact for detail."
           echo "has-warnings=true"              >> "$GITHUB_OUTPUT"
           echo "warning-messages=${MSG}"        >> "$GITHUB_OUTPUT"
           echo "::warning::${MSG}"

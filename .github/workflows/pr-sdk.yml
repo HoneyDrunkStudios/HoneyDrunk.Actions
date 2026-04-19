@@ -80,7 +80,7 @@ on:
         default: true
 
       enable-dependency-scan:
-        description: 'Run vulnerable-package scan (dotnet list --vulnerable)'
+        description: 'Run vulnerable-package scan (dotnet list <target> package --vulnerable --include-transitive --format json)'
         required: false
         type: boolean
         default: true
@@ -336,9 +336,9 @@ jobs:
             [ "${DEPS_MODERATE:-0}" -gt 0 ] && PARTS+=("${DEPS_MODERATE} moderate")
             [ "${DEPS_LOW:-0}"      -gt 0 ] && PARTS+=("${DEPS_LOW} low")
             BREAKDOWN=$(IFS=', '; echo "${PARTS[*]}")
-            echo "line=**Dependency Scan:** ${JOB_DEPS_RESULT} — ${FINDINGS} vulnerable package(s) (${BREAKDOWN})" >> "$GITHUB_OUTPUT"
+            echo "line=**Dependency Scan:** ${JOB_DEPS_RESULT} — ${FINDINGS} vulnerabilities (${BREAKDOWN})" >> "$GITHUB_OUTPUT"
           else
-            echo "line=**Dependency Scan:** ${JOB_DEPS_RESULT} — no vulnerable packages" >> "$GITHUB_OUTPUT"
+            echo "line=**Dependency Scan:** ${JOB_DEPS_RESULT} — no vulnerabilities" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build codeql line

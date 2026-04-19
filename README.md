@@ -41,7 +41,7 @@ Fast validation for pull requests:
   - Build and unit tests
   - Fast static analysis (formatting, test naming)
   - Diff-only secret scanning
-  - Vulnerable-package scan (`dotnet list --vulnerable --include-transitive`)
+  - Vulnerable-package scan (`dotnet list package --vulnerable --include-transitive --format json`)
   - CodeQL SAST + code-quality (`security-and-quality` query pack)
   - Optional minimal accessibility check
   - Consolidated PR summary comment with per-job severity breakdowns
