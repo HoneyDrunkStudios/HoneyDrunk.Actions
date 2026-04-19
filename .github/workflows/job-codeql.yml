@@ -172,6 +172,7 @@ jobs:
           category: ${{ inputs.category }}
           output: ${{ inputs.working-directory }}/codeql-results
           upload: true
+          wait-for-processing: true
 
       - name: Evaluate findings
         id: evaluate
@@ -191,10 +192,9 @@ jobs:
           # from the local SARIF — that way dismissed alerts (e.g. false
           # positives, tests) are excluded from the PR gate and summary even
           # though CodeQL still re-detects them on every run.
-
-          # Give GitHub a moment to ingest the just-uploaded SARIF and match
-          # it against existing alerts/dismissals before we query.
-          sleep 30
+          # `analyze@v3` with `wait-for-processing: true` already blocks until
+          # GitHub has ingested the SARIF and matched dismissals, so we can
+          # query the API directly here without a manual sleep.
 
           QUERY="state=open&tool_name=CodeQL&per_page=100"
           if [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "pull_request_target" ]; then
@@ -203,10 +203,22 @@ jobs:
             QUERY="${QUERY}&ref=${REF}"
           fi
 
-          ALERTS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?${QUERY}" 2>/dev/null || echo '[]')
+          OUT_FILE=$(mktemp)
+          ERR_FILE=$(mktemp)
+          trap 'rm -f "$OUT_FILE" "$ERR_FILE"' EXIT
 
-          # Filter to this category (CodeQL surfaces it on most_recent_instance).
-          FILTERED=$(echo "${ALERTS}" | jq --arg cat "${CATEGORY}" '[.[] | select(.most_recent_instance.category == $cat)]')
+          if ! gh api --paginate "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?${QUERY}" \
+                 > "$OUT_FILE" 2> "$ERR_FILE"; then
+            echo "::error::Failed to query Code Scanning alerts API: $(cat "$ERR_FILE")"
+            exit 1
+          fi
+
+          # `gh api --paginate` emits one JSON array per page back-to-back.
+          # `jq -s 'add'` slurps the documents into one flat array before we
+          # filter; without this, counts would be per-page instead of total.
+          FILTERED=$(jq -s --arg cat "${CATEGORY}" \
+            '(add // []) | [.[] | select(.most_recent_instance.category == $cat)]' \
+            "$OUT_FILE")
 
           TOTAL=$(echo "${FILTERED}" | jq 'length')
           ERROR=$(echo "${FILTERED}" | jq '[.[] | select(.rule.severity == "error")] | length')
