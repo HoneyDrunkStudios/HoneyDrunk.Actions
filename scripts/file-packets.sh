@@ -111,10 +111,22 @@ with open(path, encoding="utf-8") as f:
 
 fm = {}
 body = raw
+has_frontmatter = False
 m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n(.*)$", raw, re.DOTALL)
 if m:
-    fm = yaml.safe_load(m.group(1)) or {}
+    loaded = yaml.safe_load(m.group(1))
+    if loaded is None:
+        fm = {}
+    elif isinstance(loaded, dict):
+        fm = loaded
+    else:
+        print(
+            f"Frontmatter in {path} is not a YAML mapping (got {type(loaded).__name__})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     body = m.group(2).lstrip("\n")
+    has_frontmatter = True
 
 title = ""
 for line in body.splitlines():
@@ -133,6 +145,7 @@ def as_list(v):
 out = {
     "title": title,
     "body": body,
+    "has_frontmatter": has_frontmatter,
     "target_repo": str(fm.get("target_repo", "")).strip(),
     "labels": as_list(fm.get("labels")),
     "initiative": str(fm.get("initiative", "")).strip(),
@@ -217,6 +230,16 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   fi
 
   packet_json="$(parse_packet "$packet")"
+  has_frontmatter="$(jq -r '.has_frontmatter' <<<"$packet_json")"
+
+  # Files without YAML frontmatter are coordination docs (dispatch-plan.md,
+  # READMEs, notes), not packets. Skip quietly so non-packet markdown can live
+  # alongside packets in the same directory.
+  if [[ "$has_frontmatter" != "true" ]]; then
+    echo "skip  $rel -> no frontmatter (not a packet)"
+    continue
+  fi
+
   title="$(jq -r '.title' <<<"$packet_json")"
   body_content="$(jq -r '.body' <<<"$packet_json")"
   target_repo="$(jq -r '.target_repo' <<<"$packet_json")"

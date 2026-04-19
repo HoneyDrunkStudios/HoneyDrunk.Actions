@@ -74,6 +74,7 @@ jobs:
           fi
 
       - name: Checkout HoneyDrunk.Architecture
+        id: checkout-architecture
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.architecture-repo }}
@@ -112,6 +113,13 @@ jobs:
             --mapping-file ./honeydrunk-actions/.github/config/repo-to-node.yml
 
       - name: Commit updated manifest
+        # Run even if `File packets` errored partway through, so any packets
+        # that WERE successfully filed get persisted to the manifest. Without
+        # this, a single bad packet mid-run loses state for every packet that
+        # filed before it — causing duplicate issues on the next run. Gated on
+        # the architecture checkout succeeding so we don't try to commit into a
+        # non-existent working directory when earlier steps fail.
+        if: always() && steps.checkout-architecture.outcome == 'success'
         working-directory: architecture
         env:
           MANIFEST_PATH: ${{ inputs.manifest-path }}
