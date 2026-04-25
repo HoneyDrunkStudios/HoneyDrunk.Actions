@@ -1,0 +1,267 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Check Secret Rotation SLA'
+description: 'Query Log Analytics for Key Vault secret-age telemetry and fail when rotation SLA is exceeded'
+inputs:
+  workspace-id:
+    description: 'Log Analytics workspace ID, such as log-hd-shared-prod'
+    required: true
+  vault-name:
+    description: 'Target Key Vault name'
+    required: true
+  environment:
+    description: 'Deployment environment name'
+    required: true
+  telemetry-table:
+    description: 'Log Analytics table containing secret rotation telemetry'
+    required: false
+    default: 'SecretRotationTelemetry_CL'
+  exceptions-table:
+    description: 'Log Analytics table containing active rotation SLA exceptions'
+    required: false
+    default: 'SecretRotationExceptions_CL'
+  query-timespan:
+    description: 'Timespan passed to the Log Analytics query'
+    required: false
+    default: 'P365D'
+  fail-on-empty:
+    description: 'Fail when no telemetry rows are returned for the target vault'
+    required: false
+    default: 'true'
+outputs:
+  checked-count:
+    description: 'Number of secrets checked'
+    value: ${{ steps.evaluate.outputs.checked-count }}
+  violation-count:
+    description: 'Number of deploy-blocking SLA findings'
+    value: ${{ steps.evaluate.outputs.violation-count }}
+  exception-count:
+    description: 'Number of active exceptions applied'
+    value: ${{ steps.evaluate.outputs.exception-count }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Query rotation telemetry
+      id: query
+      uses: azure/cli@v2
+      env:
+        WORKSPACE_ID: ${{ inputs.workspace-id }}
+        VAULT_NAME: ${{ inputs.vault-name }}
+        ENVIRONMENT_NAME: ${{ inputs.environment }}
+        TELEMETRY_TABLE: ${{ inputs.telemetry-table }}
+        EXCEPTIONS_TABLE: ${{ inputs.exceptions-table }}
+        QUERY_TIMESPAN: ${{ inputs.query-timespan }}
+      with:
+        inlineScript: |
+          set -euo pipefail
+
+          for value_name in WORKSPACE_ID VAULT_NAME ENVIRONMENT_NAME QUERY_TIMESPAN; do
+            if [ -z "${!value_name}" ]; then
+              echo "::error::${value_name} is required"
+              exit 1
+            fi
+          done
+
+          if ! printf '%s' "$VAULT_NAME" | grep -Eq '^[A-Za-z0-9-]+$'; then
+            echo "::error::vault-name contains unsupported characters"
+            exit 1
+          fi
+          if ! printf '%s' "$ENVIRONMENT_NAME" | grep -Eq '^[A-Za-z0-9_.-]+$'; then
+            echo "::error::environment contains unsupported characters"
+            exit 1
+          fi
+          if ! printf '%s' "$TELEMETRY_TABLE" | grep -Eq '^[A-Za-z][A-Za-z0-9_]*$'; then
+            echo "::error::telemetry-table contains unsupported characters"
+            exit 1
+          fi
+          if ! printf '%s' "$EXCEPTIONS_TABLE" | grep -Eq '^[A-Za-z][A-Za-z0-9_]*$'; then
+            echo "::error::exceptions-table contains unsupported characters"
+            exit 1
+          fi
+
+          cat > rotation-sla.kql <<KQL
+          let TargetVault = '${VAULT_NAME}';
+          let TargetEnvironment = '${ENVIRONMENT_NAME}';
+          let Telemetry =
+            ${TELEMETRY_TABLE}
+            | extend VaultName = tostring(column_ifexists('vaultName_s', ''))
+            | extend VaultName = iff(isempty(VaultName), tostring(column_ifexists('VaultName_s', '')), VaultName)
+            | extend VaultName = iff(isempty(VaultName), tostring(column_ifexists('vaultName', '')), VaultName)
+            | extend VaultName = iff(isempty(VaultName), tostring(column_ifexists('VaultName', '')), VaultName)
+            | extend Environment = tostring(column_ifexists('environment_s', ''))
+            | extend Environment = iff(isempty(Environment), tostring(column_ifexists('Environment_s', '')), Environment)
+            | extend Environment = iff(isempty(Environment), tostring(column_ifexists('environment', '')), Environment)
+            | extend Environment = iff(isempty(Environment), tostring(column_ifexists('Environment', '')), Environment)
+            | extend SecretName = tostring(column_ifexists('secretName_s', ''))
+            | extend SecretName = iff(isempty(SecretName), tostring(column_ifexists('SecretName_s', '')), SecretName)
+            | extend SecretName = iff(isempty(SecretName), tostring(column_ifexists('secretName', '')), SecretName)
+            | extend SecretName = iff(isempty(SecretName), tostring(column_ifexists('SecretName', '')), SecretName)
+            | extend Tier = tostring(column_ifexists('tier_s', ''))
+            | extend Tier = iff(isempty(Tier), tostring(column_ifexists('Tier_s', '')), Tier)
+            | extend Tier = iff(isempty(Tier), tostring(column_ifexists('tier', '')), Tier)
+            | extend Tier = iff(isempty(Tier), tostring(column_ifexists('Tier', '')), Tier)
+            | extend SecretKind = tostring(column_ifexists('secretKind_s', ''))
+            | extend SecretKind = iff(isempty(SecretKind), tostring(column_ifexists('SecretKind_s', '')), SecretKind)
+            | extend SecretKind = iff(isempty(SecretKind), tostring(column_ifexists('secretKind', '')), SecretKind)
+            | extend SecretKind = iff(isempty(SecretKind), tostring(column_ifexists('SecretKind', '')), SecretKind)
+            | extend AgeDays = todouble(column_ifexists('secretAgeDays_d', real(null)))
+            | extend AgeDays = iff(isnull(AgeDays), todouble(column_ifexists('ageDays_d', real(null))), AgeDays)
+            | extend AgeDays = iff(isnull(AgeDays), todouble(column_ifexists('AgeDays', real(null))), AgeDays)
+            | extend CreatedAt = todatetime(column_ifexists('createdAt_t', datetime(null)))
+            | extend CreatedAt = iff(isnull(CreatedAt), todatetime(column_ifexists('CreatedAt_t', datetime(null))), CreatedAt)
+            | extend CreatedAt = iff(isnull(CreatedAt), todatetime(column_ifexists('versionCreatedAt_t', datetime(null))), CreatedAt)
+            | extend CreatedAt = iff(isnull(CreatedAt), todatetime(column_ifexists('VersionCreatedAt_t', datetime(null))), CreatedAt)
+            | extend ExpiresAt = todatetime(column_ifexists('expiresAt_t', datetime(null)))
+            | extend ExpiresAt = iff(isnull(ExpiresAt), todatetime(column_ifexists('ExpiresAt_t', datetime(null))), ExpiresAt)
+            | extend DaysToExpiry = todouble(column_ifexists('daysToExpiry_d', real(null)))
+            | extend DaysToExpiry = iff(isnull(DaysToExpiry), todouble(column_ifexists('DaysToExpiry', real(null))), DaysToExpiry)
+            | extend AgeDays = iff(isnull(AgeDays) and isnotnull(CreatedAt), todouble(datetime_diff('day', now(), CreatedAt)), AgeDays)
+            | extend DaysToExpiry = iff(isnull(DaysToExpiry) and isnotnull(ExpiresAt), todouble(datetime_diff('day', ExpiresAt, now())), DaysToExpiry)
+            | where VaultName == TargetVault
+            | where isempty(Environment) or Environment == TargetEnvironment
+            | where isnotempty(SecretName)
+            | summarize arg_max(TimeGenerated, *) by SecretName;
+          let ActiveExceptions =
+            ${EXCEPTIONS_TABLE}
+            | extend VaultName = tostring(column_ifexists('vaultName_s', ''))
+            | extend VaultName = iff(isempty(VaultName), tostring(column_ifexists('VaultName_s', '')), VaultName)
+            | extend VaultName = iff(isempty(VaultName), tostring(column_ifexists('vaultName', '')), VaultName)
+            | extend VaultName = iff(isempty(VaultName), tostring(column_ifexists('VaultName', '')), VaultName)
+            | extend Environment = tostring(column_ifexists('environment_s', ''))
+            | extend Environment = iff(isempty(Environment), tostring(column_ifexists('Environment_s', '')), Environment)
+            | extend Environment = iff(isempty(Environment), tostring(column_ifexists('environment', '')), Environment)
+            | extend Environment = iff(isempty(Environment), tostring(column_ifexists('Environment', '')), Environment)
+            | extend SecretName = tostring(column_ifexists('secretName_s', ''))
+            | extend SecretName = iff(isempty(SecretName), tostring(column_ifexists('SecretName_s', '')), SecretName)
+            | extend SecretName = iff(isempty(SecretName), tostring(column_ifexists('secretName', '')), SecretName)
+            | extend SecretName = iff(isempty(SecretName), tostring(column_ifexists('SecretName', '')), SecretName)
+            | extend ExpiresAt = todatetime(column_ifexists('expiresAt_t', datetime(null)))
+            | extend ExpiresAt = iff(isnull(ExpiresAt), todatetime(column_ifexists('ExpiresAt_t', datetime(null))), ExpiresAt)
+            | where isempty(VaultName) or VaultName == TargetVault
+            | where isempty(Environment) or Environment == TargetEnvironment
+            | where isnotempty(SecretName) and isnotnull(ExpiresAt) and ExpiresAt > now()
+            | summarize ExceptionExpiresAt=max(ExpiresAt) by SecretName;
+          Telemetry
+          | extend TierKey = replace_regex(tolower(Tier), @'[\s_]+', '-')
+          | extend SecretKindKey = replace_regex(tolower(SecretKind), @'[\s_]+', '-')
+          | extend SlaDays = case(
+              SecretKindKey in ('certificate', 'cert', 'certificates'), 30,
+              TierKey in ('tier1', 'tier-1', 'azure-native', 'azure-native-rotation'), 30,
+              TierKey in ('tier2', 'tier-2', 'third-party', 'third-party-rotation'), 90,
+              int(null))
+          | join kind=leftouter ActiveExceptions on SecretName
+          | extend HasException = isnotnull(ExceptionExpiresAt)
+          | extend IsCertificate = SecretKindKey in ('certificate', 'cert', 'certificates')
+          | extend Status = case(
+              HasException, 'exception',
+              isnull(SlaDays), 'missing-sla',
+              IsCertificate and isnull(DaysToExpiry), 'missing-expiry',
+              IsCertificate and DaysToExpiry < SlaDays, 'past-sla',
+              not(IsCertificate) and isnull(AgeDays), 'missing-age',
+              not(IsCertificate) and AgeDays > SlaDays, 'past-sla',
+              'ok')
+          | project
+              SecretName,
+              VaultName,
+              Environment,
+              Tier,
+              SecretKind,
+              AgeDays=round(AgeDays, 1),
+              DaysToExpiry=round(DaysToExpiry, 1),
+              SlaDays,
+              Status,
+              ExceptionExpiresAt,
+              LastObservedAt=TimeGenerated
+          | order by Status asc, SecretName asc
+          KQL
+
+          QUERY="$(cat rotation-sla.kql)"
+          az monitor log-analytics query \
+            --workspace "$WORKSPACE_ID" \
+            --analytics-query "$QUERY" \
+            --timespan "$QUERY_TIMESPAN" \
+            --output json > rotation-sla-results.json
+
+    - name: Evaluate SLA results
+      id: evaluate
+      shell: bash
+      env:
+        FAIL_ON_EMPTY: ${{ inputs.fail-on-empty }}
+        VAULT_NAME: ${{ inputs.vault-name }}
+        ENVIRONMENT_NAME: ${{ inputs.environment }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json
+        import os
+        import sys
+
+        def normalize_rows(payload):
+            if isinstance(payload, list):
+                return payload
+            if isinstance(payload, dict):
+                if isinstance(payload.get("tables"), list) and payload["tables"]:
+                    table = payload["tables"][0]
+                    columns = [column["name"] for column in table.get("columns", [])]
+                    return [dict(zip(columns, row)) for row in table.get("rows", [])]
+                for key in ("value", "records", "data"):
+                    if isinstance(payload.get(key), list):
+                        return payload[key]
+            return []
+
+        def clean(value):
+            if value is None:
+                return ""
+            return str(value)
+
+        def md(value):
+            return clean(value).replace("|", "\\|").replace("\n", " ")
+
+        with open("rotation-sla-results.json", "r", encoding="utf-8") as handle:
+            rows = normalize_rows(json.load(handle))
+
+        checked_count = len(rows)
+        exception_count = sum(1 for row in rows if row.get("Status") == "exception")
+        blocking_statuses = {"past-sla", "missing-sla", "missing-age", "missing-expiry"}
+        violations = [row for row in rows if row.get("Status") in blocking_statuses]
+
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            with open(summary_path, "a", encoding="utf-8") as summary:
+                summary.write("## Secret Rotation SLA Gate\n\n")
+                summary.write(f"Vault: `{md(os.environ['VAULT_NAME'])}`  \n")
+                summary.write(f"Environment: `{md(os.environ['ENVIRONMENT_NAME'])}`\n\n")
+                summary.write("| Secret | Tier | Kind | Age days | Days to expiry | SLA days | Status | Exception expires |\n")
+                summary.write("| --- | --- | --- | ---: | ---: | ---: | --- | --- |\n")
+                if rows:
+                    for row in rows:
+                        summary.write(
+                            f"| `{md(row.get('SecretName'))}` "
+                            f"| {md(row.get('Tier'))} "
+                            f"| {md(row.get('SecretKind'))} "
+                            f"| {md(row.get('AgeDays'))} "
+                            f"| {md(row.get('DaysToExpiry'))} "
+                            f"| {md(row.get('SlaDays'))} "
+                            f"| **{md(row.get('Status'))}** "
+                            f"| {md(row.get('ExceptionExpiresAt'))} |\n"
+                        )
+                else:
+                    summary.write("| _No telemetry rows returned_ |  |  |  |  |  | **missing-telemetry** |  |\n")
+
+        output_path = os.environ["GITHUB_OUTPUT"]
+        with open(output_path, "a", encoding="utf-8") as output:
+            output.write(f"checked-count={checked_count}\n")
+            output.write(f"violation-count={len(violations)}\n")
+            output.write(f"exception-count={exception_count}\n")
+
+        fail_on_empty = os.environ.get("FAIL_ON_EMPTY", "true").lower() == "true"
+        if checked_count == 0 and fail_on_empty:
+            print("::error::No secret rotation telemetry rows were returned for the target vault.")
+            sys.exit(1)
+
+        if violations:
+            names = ", ".join(clean(row.get("SecretName")) for row in violations)
+            print(f"::error::Secret rotation SLA gate failed for {len(violations)} secret(s): {names}")
+            sys.exit(1)
+
+        print(f"Secret rotation SLA gate passed for {checked_count} secret(s); {exception_count} active exception(s).")
+        PY

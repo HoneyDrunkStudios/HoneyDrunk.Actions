@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
-name: 'Setup .NET SDK'
+name: 'Setup HoneyDrunk .NET'
 description: 'Install the .NET SDK from an explicit version or global.json, with optional GitHub Packages NuGet auth'
 inputs:
   dotnet-version:

@@ -1,0 +1,563 @@
+# ==============================================================================
+# Deploy Azure Container App Revision
+# ==============================================================================
+# Purpose:
+#   Reusable job for deploying a container image to Azure Container Apps.
+#   Supports optional build/push to ACR, Key Vault-backed runtime secrets,
+#   revision health probing, and explicit traffic shifting.
+#
+# Responsibilities:
+#   - Authenticate with Azure via OIDC
+#   - Optionally build and push a container image to shared ACR
+#   - Validate Container App naming, managed identity, and revision mode
+#   - Configure Container App env vars as Key Vault-backed secret references
+#   - Create a new revision at 0% traffic, health-probe it, then shift traffic
+#
+# Target:
+#   Repos with containerized Nodes deploying to Azure Container Apps per ADR-0015.
+#
+# Usage Example:
+#   See docs/consumer-usage.md for sample consumer workflows
+# ==============================================================================
+
+name: Deploy Azure Container App
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      container-image:
+        description: 'Full container image reference (e.g., acrhdshareddev.azurecr.io/honeydrunk-notify-worker:v1.2.3). Required when build-context is empty.'
+        required: false
+        type: string
+        default: ''
+
+      build-context:
+        description: 'Path to Docker build context. When set, this workflow builds and pushes image-name:image-tag to acr-registry.'
+        required: false
+        type: string
+        default: ''
+
+      image-name:
+        description: 'Short image name. Required when build-context is set.'
+        required: false
+        type: string
+        default: ''
+
+      image-tag:
+        description: 'Explicit image tag. Required when build-context is set.'
+        required: false
+        type: string
+        default: ''
+
+      dockerfile:
+        description: 'Dockerfile path relative to build-context'
+        required: false
+        type: string
+        default: 'Dockerfile'
+
+      acr-registry:
+        description: 'ACR login server (e.g., acrhdshareddev.azurecr.io)'
+        required: true
+        type: string
+
+      container-app:
+        description: 'Target Container App name (must match ca-hd-{service}-{env})'
+        required: true
+        type: string
+
+      resource-group:
+        description: 'Azure resource group containing the Container App'
+        required: true
+        type: string
+
+      azure-client-id:
+        description: 'Azure AD application (client) ID for OIDC federation'
+        required: true
+        type: string
+
+      azure-tenant-id:
+        description: 'Azure AD tenant ID for OIDC federation'
+        required: true
+        type: string
+
+      azure-subscription-id:
+        description: 'Azure subscription ID for OIDC federation'
+        required: true
+        type: string
+
+      revision-suffix:
+        description: 'Suffix appended to the new revision name. Defaults to ca-<run-id>-<run-attempt>.'
+        required: false
+        type: string
+        default: ''
+
+      health-check-url:
+        description: 'Absolute URL or path relative to the revision FQDN. Empty to skip.'
+        required: false
+        type: string
+        default: ''
+
+      health-check-timeout:
+        description: 'Max seconds to wait for health check and revision readiness'
+        required: false
+        type: number
+        default: 120
+
+      startup-wait:
+        description: 'Seconds to wait after revision provisioning before probing'
+        required: false
+        type: number
+        default: 15
+
+      traffic-shift-mode:
+        description: 'Traffic shift mode: full, canary:N, or hold'
+        required: false
+        type: string
+        default: 'full'
+
+      keyvault-name:
+        description: 'Azure Key Vault name for runtime secret references. Empty to skip.'
+        required: false
+        type: string
+        default: ''
+
+      keyvault-secrets:
+        description: >
+          Newline-separated Key Vault secrets to expose as Container App env vars.
+          Format: SECRET_NAME or SECRET_NAME=ENV_VAR_NAME.
+          Values are configured as Key Vault references, never fetched into the workflow.
+        required: false
+        type: string
+        default: ''
+
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+    outputs:
+      revision-name:
+        description: 'Name of the created Container App revision'
+        value: ${{ jobs.deploy.outputs.revision-name }}
+      revision-fqdn:
+        description: 'Revision-specific FQDN for the created revision'
+        value: ${{ jobs.deploy.outputs.revision-fqdn }}
+      deployment-status:
+        description: 'Final deployment status: success, health-check-failed, or deploy-failed'
+        value: ${{ jobs.deploy.outputs.deployment-status }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to Container App
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      revision-name: ${{ steps.deploy-container-app.outputs.revision-name }}
+      revision-fqdn: ${{ steps.deploy-container-app.outputs.revision-fqdn }}
+      deployment-status: ${{ steps.deployment-status.outputs.status }}
+
+    steps:
+      - name: Checkout caller repository
+        if: ${{ inputs.build-context != '' }}
+        uses: actions/checkout@v4
+
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.actions-ref }}
+          path: .actions
+
+      - name: Validate inputs
+        id: validate-inputs
+        shell: bash
+        env:
+          BUILD_CONTEXT: ${{ inputs.build-context }}
+          CONTAINER_IMAGE: ${{ inputs.container-image }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          ACR_REGISTRY: ${{ inputs.acr-registry }}
+          CONTAINER_APP: ${{ inputs.container-app }}
+          TRAFFIC_SHIFT_MODE: ${{ inputs.traffic-shift-mode }}
+          REVISION_SUFFIX_INPUT: ${{ inputs.revision-suffix }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$CONTAINER_APP" =~ ^ca-hd-[a-z0-9]+(-[a-z0-9]+)+$ ]]; then
+            echo "::error::container-app must match ca-hd-{service}-{env}; received '$CONTAINER_APP'"
+            exit 1
+          fi
+
+          if [ -n "$BUILD_CONTEXT" ]; then
+            if [ -z "$IMAGE_NAME" ] || [ -z "$IMAGE_TAG" ]; then
+              echo "::error::image-name and image-tag are required when build-context is set"
+              exit 1
+            fi
+            if [ -z "$ACR_REGISTRY" ]; then
+              echo "::error::acr-registry is required when build-context is set"
+              exit 1
+            fi
+          elif [ -z "$CONTAINER_IMAGE" ]; then
+            echo "::error::container-image is required when build-context is empty"
+            exit 1
+          fi
+
+          case "$TRAFFIC_SHIFT_MODE" in
+            full|hold) ;;
+            canary:*)
+              CANARY_PERCENT="${TRAFFIC_SHIFT_MODE#canary:}"
+              if [[ ! "$CANARY_PERCENT" =~ ^[0-9]+$ ]] || [ "$CANARY_PERCENT" -lt 1 ] || [ "$CANARY_PERCENT" -gt 99 ]; then
+                echo "::error::traffic-shift-mode canary:N requires N between 1 and 99"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::traffic-shift-mode must be one of: full, hold, canary:N"
+              exit 1
+              ;;
+          esac
+
+          if [ -n "$REVISION_SUFFIX_INPUT" ]; then
+            REVISION_SUFFIX="$REVISION_SUFFIX_INPUT"
+          else
+            REVISION_SUFFIX="ca-${{ github.run_id }}-${{ github.run_attempt }}"
+          fi
+
+          echo "revision-suffix=$REVISION_SUFFIX" >> "$GITHUB_OUTPUT"
+
+      - name: Azure Login
+        id: azure-login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
+      - name: Validate target Container App
+        id: validate-target
+        shell: bash
+        env:
+          APP_NAME: ${{ inputs.container-app }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          APP_JSON=$(az containerapp show \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json)
+
+          REVISION_MODE=$(echo "$APP_JSON" | jq -r '.properties.configuration.activeRevisionsMode // empty')
+          if [ "$REVISION_MODE" != "Multiple" ]; then
+            echo "::error::Container App '$APP_NAME' must use activeRevisionsMode=Multiple for safe traffic shifting. Current mode: ${REVISION_MODE:-unknown}."
+            exit 1
+          fi
+
+          IDENTITY_TYPE=$(echo "$APP_JSON" | jq -r '.identity.type // empty')
+          if [[ ",$IDENTITY_TYPE," != *",SystemAssigned,"* ]] && [ "$IDENTITY_TYPE" != "SystemAssigned" ]; then
+            echo "::error::Container App '$APP_NAME' must have system-assigned Managed Identity enabled for Key Vault references and ADR-0015 compliance. Current identity: ${IDENTITY_TYPE:-none}."
+            exit 1
+          fi
+
+          echo "Container App target validated: revision mode Multiple, system-assigned identity enabled"
+
+      - name: Capture current traffic target
+        id: current-traffic
+        shell: bash
+        env:
+          APP_NAME: ${{ inputs.container-app }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          TRAFFIC_JSON=$(az containerapp ingress traffic show \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json 2>/dev/null || echo '[]')
+
+          LATEST_TRAFFIC_WEIGHT=$(echo "$TRAFFIC_JSON" | jq -r '
+            [.[] | select((.latestRevision // false) == true) | (.weight // .trafficWeight // 0)]
+            | add // 0')
+          if [ "$LATEST_TRAFFIC_WEIGHT" -gt 0 ]; then
+            echo "::error::Container App '$APP_NAME' routes ${LATEST_TRAFFIC_WEIGHT}% traffic to latestRevision. Configure explicit revision traffic before using this workflow so new revisions stay at 0% until health succeeds."
+            exit 1
+          fi
+
+          CURRENT_REVISION=$(echo "$TRAFFIC_JSON" | jq -r '
+            [.[] | select((.weight // .trafficWeight // 0) > 0) | select((.revisionName // "") != "")]
+            | sort_by(.weight // .trafficWeight)
+            | last
+            | .revisionName // empty')
+
+          if [ -z "$CURRENT_REVISION" ]; then
+            CURRENT_REVISION=$(az containerapp revision list \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active].name | [-1]" \
+              --output tsv 2>/dev/null || true)
+          fi
+
+          echo "current-revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
+          if [ -n "$CURRENT_REVISION" ]; then
+            echo "Current traffic target: $CURRENT_REVISION"
+          else
+            echo "::warning::Could not determine current traffic target; canary mode will fail if requested"
+          fi
+
+      - name: Login to ACR for build
+        if: ${{ inputs.build-context != '' }}
+        uses: ./.actions/.github/actions/azure/acr-login
+        with:
+          registry: ${{ inputs.acr-registry }}
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
+      - name: Set up Docker Buildx
+        if: ${{ inputs.build-context != '' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve deployment image
+        id: image
+        shell: bash
+        env:
+          BUILD_CONTEXT: ${{ inputs.build-context }}
+          CONTAINER_IMAGE: ${{ inputs.container-image }}
+          ACR_REGISTRY: ${{ inputs.acr-registry }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BUILD_CONTEXT" ]; then
+            IMAGE_REF="${ACR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+            DOCKERFILE_PATH="${BUILD_CONTEXT%/}/${DOCKERFILE}"
+            echo "Building image $IMAGE_REF"
+            docker buildx build \
+              --file "$DOCKERFILE_PATH" \
+              --tag "$IMAGE_REF" \
+              --load \
+              "$BUILD_CONTEXT"
+            docker push "$IMAGE_REF"
+          else
+            IMAGE_REF="$CONTAINER_IMAGE"
+          fi
+
+          echo "image=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Key Vault inputs
+        if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}
+        shell: bash
+        run: |
+          echo "::warning::Both 'keyvault-name' and 'keyvault-secrets' must be provided together. One is missing - skipping Key Vault integration."
+
+      - name: Configure Key Vault-backed Container App secrets
+        id: configure-keyvault-refs
+        if: ${{ inputs.keyvault-name != '' && inputs.keyvault-secrets != '' }}
+        shell: bash
+        env:
+          VAULT_NAME: ${{ inputs.keyvault-name }}
+          SECRETS_INPUT: ${{ inputs.keyvault-secrets }}
+          APP_NAME: ${{ inputs.container-app }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          SECRET_ARGS=()
+          ENV_ARGS=()
+          COUNT=0
+
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+            if [[ "$line" == *"="* ]]; then
+              KV_SECRET="${line%%=*}"
+              ENV_NAME="${line#*=}"
+            else
+              KV_SECRET="$line"
+              ENV_NAME=$(echo "$KV_SECRET" | sed 's/--/__/g' | sed 's/-/_/g')
+            fi
+
+            KV_SECRET=$(echo "$KV_SECRET" | xargs)
+            ENV_NAME=$(echo "$ENV_NAME" | xargs)
+
+            if [ -z "$KV_SECRET" ] || [ -z "$ENV_NAME" ]; then
+              echo "::error::Invalid keyvault-secrets line. Use SECRET_NAME or SECRET_NAME=ENV_VAR_NAME."
+              exit 1
+            fi
+
+            SECRET_HASH=$(printf '%s' "$KV_SECRET" | sha256sum | cut -c1-17)
+            CONTAINERAPP_SECRET="kv-${SECRET_HASH}"
+            SECRET_URI="https://${VAULT_NAME}.vault.azure.net/secrets/${KV_SECRET}"
+
+            SECRET_ARGS+=("${CONTAINERAPP_SECRET}=keyvaultref:${SECRET_URI},identityref:system")
+            ENV_ARGS+=("${ENV_NAME}=secretref:${CONTAINERAPP_SECRET}")
+            COUNT=$((COUNT + 1))
+            echo "Mapped Key Vault secret '$KV_SECRET' to env var '$ENV_NAME' via Container App secret '$CONTAINERAPP_SECRET'"
+          done <<< "$SECRETS_INPUT"
+
+          if [ "$COUNT" -gt 0 ]; then
+            az containerapp secret set \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --secrets "${SECRET_ARGS[@]}" \
+              --output none
+
+            az containerapp update \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --set-env-vars "${ENV_ARGS[@]}" \
+              --output none
+
+            echo "Configured $COUNT Key Vault-backed Container App secret reference(s)"
+          fi
+
+      - name: Deploy Container App revision
+        id: deploy-container-app
+        uses: ./.actions/.github/actions/azure/deploy-container-app
+        with:
+          app-name: ${{ inputs.container-app }}
+          resource-group: ${{ inputs.resource-group }}
+          image: ${{ steps.image.outputs.image }}
+          revision-suffix: ${{ steps.validate-inputs.outputs.revision-suffix }}
+          startup-wait: ${{ inputs.startup-wait }}
+          health-check-timeout: ${{ inputs.health-check-timeout }}
+
+      - name: Health probe new revision
+        id: health-check
+        if: ${{ inputs.health-check-url != '' }}
+        shell: bash
+        env:
+          REVISION_FQDN: ${{ steps.deploy-container-app.outputs.revision-fqdn }}
+          HEALTH_CHECK_URL: ${{ inputs.health-check-url }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
+        run: |
+          set -euo pipefail
+          if [[ "$HEALTH_CHECK_URL" == http://* || "$HEALTH_CHECK_URL" == https://* ]]; then
+            PROBE_URL="$HEALTH_CHECK_URL"
+          else
+            HEALTH_PATH="$HEALTH_CHECK_URL"
+            if [[ "$HEALTH_PATH" != /* ]]; then
+              HEALTH_PATH="/$HEALTH_PATH"
+            fi
+            PROBE_URL="https://${REVISION_FQDN}${HEALTH_PATH}"
+          fi
+
+          echo "Probing new revision health endpoint (timeout: ${HEALTH_CHECK_TIMEOUT}s)"
+          ELAPSED=0
+          INTERVAL=5
+          while [ "$ELAPSED" -lt "$HEALTH_CHECK_TIMEOUT" ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$PROBE_URL" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+              echo "Health check passed (HTTP ${HTTP_CODE})"
+              echo "healthy=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "  HTTP ${HTTP_CODE}; retrying in ${INTERVAL}s..."
+            sleep "$INTERVAL"
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "healthy=false" >> "$GITHUB_OUTPUT"
+          echo "::error::Health check failed after ${HEALTH_CHECK_TIMEOUT}s. Leaving traffic on the previous revision."
+          exit 1
+
+      - name: Shift traffic
+        id: shift-traffic
+        if: ${{ steps.deploy-container-app.outcome == 'success' && (inputs.health-check-url == '' || steps.health-check.outcome == 'success') }}
+        shell: bash
+        env:
+          APP_NAME: ${{ inputs.container-app }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          NEW_REVISION: ${{ steps.deploy-container-app.outputs.revision-name }}
+          CURRENT_REVISION: ${{ steps.current-traffic.outputs.current-revision }}
+          TRAFFIC_SHIFT_MODE: ${{ inputs.traffic-shift-mode }}
+        run: |
+          set -euo pipefail
+          TRAFFIC_PERCENT=0
+
+          case "$TRAFFIC_SHIFT_MODE" in
+            full)
+              az containerapp ingress traffic set \
+                --name "$APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --revision-weight "${NEW_REVISION}=100" \
+                --output none
+              TRAFFIC_PERCENT=100
+              ;;
+            hold)
+              echo "traffic-shift-mode=hold; leaving new revision at 0% traffic"
+              TRAFFIC_PERCENT=0
+              ;;
+            canary:*)
+              CANARY_PERCENT="${TRAFFIC_SHIFT_MODE#canary:}"
+              if [ -z "$CURRENT_REVISION" ]; then
+                echo "::error::Cannot use canary mode because the current traffic revision could not be determined"
+                exit 1
+              fi
+              REMAINDER=$((100 - CANARY_PERCENT))
+              az containerapp ingress traffic set \
+                --name "$APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --revision-weight "${NEW_REVISION}=${CANARY_PERCENT}" "${CURRENT_REVISION}=${REMAINDER}" \
+                --output none
+              TRAFFIC_PERCENT="$CANARY_PERCENT"
+              ;;
+          esac
+
+          echo "traffic-percent=$TRAFFIC_PERCENT" >> "$GITHUB_OUTPUT"
+          echo "New revision traffic: ${TRAFFIC_PERCENT}%"
+
+      - name: Rollback guidance
+        if: ${{ failure() && steps.deploy-container-app.outputs.revision-name != '' }}
+        shell: bash
+        run: |
+          echo "::error::Container App deployment did not complete successfully. Traffic was not shifted unless the failure happened after the traffic step. To roll back manually, run: az containerapp ingress traffic set --name '${{ inputs.container-app }}' --resource-group '${{ inputs.resource-group }}' --revision-weight '<previous-revision>=100'."
+
+      - name: Set deployment status
+        id: deployment-status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS="success"
+          if [ "${{ steps.health-check.outcome }}" = "failure" ]; then
+            STATUS="health-check-failed"
+          elif [ "${{ steps.validate-inputs.outcome }}" = "failure" ] \
+            || [ "${{ steps.azure-login.outcome }}" = "failure" ] \
+            || [ "${{ steps.validate-target.outcome }}" = "failure" ] \
+            || [ "${{ steps.configure-keyvault-refs.outcome }}" = "failure" ] \
+            || [ "${{ steps.image.outcome }}" = "failure" ] \
+            || [ "${{ steps.deploy-container-app.outcome }}" = "failure" ] \
+            || [ "${{ steps.shift-traffic.outcome }}" = "failure" ]; then
+            STATUS="deploy-failed"
+          fi
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "Deployment status: $STATUS"
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "# Container App Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ steps.image.outputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Container App** | ${{ inputs.container-app }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Resource Group** | ${{ inputs.resource-group }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Revision** | ${{ steps.deploy-container-app.outputs.revision-name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Revision FQDN** | ${{ steps.deploy-container-app.outputs.revision-fqdn }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Traffic Mode** | ${{ inputs.traffic-shift-mode }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Traffic Percent** | ${{ steps.shift-traffic.outputs.traffic-percent || '0' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Key Vault** | ${{ inputs.keyvault-name || 'N/A' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Status** | ${{ steps.deployment-status.outputs.status }} |" >> "$GITHUB_STEP_SUMMARY"

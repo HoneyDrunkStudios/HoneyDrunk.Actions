@@ -98,6 +98,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Chains ACR login → Key Vault fetch → App Service config → deploy → health check → slot swap
   - Deployment summary in GitHub Step Summary
   - Supports both service principal and admin credentials
+- Reusable Azure Container Apps deployment workflow (`job-deploy-container-app.yml`)
+  - Optionally builds and pushes images to ACR, or deploys a prebuilt image reference
+  - Validates ADR-0015 Container App naming, system-assigned identity, and Multiple revision mode
+  - Creates a new revision, health-probes it, and shifts traffic with `full`, `hold`, or `canary:N` modes
+  - Configures runtime secrets as Key Vault-backed Container App secret references without fetching secret values into workflow logs
+- Azure Container Apps revision deployment composite action (`azure/deploy-container-app`)
+  - Uses `az containerapp revision copy` and polls until the new revision reaches Running
+  - Outputs revision name and revision FQDN for downstream health checks and summaries
+- Consumer example workflow (`examples/deploy-container-app.yml`) for Container Apps build-and-deploy usage
+- Consumer usage docs for `job-deploy-container-app.yml`, including inputs, outputs, secrets, traffic modes, and target prerequisites
 - Slack/Teams notification composite action (`common/send-notification`)
   - Incoming webhook support for Slack and Teams
   - Configurable status, title, message, and fields

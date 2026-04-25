@@ -174,6 +174,38 @@ permissions:
   id-token: write
 ```
 
+### Azure OIDC Deploy
+
+For deployable Nodes, callers pass Azure identifiers as variables and grant the job `id-token: write`. No Azure credential secret is accepted.
+
+```yaml
+name: Deploy Notify Worker
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/azure-oidc-deploy.yml@main
+    with:
+      client-id: ${{ vars.AZURE_CLIENT_ID }}
+      tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      resource-group: rg-hd-notify-prod
+      app-name: func-hd-notify-prod
+      artifact-name: notify-worker
+      environment: production
+      app-kind: functionapp
+      keyvault-name: kv-hd-notify-prod
+      kv-smoke-test-secret-name: Oidc--SmokeTest
+      check-sla: true
+      workspace-id: log-hd-shared-prod
+```
+
 ### Nightly Security Scan
 
 ```yaml
@@ -204,6 +236,15 @@ permissions:
 ## 🧩 Composite Actions (Steps)
 
 ### .NET Actions
+
+#### Setup HoneyDrunk .NET
+Installs the SDK from `global.json` when present, or from an explicit version, and can configure GitHub Packages using the workflow token instead of a PAT.
+
+```yaml
+- uses: HoneyDrunkStudios/HoneyDrunk.Actions/actions/setup-honeydrunk-dotnet@main
+  with:
+    configure-github-packages: true
+```
 
 #### Setup .NET SDK
 Installs a specific version of the .NET SDK.
@@ -346,6 +387,30 @@ Uploads and publishes test results with annotations.
 
 ### Security Actions
 
+#### Check Secret Rotation SLA
+Queries Log Analytics after `azure/login@v2` and blocks deployment if any secret in the target vault is past its ADR-0006 rotation SLA without an active exception.
+
+```yaml
+- uses: HoneyDrunkStudios/HoneyDrunk.Actions/actions/check-rotation-sla@main
+  with:
+    workspace-id: log-hd-shared-prod
+    vault-name: kv-hd-notify-prod
+    environment: production
+```
+
+The reusable `azure-oidc-deploy.yml` workflow runs this gate by default before deployment. Callers must pass `workspace-id` and either `keyvault-name` or `rotation-sla-vault-name`; set `check-sla: false` only for non-deploy smoke runs that have no vault telemetry yet.
+
+#### Read Azure Key Vault Secret
+Reads one Key Vault secret after an OIDC Azure login, masks the value, and exposes it as an output for the current job.
+
+```yaml
+- uses: HoneyDrunkStudios/HoneyDrunk.Actions/actions/azure-kv-read@main
+  id: kv
+  with:
+    vault-name: kv-hd-notify-prod
+    secret-name: Provider--ApiKey
+```
+
 #### Vulnerability Scan
 Scans for known security vulnerabilities.
 
@@ -381,6 +446,45 @@ Posts a comment to the pull request.
 ```
 
 ## 🎯 Design Principles
+
+### Secret Policy
+
+Azure deploy workflows are OIDC-only. The Actions repo CI runs `actionlint` and rejects these direct-secret patterns in workflow and action YAML:
+
+- `AZURE[_-]CLIENT[_-]SECRET` and `client[-_]secret`
+- `AZURE[_-]CREDENTIALS`
+- `NUGET_(API[_-]KEY|AUTH[_-]TOKEN)`
+- `GH_PAT`, `GITHUB_PAT`, `PERSONAL_ACCESS_TOKEN`, and `*_PAT_TOKEN`
+
+Remaining `secrets.*` references are limited to GitHub workflow tokens, GitHub App tokens for Hive automation, local Key Vault resolution, or documented pending migrations for external package/container registries and agent API credentials.
+
+### Rotation SLA Gate
+
+`actions/check-rotation-sla` reads `SecretRotationTelemetry_CL` and joins active exceptions from `SecretRotationExceptions_CL`. It never selects or prints secret values; summaries include only secret names, tiers, ages, SLA status, and exception expiry timestamps.
+
+Expected telemetry columns:
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| `vaultName_s` | string | Key Vault name, for example `kv-hd-notify-prod`. |
+| `environment_s` | string | Deployment environment, for example `prod` or `production`. |
+| `secretName_s` | string | Secret identifier/name only. |
+| `tier_s` | string | `tier-1`, `azure-native`, `tier-2`, or `third-party`. |
+| `secretKind_s` | string | Optional; use `certificate` for cert expiry checks. |
+| `secretAgeDays_d` | real | Current secret age in days. |
+| `daysToExpiry_d` | real | Certificate days until expiry when `secretKind_s` is `certificate`. |
+
+Exception table schema:
+
+| Column | Type | Required | Purpose |
+| --- | --- | ---: | --- |
+| `secretName_s` | string | Yes | Secret identifier/name to exempt. |
+| `expiresAt_t` | datetime | Yes | UTC time when the exception stops applying. |
+| `reason_s` | string | Yes | Human-readable reason for the temporary override. |
+| `vaultName_s` | string | No | Scope the exception to one vault. Empty applies by secret name. |
+| `environment_s` | string | No | Scope the exception to one environment. Empty applies across environments. |
+
+Deploy-blocking statuses are `past-sla`, `missing-sla`, `missing-age`, and `missing-expiry`. `exception` permits a temporary override until `expiresAt_t`.
 
 ### 1. Reusable, Not Bespoke
 All workflows are designed to be consumed via `uses:` syntax. No repo-specific logic.

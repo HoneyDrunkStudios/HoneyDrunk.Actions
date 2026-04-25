@@ -1,48 +1,29 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Login to Azure Container Registry'
-description: 'Authenticate with ACR via OIDC federation (preferred), service principal, or admin credentials'
+description: 'Authenticate with ACR via GitHub OIDC federation'
 inputs:
   registry:
     description: 'ACR login server (e.g., myregistry.azurecr.io)'
     required: true
   client-id:
-    description: 'Azure AD application (client) ID — used for both OIDC and service principal auth'
-    required: false
-    default: ''
+    description: 'Azure AD application (client) ID'
+    required: true
   tenant-id:
     description: 'Azure AD tenant ID'
-    required: false
-    default: ''
+    required: true
   subscription-id:
-    description: 'Azure subscription ID (required for OIDC federation, not needed for SP or admin auth)'
-    required: false
-    default: ''
-  client-secret:
-    description: 'Azure service principal client secret (only for SP auth — prefer OIDC instead)'
-    required: false
-    default: ''
-  username:
-    description: 'ACR username (for admin or token-based auth — not recommended for production)'
-    required: false
-    default: ''
-  password:
-    description: 'ACR password or token (for admin or token-based auth)'
-    required: false
-    default: ''
+    description: 'Azure subscription ID'
+    required: true
 runs:
   using: 'composite'
   steps:
-    - name: Determine auth method
-      id: auth-method
+    - name: Validate OIDC inputs
       shell: bash
       env:
         ACR_REGISTRY: ${{ inputs.registry }}
         CLIENT_ID: ${{ inputs.client-id }}
         TENANT_ID: ${{ inputs.tenant-id }}
         SUBSCRIPTION_ID: ${{ inputs.subscription-id }}
-        CLIENT_SECRET: ${{ inputs.client-secret }}
-        ADMIN_USERNAME: ${{ inputs.username }}
-        ADMIN_PASSWORD: ${{ inputs.password }}
       run: |
         set -euo pipefail
         if [ -z "$ACR_REGISTRY" ]; then
@@ -50,34 +31,19 @@ runs:
           exit 1
         fi
 
-        if [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$SUBSCRIPTION_ID" ] && [ -z "$CLIENT_SECRET" ]; then
-          echo "method=oidc" >> $GITHUB_OUTPUT
-        elif [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$CLIENT_SECRET" ]; then
-          echo "::warning::Using service principal auth — consider switching to OIDC federation for zero-secret deployments"
-          echo "method=sp" >> $GITHUB_OUTPUT
-        elif [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
-          if [[ "$ACR_REGISTRY" == *.azurecr.io ]]; then
-            echo "::warning::Using ACR admin credentials — not recommended for production"
-          else
-            echo "::warning::Using registry username/password credentials — not recommended for production"
-          fi
-          echo "method=admin" >> $GITHUB_OUTPUT
-        else
-          echo "::error::Provide one of: (1) client-id + tenant-id + subscription-id for OIDC, (2) client-id + tenant-id + client-secret for SP, or (3) username + password for admin auth"
+        if [ -z "$CLIENT_ID" ] || [ -z "$TENANT_ID" ] || [ -z "$SUBSCRIPTION_ID" ]; then
+          echo "::error::client-id, tenant-id, and subscription-id are required for OIDC ACR login"
           exit 1
         fi
 
-    # OIDC federation (preferred) — no long-lived secrets
-    - name: Azure Login (OIDC)
-      if: steps.auth-method.outputs.method == 'oidc'
+    - name: Azure Login
       uses: azure/login@v2
       with:
         client-id: ${{ inputs.client-id }}
         tenant-id: ${{ inputs.tenant-id }}
         subscription-id: ${{ inputs.subscription-id }}
 
-    - name: Login to ACR (OIDC)
-      if: steps.auth-method.outputs.method == 'oidc'
+    - name: Login to ACR
       shell: bash
       env:
         ACR_REGISTRY: ${{ inputs.registry }}
@@ -85,42 +51,3 @@ runs:
         set -euo pipefail
         ACR_NAME="${ACR_REGISTRY%%.*}"
         az acr login --name "$ACR_NAME"
-
-    # Service principal fallback — uses client secret
-    - name: Build Azure credentials (SP)
-      id: sp-creds
-      if: steps.auth-method.outputs.method == 'sp'
-      shell: bash
-      env:
-        CLIENT_ID: ${{ inputs.client-id }}
-        CLIENT_SECRET: ${{ inputs.client-secret }}
-        TENANT_ID: ${{ inputs.tenant-id }}
-      run: |
-        set -euo pipefail
-        CREDS=$(jq -nc --arg c "$CLIENT_ID" --arg s "$CLIENT_SECRET" --arg t "$TENANT_ID" \
-          '{clientId: $c, clientSecret: $s, tenantId: $t}')
-        echo "::add-mask::$CREDS"
-        echo "creds=$CREDS" >> $GITHUB_OUTPUT
-
-    - name: Azure Login (SP)
-      if: steps.auth-method.outputs.method == 'sp'
-      uses: azure/login@v2
-      with:
-        creds: ${{ steps.sp-creds.outputs.creds }}
-
-    - name: Login to ACR (SP)
-      if: steps.auth-method.outputs.method == 'sp'
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ inputs.registry }}
-        username: ${{ inputs.client-id }}
-        password: ${{ inputs.client-secret }}
-
-    # Admin credentials fallback — not recommended
-    - name: Login to ACR (admin)
-      if: steps.auth-method.outputs.method == 'admin'
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ inputs.registry }}
-        username: ${{ inputs.username }}
-        password: ${{ inputs.password }}
