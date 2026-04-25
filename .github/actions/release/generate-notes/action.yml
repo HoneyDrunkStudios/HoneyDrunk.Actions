@@ -101,7 +101,7 @@ runs:
           fi
 
           # Trim leading/trailing blank lines
-          notes=$(echo "$notes" | sed -e '/./,$!d' -e :a -e '/^\n*$/{$d;N;ba}')
+          notes=$(echo "$notes" | sed -e '/./,$!d' -e :a -e '/^[[:space:]]*$/{$d;N;ba}')
 
           ENTRY_COUNT=$((ENTRY_COUNT + 1))
           HAS_CHANGELOG="true"
@@ -234,7 +234,7 @@ runs:
         else
           echo "### 📋 What's Changed" >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
-          echo "See the [commit history](../commits/v$VERSION) for details." >> "$BODY_FILE"
+          echo "See the [commit history](https://github.com/${GITHUB_REPOSITORY}/commits/v$VERSION) for details." >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
         fi
 
