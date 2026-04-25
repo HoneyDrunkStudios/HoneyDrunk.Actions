@@ -1,0 +1,301 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Generate Release Notes'
+description: 'Generate rich release notes by auto-discovering CHANGELOG.md files and extracting the section for the released version'
+inputs:
+  version:
+    description: 'Version being released (without v prefix, e.g., 0.4.0)'
+    required: true
+  product-name:
+    description: 'Product name for the release title (e.g., HoneyDrunk.Kernel)'
+    required: true
+  product-description:
+    description: 'One-line description of the product'
+    required: false
+    default: ''
+  changelog-paths:
+    description: |
+      Optional override. If omitted, auto-discovers all CHANGELOG.md files in the repo
+      (excluding node_modules, .actions, bin, obj, artifacts, TestResults).
+      When provided, takes a newline-separated list of paths.
+      Use 'Label:path/to/CHANGELOG.md' syntax to override the sub-heading label.
+    required: false
+    default: ''
+  search-root:
+    description: 'Root directory to search for CHANGELOG.md files (only used during auto-discovery)'
+    required: false
+    default: '.'
+  nuget-packages:
+    description: |
+      Newline-separated list of NuGet package names to include in the installation section.
+      Use 'PackageName:attributes' to add extra attributes (e.g., PrivateAssets="all").
+    required: false
+    default: ''
+  docs-url:
+    description: 'URL to documentation (generates a link in the Links section)'
+    required: false
+    default: ''
+  include-compare-link:
+    description: 'Whether to include a "Full Changelog" compare link (true/false)'
+    required: false
+    default: 'true'
+outputs:
+  body:
+    description: 'Complete release notes body (markdown)'
+    value: ${{ steps.assemble.outputs.body }}
+  has-changelog:
+    description: 'Whether any changelog entries were found (true/false)'
+    value: ${{ steps.extract-all.outputs.has-changelog }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Discover and extract changelogs
+      id: extract-all
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        EXPLICIT_PATHS="${{ inputs.changelog-paths }}"
+        SEARCH_ROOT="${{ inputs.search-root }}"
+        HAS_CHANGELOG="false"
+        ENTRY_COUNT=0
+
+        : > "$RUNNER_TEMP/changelog-entries.txt"
+
+        extract_version() {
+          local file="$1"
+          local ver="$2"
+          awk -v ver="$ver" '
+            BEGIN { found=0; printing=0 }
+            /^## \[/ {
+              if (printing) exit
+              if ($0 ~ "^## \\[" ver "\\]") {
+                found=1
+                printing=1
+                next
+              }
+            }
+            printing { print }
+            END { if (!found) exit 1 }
+          ' "$file" 2>/dev/null
+        }
+
+        process_changelog() {
+          local fpath="$1"
+          local label="$2"
+
+          if [ ! -f "$fpath" ]; then
+            echo "::warning::Changelog not found: $fpath"
+            return
+          fi
+
+          # Derive label from parent directory if not provided
+          if [ -z "$label" ]; then
+            label=$(basename "$(dirname "$fpath")")
+          fi
+
+          local notes
+          notes=$(extract_version "$fpath" "$VERSION")
+
+          if [ $? -ne 0 ] || [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
+            echo "::notice::Version $VERSION not found in $fpath — skipping"
+            return
+          fi
+
+          # Trim leading/trailing blank lines
+          notes=$(echo "$notes" | sed -e '/./,$!d' -e :a -e '/^[[:space:]]*$/{$d;N;ba}')
+
+          ENTRY_COUNT=$((ENTRY_COUNT + 1))
+          HAS_CHANGELOG="true"
+
+          echo "--- ENTRY: $label ---" >> "$RUNNER_TEMP/changelog-entries.txt"
+          echo "$notes" >> "$RUNNER_TEMP/changelog-entries.txt"
+          echo "" >> "$RUNNER_TEMP/changelog-entries.txt"
+        }
+
+        if [ -n "$EXPLICIT_PATHS" ]; then
+          # Use explicitly provided paths
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            line=$(echo "$line" | xargs)
+
+            LABEL=""
+            FPATH="$line"
+
+            # Parse Label:path syntax (label must not contain slashes)
+            if [[ "$line" =~ ^([^/]+):(.+)$ ]]; then
+              LABEL="${BASH_REMATCH[1]}"
+              FPATH="${BASH_REMATCH[2]}"
+            fi
+
+            process_changelog "$FPATH" "$LABEL"
+          done <<< "$EXPLICIT_PATHS"
+        else
+          # Auto-discover changelogs, preferring repo-level ones next to .slnx files
+          echo "::notice::Auto-discovering CHANGELOG.md files under $SEARCH_ROOT"
+
+          REPO_LEVEL_FILES=""
+          SLNX_FILES=$(find "$SEARCH_ROOT" -name "*.slnx" -type f 2>/dev/null | sort)
+
+          if [ -n "$SLNX_FILES" ]; then
+            while IFS= read -r slnx; do
+              SLNX_DIR=$(dirname "$slnx")
+              CANDIDATE="$SLNX_DIR/CHANGELOG.md"
+              if [ -f "$CANDIDATE" ]; then
+                REPO_LEVEL_FILES="${REPO_LEVEL_FILES}${CANDIDATE}"$'\n'
+              fi
+            done <<< "$SLNX_FILES"
+          fi
+
+          REPO_LEVEL_FILES=$(echo "$REPO_LEVEL_FILES" | sed '/^$/d')
+
+          if [ -n "$REPO_LEVEL_FILES" ]; then
+            # Repo-level changelogs found — use only those (they aggregate per-package content)
+            FILE_COUNT=$(echo "$REPO_LEVEL_FILES" | wc -l)
+            echo "::notice::Found $FILE_COUNT repo-level CHANGELOG.md file(s) next to .slnx"
+
+            while IFS= read -r fpath; do
+              [ -z "$fpath" ] && continue
+              process_changelog "$fpath" ""
+            done <<< "$REPO_LEVEL_FILES"
+          else
+            # No repo-level changelogs — fall back to discovering all CHANGELOG.md files
+            echo "::notice::No repo-level changelogs found, discovering all CHANGELOG.md files"
+            FOUND_FILES=$(find "$SEARCH_ROOT" -name "CHANGELOG.md" -type f \
+              ! -path "*/node_modules/*" \
+              ! -path "*/.actions/*" \
+              ! -path "*/bin/*" \
+              ! -path "*/obj/*" \
+              ! -path "*/artifacts/*" \
+              ! -path "*/TestResults/*" \
+              | sort)
+
+            if [ -z "$FOUND_FILES" ]; then
+              echo "::warning::No CHANGELOG.md files found under $SEARCH_ROOT"
+            else
+              FILE_COUNT=$(echo "$FOUND_FILES" | wc -l)
+              echo "::notice::Found $FILE_COUNT CHANGELOG.md file(s)"
+
+              while IFS= read -r fpath; do
+                [ -z "$fpath" ] && continue
+                process_changelog "$fpath" ""
+              done <<< "$FOUND_FILES"
+            fi
+          fi
+        fi
+
+        echo "has-changelog=$HAS_CHANGELOG" >> "$GITHUB_OUTPUT"
+        echo "entry-count=$ENTRY_COUNT" >> "$GITHUB_OUTPUT"
+
+    - name: Assemble release body
+      id: assemble
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        PRODUCT="${{ inputs.product-name }}"
+        DESCRIPTION="${{ inputs.product-description }}"
+        NUGET_PACKAGES="${{ inputs.nuget-packages }}"
+        DOCS_URL="${{ inputs.docs-url }}"
+        HAS_CHANGELOG="${{ steps.extract-all.outputs.has-changelog }}"
+        ENTRY_COUNT="${{ steps.extract-all.outputs.entry-count }}"
+        INCLUDE_COMPARE="${{ inputs.include-compare-link }}"
+
+        BODY_FILE="$RUNNER_TEMP/release-body.md"
+        : > "$BODY_FILE"
+
+        # Header
+        echo "## $PRODUCT v$VERSION" >> "$BODY_FILE"
+        echo "" >> "$BODY_FILE"
+
+        if [ -n "$DESCRIPTION" ]; then
+          echo "$DESCRIPTION" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+        fi
+
+        # Changelog section
+        if [ "$HAS_CHANGELOG" == "true" ] && [ -f "$RUNNER_TEMP/changelog-entries.txt" ]; then
+          echo "### 📋 What's Changed" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+
+          if [ "$ENTRY_COUNT" -eq 1 ]; then
+            # Single changelog — render flat (skip the entry header)
+            sed '/^--- ENTRY:.*---$/d' "$RUNNER_TEMP/changelog-entries.txt" >> "$BODY_FILE"
+          else
+            # Multiple changelogs — render with package headings
+            CURRENT_LABEL=""
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^---\ ENTRY:\ (.+)\ ---$ ]]; then
+                CURRENT_LABEL="${BASH_REMATCH[1]}"
+                echo "#### $CURRENT_LABEL" >> "$BODY_FILE"
+                echo "" >> "$BODY_FILE"
+              else
+                echo "$line" >> "$BODY_FILE"
+              fi
+            done < "$RUNNER_TEMP/changelog-entries.txt"
+          fi
+        else
+          echo "### 📋 What's Changed" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo "See the [commit history](https://github.com/${GITHUB_REPOSITORY}/commits/v$VERSION) for details." >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+        fi
+
+        # NuGet installation section
+        if [ -n "$NUGET_PACKAGES" ]; then
+          echo "### 📦 Installation" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo '```xml' >> "$BODY_FILE"
+
+          while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            pkg=$(echo "$pkg" | xargs)
+
+            # Parse PackageName:attributes syntax
+            if [[ "$pkg" == *:* ]]; then
+              PKG_NAME="${pkg%%:*}"
+              PKG_ATTRS=" ${pkg#*:}"
+            else
+              PKG_NAME="$pkg"
+              PKG_ATTRS=""
+            fi
+
+            echo "<PackageReference Include=\"$PKG_NAME\" Version=\"$VERSION\"$PKG_ATTRS />" >> "$BODY_FILE"
+          done <<< "$NUGET_PACKAGES"
+
+          echo '```' >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+        fi
+
+        # Links section
+        echo "### 🔗 Links" >> "$BODY_FILE"
+        echo "" >> "$BODY_FILE"
+
+        # NuGet links
+        if [ -n "$NUGET_PACKAGES" ]; then
+          while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            PKG_NAME="${pkg%%:*}"
+            PKG_NAME=$(echo "$PKG_NAME" | xargs)
+            echo "- [NuGet: $PKG_NAME](https://www.nuget.org/packages/$PKG_NAME/$VERSION)" >> "$BODY_FILE"
+          done <<< "$NUGET_PACKAGES"
+        fi
+
+        if [ -n "$DOCS_URL" ]; then
+          echo "- [Documentation]($DOCS_URL)" >> "$BODY_FILE"
+        fi
+
+        if [ "$INCLUDE_COMPARE" == "true" ]; then
+          REPO="${{ github.repository }}"
+          # Find the previous tag to build a compare link
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            echo "- [Full Changelog](https://github.com/$REPO/compare/$PREV_TAG...v$VERSION)" >> "$BODY_FILE"
+          fi
+        fi
+
+        echo "" >> "$BODY_FILE"
+
+        # Write output
+        {
+          echo "body<<RELEASE_BODY_EOF"
+          cat "$BODY_FILE"
+          echo "RELEASE_BODY_EOF"
+        } >> "$GITHUB_OUTPUT"
