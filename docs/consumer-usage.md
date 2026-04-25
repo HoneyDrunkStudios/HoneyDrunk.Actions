@@ -320,11 +320,11 @@ jobs:
       docker-build-context: 'HoneyDrunk.Pulse'
       container-registry: 'myregistry.azurecr.io'
       container-image-name: 'honeydrunkstudios/pulse-collector'
-    secrets:
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
 
 permissions:
   contents: read
@@ -395,7 +395,6 @@ jobs:
       dockerfile-path: './Pulse.Collector/Dockerfile'
       container-registry: 'myregistry.azurecr.io'
       container-image-name: 'pulse-collector'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -411,7 +410,6 @@ jobs:
       slot-name: 'staging'
       swap-to-production: true
       health-check-url: '/healthz'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -434,7 +432,6 @@ permissions:
       app-name: 'my-app-service'
       resource-group: 'rg-honeydrunk'
       slot-name: 'production'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -459,7 +456,6 @@ Fetch secrets from Azure Key Vault and apply them as App Service configuration b
         PostHog--ApiKey=POSTHOG_API_KEY
         Sentry--Dsn=SENTRY_DSN
         ApplicationInsights--ConnectionString
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -515,7 +511,6 @@ jobs:
       resource-group: 'rg-hd-platform-dev'
       health-check-url: '/healthz'
       traffic-shift-mode: 'full'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -536,7 +531,6 @@ jobs:
       container-app: 'ca-hd-notify-worker-dev'
       resource-group: 'rg-hd-platform-dev'
       health-check-url: '/healthz'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -559,7 +553,6 @@ Secret values are not fetched into the workflow. The workflow creates Container 
         ConnectionStrings--AppDb
         Resend--ApiKey=RESEND_API_KEY
         ApplicationInsights--ConnectionString
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -592,7 +585,7 @@ Secret name mapping:
 | `azure-client-id` | Yes | n/a | Azure client ID for OIDC federation. |
 | `azure-tenant-id` | Yes | n/a | Azure tenant ID for OIDC federation. |
 | `azure-subscription-id` | Yes | n/a | Azure subscription ID for OIDC federation. |
-| `actions-ref` | No | `main` | Ref of `HoneyDrunk.Actions` to check out for composite actions. |
+| `actions-ref` | No | `''` | Ref of `HoneyDrunk.Actions` to check out for composite actions. Empty uses the called workflow ref. |
 
 ### Outputs
 
@@ -656,7 +649,6 @@ jobs:
     with:
       functions-app: 'my-function-app'
       resource-group: 'rg-honeydrunk'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -678,7 +670,6 @@ permissions:
       slot-name: 'staging'
       swap-to-production: true
       health-check-url: '/api/health'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -699,7 +690,6 @@ permissions:
         Resend--ApiKey=RESEND_API_KEY
         Twilio--AccountSid=TWILIO_ACCOUNT_SID
         Twilio--AuthToken=TWILIO_AUTH_TOKEN
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}

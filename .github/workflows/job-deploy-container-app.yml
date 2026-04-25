@@ -137,10 +137,10 @@ on:
         default: ''
 
       actions-ref:
-        description: 'Git ref of HoneyDrunk.Actions to use'
+        description: 'Git ref of HoneyDrunk.Actions to use. Empty uses the called workflow ref.'
         required: false
         type: string
-        default: 'main'
+        default: ''
 
     outputs:
       revision-name:
@@ -171,11 +171,23 @@ jobs:
         if: ${{ inputs.build-context != '' }}
         uses: actions/checkout@v4
 
+      - name: Resolve actions checkout ref
+        id: resolve-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_REF="${{ inputs.actions-ref }}"
+          if [ -n "$INPUT_REF" ]; then
+            echo "ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v4
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          ref: ${{ inputs.actions-ref }}
+          ref: ${{ steps.resolve-ref.outputs.ref }}
           path: .actions
 
       - name: Validate inputs

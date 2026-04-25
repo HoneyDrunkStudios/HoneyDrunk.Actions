@@ -203,7 +203,7 @@ jobs:
       keyvault-name: kv-hd-notify-prod
       kv-smoke-test-secret-name: Oidc--SmokeTest
       check-sla: true
-      workspace-id: log-hd-shared-prod
+      workspace-id: ${{ vars.LOG_ANALYTICS_WORKSPACE_ID }} # workspace/customer GUID
 ```
 
 ### Nightly Security Scan
@@ -393,7 +393,7 @@ Queries Log Analytics after `azure/login@v2` and blocks deployment if any secret
 ```yaml
 - uses: HoneyDrunkStudios/HoneyDrunk.Actions/actions/check-rotation-sla@main
   with:
-    workspace-id: log-hd-shared-prod
+    workspace-id: ${{ vars.LOG_ANALYTICS_WORKSPACE_ID }}
     vault-name: kv-hd-notify-prod
     environment: production
 ```

@@ -3,7 +3,7 @@ name: 'Check Secret Rotation SLA'
 description: 'Query Log Analytics for Key Vault secret-age telemetry and fail when rotation SLA is exceeded'
 inputs:
   workspace-id:
-    description: 'Log Analytics workspace ID, such as log-hd-shared-prod'
+    description: 'Log Analytics workspace/customer ID GUID used by az monitor log-analytics query --workspace'
     required: true
   vault-name:
     description: 'Target Key Vault name'

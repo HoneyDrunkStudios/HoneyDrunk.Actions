@@ -70,7 +70,7 @@ on:
         type: boolean
         default: true
       workspace-id:
-        description: 'Log Analytics workspace ID for secret rotation SLA telemetry'
+        description: 'Log Analytics workspace/customer ID GUID for secret rotation SLA telemetry'
         required: false
         type: string
         default: ''
@@ -80,10 +80,10 @@ on:
         type: string
         default: ''
       actions-ref:
-        description: 'Git ref of HoneyDrunk.Actions to use for local composite actions'
+        description: 'Git ref of HoneyDrunk.Actions to use for local composite actions. Empty uses this workflow''s pinned ref.'
         required: false
         type: string
-        default: 'main'
+        default: ''
       runs-on:
         description: 'GitHub runner to use'
         required: false
@@ -135,12 +135,25 @@ jobs:
             fi
           fi
 
+      - name: Resolve actions checkout ref
+        id: resolve-ref
+        if: ${{ inputs.check-sla }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_REF="${{ inputs.actions-ref }}"
+          if [ -n "$INPUT_REF" ]; then
+            echo "ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout HoneyDrunk.Actions
         if: ${{ inputs.check-sla }}
         uses: actions/checkout@v4
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
-          ref: ${{ inputs.actions-ref }}
+          ref: ${{ steps.resolve-ref.outputs.ref }}
           path: .actions
 
       - name: Download artifact
@@ -155,6 +168,28 @@ jobs:
           client-id: ${{ inputs.client-id }}
           tenant-id: ${{ inputs.tenant-id }}
           subscription-id: ${{ inputs.subscription-id }}
+
+      - name: Validate target app
+        shell: bash
+        env:
+          APP_KIND: ${{ inputs.app-kind }}
+          APP_NAME: ${{ inputs.app-name }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          if [ "$APP_KIND" = "functionapp" ]; then
+            az functionapp show \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query id \
+              --output tsv >/dev/null
+          else
+            az webapp show \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query id \
+              --output tsv >/dev/null
+          fi
 
       - name: Key Vault smoke test
         if: ${{ inputs.keyvault-name != '' }}
