@@ -238,22 +238,28 @@ permissions:
 ### .NET Actions
 
 #### Setup HoneyDrunk .NET
-Installs the SDK from `global.json` when present, or from an explicit version, and can configure GitHub Packages using the workflow token instead of a PAT.
+Installs the SDK from `global.json` when present, or from an explicit version, and can configure GitHub Packages using the workflow token instead of a PAT. Jobs that enable GitHub Packages auth need `contents: read` and `packages: read`.
 
 ```yaml
-- uses: HoneyDrunkStudios/HoneyDrunk.Actions/actions/setup-honeydrunk-dotnet@main
-  with:
-    configure-github-packages: true
+permissions:
+  contents: read
+  packages: read
+
+steps:
+  - uses: HoneyDrunkStudios/HoneyDrunk.Actions/actions/setup-honeydrunk-dotnet@main
+    with:
+      configure-github-packages: true
 ```
 
 #### Setup .NET SDK
-Installs a specific version of the .NET SDK.
+Installs the SDK from `global.json` by default, or from an explicit version, and can configure GitHub Packages using the workflow token.
 
 ```yaml
 - uses: ./.github/actions/dotnet/setup
   with:
-    dotnet-version: '10.0.x'  # Default: 10.0.x
-    include-prerelease: false  # Default: false
+    global-json-file: global.json
+    dotnet-version: ''  # Empty reads global.json, then falls back to 10.0.x
+    configure-github-packages: false
 ```
 
 #### Restore Dependencies

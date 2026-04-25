@@ -338,7 +338,7 @@ permissions:
 
 HoneyDrunk.Actions supports Azure auth through GitHub OIDC federation only.
 
-### 1. OIDC Federation (Recommended)
+### OIDC Federation
 
 No long-lived secrets. GitHub issues a short-lived token; Azure trusts it via a federated credential on an App Registration.
 

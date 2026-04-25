@@ -303,11 +303,16 @@ jobs:
             exit 1
           fi
 
-          CURRENT_REVISION=$(echo "$TRAFFIC_JSON" | jq -r '
-            [.[] | select((.weight // .trafficWeight // 0) > 0) | select((.revisionName // "") != "")]
-            | sort_by(.weight // .trafficWeight)
-            | last
-            | .revisionName // empty')
+          POSITIVE_TRAFFIC_REVISIONS=$(echo "$TRAFFIC_JSON" | jq -c '
+            [.[] | select((.weight // .trafficWeight // 0) > 0) | select((.revisionName // "") != "") | .revisionName]')
+          POSITIVE_TRAFFIC_REVISION_COUNT=$(echo "$POSITIVE_TRAFFIC_REVISIONS" | jq 'length')
+          if [ "$POSITIVE_TRAFFIC_REVISION_COUNT" -gt 1 ]; then
+            REVISION_LIST=$(echo "$POSITIVE_TRAFFIC_REVISIONS" | jq -r 'join(", ")')
+            echo "::error::Container App '$APP_NAME' has multiple revisions receiving traffic (${REVISION_LIST}). This workflow's canary traffic shift only supports a single existing traffic-bearing revision. Consolidate traffic to one explicit revision before using this workflow."
+            exit 1
+          fi
+
+          CURRENT_REVISION=$(echo "$POSITIVE_TRAFFIC_REVISIONS" | jq -r 'first // empty')
 
           if [ -z "$CURRENT_REVISION" ]; then
             CURRENT_REVISION=$(az containerapp revision list \

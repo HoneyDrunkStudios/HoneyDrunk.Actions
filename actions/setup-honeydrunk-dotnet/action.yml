@@ -29,53 +29,19 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Resolve .NET SDK source
-      id: resolve-sdk
-      shell: bash
-      env:
-        DOTNET_VERSION: ${{ inputs.dotnet-version }}
-        GLOBAL_JSON_FILE: ${{ inputs.global-json-file }}
-      run: |
-        set -euo pipefail
-        if [ -n "$DOTNET_VERSION" ]; then
-          echo "dotnet-version=$DOTNET_VERSION" >> "$GITHUB_OUTPUT"
-          echo "global-json-file=" >> "$GITHUB_OUTPUT"
-        elif [ -f "$GLOBAL_JSON_FILE" ]; then
-          echo "dotnet-version=" >> "$GITHUB_OUTPUT"
-          echo "global-json-file=$GLOBAL_JSON_FILE" >> "$GITHUB_OUTPUT"
-        else
-          echo "dotnet-version=10.0.x" >> "$GITHUB_OUTPUT"
-          echo "global-json-file=" >> "$GITHUB_OUTPUT"
-        fi
+    - name: Checkout HoneyDrunk.Actions
+      uses: actions/checkout@v4
+      with:
+        repository: HoneyDrunkStudios/HoneyDrunk.Actions
+        ref: ${{ github.action_ref || 'main' }}
+        path: .honeydrunk-actions-setup-dotnet
 
     - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v4
+      uses: ./.honeydrunk-actions-setup-dotnet/.github/actions/dotnet/setup
       with:
-        dotnet-version: ${{ steps.resolve-sdk.outputs.dotnet-version }}
-        global-json-file: ${{ steps.resolve-sdk.outputs.global-json-file }}
+        dotnet-version: ${{ inputs.dotnet-version }}
         dotnet-quality: ${{ inputs.dotnet-quality }}
-
-    - name: Configure GitHub Packages NuGet source
-      if: ${{ inputs.configure-github-packages == 'true' }}
-      shell: bash
-      env:
-        OWNER_INPUT: ${{ inputs.github-packages-owner }}
-        NUGET_TOKEN: ${{ inputs.github-token || github.token }}
-      run: |
-        set -euo pipefail
-        OWNER="$OWNER_INPUT"
-        if [ -z "$OWNER" ]; then
-          OWNER="$GITHUB_REPOSITORY_OWNER"
-        fi
-
-        if [ -z "$NUGET_TOKEN" ]; then
-          echo "::error::github-token or github.token is required to configure GitHub Packages"
-          exit 1
-        fi
-
-        dotnet nuget remove source honeydrunk-github 2>/dev/null || true
-        dotnet nuget add source "https://nuget.pkg.github.com/${OWNER}/index.json" \
-          --name honeydrunk-github \
-          --username "$GITHUB_ACTOR" \
-          --password "$NUGET_TOKEN" \
-          --store-password-in-clear-text
+        global-json-file: ${{ inputs.global-json-file }}
+        configure-github-packages: ${{ inputs.configure-github-packages }}
+        github-packages-owner: ${{ inputs.github-packages-owner }}
+        github-token: ${{ inputs.github-token }}
