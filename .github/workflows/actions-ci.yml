@@ -31,6 +31,8 @@ jobs:
             find .github/workflows .github/actions actions \
               -type f \( -name '*.yml' -o -name '*.yaml' \) \
               ! -path './.github/workflows/actions-ci.yml' \
+              ! -path '.github/workflows/actions-ci.yml' \
+              ! -name 'actions-ci.yml' \
               2>/dev/null || true
           )
 
