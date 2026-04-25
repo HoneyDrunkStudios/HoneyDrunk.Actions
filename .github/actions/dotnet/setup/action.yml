@@ -1,20 +1,81 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Setup .NET SDK'
-description: 'Install a specific version of the .NET SDK'
+description: 'Install the .NET SDK from an explicit version or global.json, with optional GitHub Packages NuGet auth'
 inputs:
   dotnet-version:
-    description: 'The .NET SDK version to install'
+    description: 'The .NET SDK version to install. Leave empty to read global.json.'
     required: false
-    default: '10.0.x'
+    default: ''
   dotnet-quality:
     description: 'Quality of the .NET SDK version (e.g., daily, signed, validated, preview, ga)'
+    required: false
+    default: ''
+  global-json-file:
+    description: 'Path to global.json to use when dotnet-version is empty'
+    required: false
+    default: 'global.json'
+  configure-github-packages:
+    description: 'Add GitHub Packages as a NuGet source using the workflow token'
+    required: false
+    default: 'false'
+  github-packages-owner:
+    description: 'GitHub organization or user that owns the NuGet package feed. Defaults to the repository owner.'
+    required: false
+    default: ''
+  github-token:
+    description: 'GitHub token for GitHub Packages. Defaults to github.token; do not pass a PAT.'
     required: false
     default: ''
 runs:
   using: 'composite'
   steps:
+    - name: Resolve .NET SDK source
+      id: resolve-sdk
+      shell: bash
+      env:
+        DOTNET_VERSION: ${{ inputs.dotnet-version }}
+        GLOBAL_JSON_FILE: ${{ inputs.global-json-file }}
+      run: |
+        set -euo pipefail
+        if [ -n "$DOTNET_VERSION" ]; then
+          echo "dotnet-version=$DOTNET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "global-json-file=" >> "$GITHUB_OUTPUT"
+        elif [ -f "$GLOBAL_JSON_FILE" ]; then
+          echo "dotnet-version=" >> "$GITHUB_OUTPUT"
+          echo "global-json-file=$GLOBAL_JSON_FILE" >> "$GITHUB_OUTPUT"
+        else
+          echo "dotnet-version=10.0.x" >> "$GITHUB_OUTPUT"
+          echo "global-json-file=" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ inputs.dotnet-version }}
+        dotnet-version: ${{ steps.resolve-sdk.outputs.dotnet-version }}
+        global-json-file: ${{ steps.resolve-sdk.outputs.global-json-file }}
         dotnet-quality: ${{ inputs.dotnet-quality }}
+
+    - name: Configure GitHub Packages NuGet source
+      if: ${{ inputs.configure-github-packages == 'true' }}
+      shell: bash
+      env:
+        OWNER_INPUT: ${{ inputs.github-packages-owner }}
+        NUGET_TOKEN: ${{ inputs.github-token || github.token }}
+      run: |
+        set -euo pipefail
+        OWNER="$OWNER_INPUT"
+        if [ -z "$OWNER" ]; then
+          OWNER="$GITHUB_REPOSITORY_OWNER"
+        fi
+
+        if [ -z "$NUGET_TOKEN" ]; then
+          echo "::error::github-token or github.token is required to configure GitHub Packages"
+          exit 1
+        fi
+
+        dotnet nuget remove source honeydrunk-github 2>/dev/null || true
+        dotnet nuget add source "https://nuget.pkg.github.com/${OWNER}/index.json" \
+          --name honeydrunk-github \
+          --username "$GITHUB_ACTOR" \
+          --password "$NUGET_TOKEN" \
+          --store-password-in-clear-text

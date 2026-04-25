@@ -1,0 +1,53 @@
+name: Actions Repo CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint workflows and secret policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color -shellcheck=
+
+      - name: Check banned CI secret patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t FILES < <(
+            find .github/workflows .github/actions actions \
+              -type f \( -name '*.yml' -o -name '*.yaml' \) \
+              ! -path './.github/workflows/actions-ci.yml' \
+              ! -path '.github/workflows/actions-ci.yml' \
+              ! -name 'actions-ci.yml' \
+              2>/dev/null || true
+          )
+
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No workflow or action YAML files found."
+            exit 0
+          fi
+
+          AZURE_SP_PATTERN='AZURE[_-]CLIENT[_-]SECRET|azure-client[-_]secret|client[-_]secret|client[S]ecret'
+          LEGACY_TOKEN_PATTERN='NUGET_(API[_-]KEY|AUTH[_-]TOKEN)|(^|[^A-Z0-9_])(GH_PAT|GITHUB_PAT|PERSONAL_ACCESS_TOKEN|[A-Z0-9_]+_PAT_TOKEN)([^A-Z0-9_]|$)'
+          BANNED_REGEX="${AZURE_SP_PATTERN}|AZURE[_-]CREDENTIALS|${LEGACY_TOKEN_PATTERN}"
+          if grep -nE "$BANNED_REGEX" "${FILES[@]}" > banned-patterns.txt; then
+            echo "::error::Banned direct-secret pattern found in workflow/action YAML. Use OIDC inputs or Key Vault resolution instead."
+            cat banned-patterns.txt
+            exit 1
+          fi
+
+          echo "No banned direct-secret patterns found."

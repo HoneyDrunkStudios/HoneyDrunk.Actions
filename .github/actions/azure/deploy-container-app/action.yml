@@ -1,0 +1,127 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Deploy Container App Revision'
+description: 'Create an Azure Container Apps revision from an existing revision and wait until it is running'
+inputs:
+  app-name:
+    description: 'Azure Container App name'
+    required: true
+  resource-group:
+    description: 'Azure resource group containing the Container App'
+    required: true
+  image:
+    description: 'Full container image reference to deploy'
+    required: true
+  revision-suffix:
+    description: 'Suffix appended to the new revision name'
+    required: true
+  startup-wait:
+    description: 'Seconds to wait after revision provisioning before downstream probes'
+    required: false
+    default: '15'
+  health-check-timeout:
+    description: 'Maximum seconds to wait for the revision to reach Running state'
+    required: false
+    default: '120'
+outputs:
+  revision-name:
+    description: 'Name of the created Container App revision'
+    value: ${{ steps.deploy.outputs.revision-name }}
+  revision-fqdn:
+    description: 'Revision-specific FQDN for the created revision'
+    value: ${{ steps.deploy.outputs.revision-fqdn }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Create revision and wait until running
+      id: deploy
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app-name }}
+        RESOURCE_GROUP: ${{ inputs.resource-group }}
+        IMAGE: ${{ inputs.image }}
+        REVISION_SUFFIX: ${{ inputs.revision-suffix }}
+        STARTUP_WAIT: ${{ inputs.startup-wait }}
+        READY_TIMEOUT: ${{ inputs.health-check-timeout }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$APP_NAME" ] || [ -z "$RESOURCE_GROUP" ] || [ -z "$IMAGE" ] || [ -z "$REVISION_SUFFIX" ]; then
+          echo "::error::app-name, resource-group, image, and revision-suffix are required"
+          exit 1
+        fi
+
+        # Container Apps revision suffixes must be DNS-label friendly and fit within
+        # the generated revision name length limit. Keep the caller-provided trace
+        # value recognizable while removing unsupported characters.
+        SAFE_SUFFIX=$(echo "$REVISION_SUFFIX" \
+          | tr '[:upper:]' '[:lower:]' \
+          | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g' \
+          | cut -c1-40)
+        if [ -z "$SAFE_SUFFIX" ]; then
+          echo "::error::revision-suffix must contain at least one alphanumeric character"
+          exit 1
+        fi
+
+        echo "Creating Container App revision for $APP_NAME with suffix $SAFE_SUFFIX"
+        REVISION_NAME=$(az containerapp revision copy \
+          --name "$APP_NAME" \
+          --resource-group "$RESOURCE_GROUP" \
+          --image "$IMAGE" \
+          --revision-suffix "$SAFE_SUFFIX" \
+          --query "name" \
+          --output tsv)
+
+        if [ -z "$REVISION_NAME" ]; then
+          echo "::error::Container App revision copy did not return a revision name"
+          exit 1
+        fi
+
+        echo "Created revision: $REVISION_NAME"
+
+        INTERVAL=5
+        ELAPSED=0
+        RUNNING_STATE=""
+        REVISION_FQDN=""
+
+        while [ "$ELAPSED" -le "$READY_TIMEOUT" ]; do
+          REVISION_JSON=$(az containerapp revision show \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision "$REVISION_NAME" \
+            --output json)
+
+          RUNNING_STATE=$(echo "$REVISION_JSON" | jq -r '.properties.runningState // .properties.healthState // empty')
+          REVISION_FQDN=$(echo "$REVISION_JSON" | jq -r '.properties.fqdn // .fqdn // empty')
+
+          if [ "$RUNNING_STATE" = "Running" ]; then
+            echo "Revision is Running"
+            break
+          fi
+
+          echo "Revision state: ${RUNNING_STATE:-unknown}; retrying in ${INTERVAL}s..."
+          sleep "$INTERVAL"
+          ELAPSED=$((ELAPSED + INTERVAL))
+        done
+
+        if [ "$RUNNING_STATE" != "Running" ]; then
+          echo "::error::Revision '$REVISION_NAME' did not reach Running state within ${READY_TIMEOUT}s"
+          exit 1
+        fi
+
+        if [ -z "$REVISION_FQDN" ]; then
+          APP_FQDN=$(az containerapp show \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          REVISION_FQDN="$APP_FQDN"
+          echo "::warning::Could not resolve a revision-specific FQDN; falling back to app ingress FQDN"
+        fi
+
+        if [ "$STARTUP_WAIT" -gt 0 ]; then
+          echo "Waiting ${STARTUP_WAIT}s for revision startup"
+          sleep "$STARTUP_WAIT"
+        fi
+
+        echo "revision-name=$REVISION_NAME" >> "$GITHUB_OUTPUT"
+        echo "revision-fqdn=$REVISION_FQDN" >> "$GITHUB_OUTPUT"

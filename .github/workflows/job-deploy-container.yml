@@ -82,6 +82,21 @@ on:
         type: number
         default: 30
 
+      azure-client-id:
+        description: 'Azure AD application (client) ID for OIDC federation'
+        required: true
+        type: string
+
+      azure-tenant-id:
+        description: 'Azure AD tenant ID for OIDC federation'
+        required: true
+        type: string
+
+      azure-subscription-id:
+        description: 'Azure subscription ID for OIDC federation'
+        required: true
+        type: string
+
       keyvault-name:
         description: 'Azure Key Vault name for secret fetching. Empty to skip.'
         required: false
@@ -103,26 +118,6 @@ on:
         required: false
         type: string
         default: 'main'
-
-    secrets:
-      azure-client-id:
-        description: 'Azure AD application (client) ID — used for both OIDC and SP auth'
-        required: false
-      azure-tenant-id:
-        description: 'Azure AD tenant ID'
-        required: false
-      azure-subscription-id:
-        description: 'Azure subscription ID (required for OIDC federation)'
-        required: false
-      azure-client-secret:
-        description: 'Azure SP client secret (only for SP auth — prefer OIDC instead)'
-        required: false
-      acr-username:
-        description: 'ACR admin username (not recommended for production)'
-        required: false
-      acr-password:
-        description: 'ACR admin password or token'
-        required: false
 
     outputs:
       deployed-url:
@@ -156,48 +151,9 @@ jobs:
         uses: ./.actions/.github/actions/azure/acr-login
         with:
           registry: ${{ inputs.acr-registry }}
-          client-id: ${{ secrets.azure-client-id }}
-          tenant-id: ${{ secrets.azure-tenant-id }}
-          subscription-id: ${{ secrets.azure-subscription-id }}
-          client-secret: ${{ secrets.azure-client-secret }}
-          username: ${{ secrets.acr-username }}
-          password: ${{ secrets.acr-password }}
-
-      # Detect whether SP fallback is needed (secrets.* can't be used in step if conditions)
-      - name: Detect auth method
-        id: auth
-        shell: bash
-        env:
-          CLIENT_SECRET: ${{ secrets.azure-client-secret }}
-        run: |
-          if [ -n "$CLIENT_SECRET" ]; then
-            echo "use-sp=true" >> $GITHUB_OUTPUT
-          else
-            echo "use-sp=false" >> $GITHUB_OUTPUT
-          fi
-
-      # ACR login action already calls azure/login — for OIDC this is sufficient
-      # for App Service management (slot swaps, config). For SP fallback, build creds.
-      - name: Build Azure credentials (SP fallback)
-        id: azure-creds
-        if: steps.auth.outputs.use-sp == 'true'
-        shell: bash
-        env:
-          CLIENT_ID: ${{ secrets.azure-client-id }}
-          CLIENT_SECRET: ${{ secrets.azure-client-secret }}
-          TENANT_ID: ${{ secrets.azure-tenant-id }}
-        run: |
-          set -euo pipefail
-          CREDS=$(jq -nc --arg c "$CLIENT_ID" --arg s "$CLIENT_SECRET" --arg t "$TENANT_ID" \
-            '{clientId: $c, clientSecret: $s, tenantId: $t}')
-          echo "::add-mask::$CREDS"
-          echo "creds=$CREDS" >> $GITHUB_OUTPUT
-
-      - name: Azure Login (SP fallback for App Service management)
-        if: steps.auth.outputs.use-sp == 'true'
-        uses: azure/login@v2
-        with:
-          creds: ${{ steps.azure-creds.outputs.creds }}
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
 
       - name: Validate Key Vault inputs
         if: ${{ (inputs.keyvault-name != '') != (inputs.keyvault-secrets != '') }}

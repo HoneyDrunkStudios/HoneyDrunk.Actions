@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Read Azure Key Vault Secret'
+description: 'Read one Azure Key Vault secret after OIDC login and expose it as a masked output'
+inputs:
+  vault-name:
+    description: 'Azure Key Vault name'
+    required: true
+  secret-name:
+    description: 'Key Vault secret name'
+    required: true
+outputs:
+  value:
+    description: 'Masked secret value'
+    value: ${{ steps.read-secret.outputs.value }}
+  secret-name:
+    description: 'Secret name that was read'
+    value: ${{ steps.read-secret.outputs.secret-name }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Read secret from Key Vault
+      id: read-secret
+      uses: azure/cli@v2
+      env:
+        VAULT_NAME: ${{ inputs.vault-name }}
+        SECRET_NAME: ${{ inputs.secret-name }}
+      with:
+        inlineScript: |
+          set -euo pipefail
+          if [ -z "$VAULT_NAME" ] || [ -z "$SECRET_NAME" ]; then
+            echo "::error::vault-name and secret-name are required"
+            exit 1
+          fi
+
+          SECRET_FILE="$(mktemp)"
+          trap 'rm -f "$SECRET_FILE"' EXIT
+
+          az keyvault secret show \
+            --vault-name "$VAULT_NAME" \
+            --name "$SECRET_NAME" \
+            --query value \
+            --output tsv > "$SECRET_FILE"
+
+          if [ ! -s "$SECRET_FILE" ]; then
+            echo "::error::Secret '$SECRET_NAME' in vault '$VAULT_NAME' is empty or unavailable"
+            exit 1
+          fi
+
+          SECRET_VALUE="$(cat "$SECRET_FILE")"
+          echo "::add-mask::$SECRET_VALUE"
+          while IFS= read -r secret_line || [ -n "$secret_line" ]; do
+            if [ -n "$secret_line" ]; then
+              echo "::add-mask::$secret_line"
+            fi
+          done < "$SECRET_FILE"
+
+          {
+            echo "value<<__AZURE_KV_READ__"
+            cat "$SECRET_FILE"
+            printf '\n'
+            echo "__AZURE_KV_READ__"
+            echo "secret-name=$SECRET_NAME"
+          } >> "$GITHUB_OUTPUT"

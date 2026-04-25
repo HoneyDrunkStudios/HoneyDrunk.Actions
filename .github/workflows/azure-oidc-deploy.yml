@@ -1,0 +1,252 @@
+# ==============================================================================
+# Azure OIDC Deploy
+# ==============================================================================
+# Purpose:
+#   Deploy an uploaded artifact to Azure App Service or Function App using only
+#   GitHub OIDC federation.
+# ==============================================================================
+
+name: Azure OIDC Deploy
+
+on:
+  workflow_call:
+    inputs:
+      client-id:
+        description: 'Azure AD application (client) ID for OIDC federation'
+        required: true
+        type: string
+      tenant-id:
+        description: 'Azure AD tenant ID for OIDC federation'
+        required: true
+        type: string
+      subscription-id:
+        description: 'Azure subscription ID for OIDC federation'
+        required: true
+        type: string
+      resource-group:
+        description: 'Azure resource group containing the target app'
+        required: true
+        type: string
+      app-name:
+        description: 'Azure App Service or Function App name'
+        required: true
+        type: string
+      artifact-name:
+        description: 'Uploaded artifact name to deploy'
+        required: true
+        type: string
+      environment:
+        description: 'GitHub environment name for the deployment job'
+        required: true
+        type: string
+      app-kind:
+        description: 'Target app kind: functionapp or webapp'
+        required: false
+        type: string
+        default: 'functionapp'
+      artifact-path:
+        description: 'Local path where the artifact is downloaded'
+        required: false
+        type: string
+        default: './deploy-package'
+      slot-name:
+        description: 'Deployment slot. Empty deploys to production.'
+        required: false
+        type: string
+        default: ''
+      keyvault-name:
+        description: 'Optional Key Vault name for the OIDC smoke test'
+        required: false
+        type: string
+        default: ''
+      kv-smoke-test-secret-name:
+        description: 'Optional non-production secret name used only to verify Key Vault access; value is never printed'
+        required: false
+        type: string
+        default: ''
+      check-sla:
+        description: 'Run the ADR-0006 secret rotation SLA gate before deployment'
+        required: false
+        type: boolean
+        default: true
+      workspace-id:
+        description: 'Log Analytics workspace/customer ID GUID for secret rotation SLA telemetry'
+        required: false
+        type: string
+        default: ''
+      rotation-sla-vault-name:
+        description: 'Key Vault name to check for rotation SLA. Defaults to keyvault-name.'
+        required: false
+        type: string
+        default: ''
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use for local composite actions. Empty uses this workflow''s pinned ref.'
+        required: false
+        type: string
+        default: ''
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.app-name }}
+    runs-on: ${{ inputs.runs-on }}
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Validate inputs
+        shell: bash
+        env:
+          APP_KIND: ${{ inputs.app-kind }}
+          KEYVAULT_NAME: ${{ inputs.keyvault-name }}
+          SMOKE_SECRET_NAME: ${{ inputs.kv-smoke-test-secret-name }}
+          CHECK_SLA: ${{ inputs.check-sla }}
+          WORKSPACE_ID: ${{ inputs.workspace-id }}
+          SLA_VAULT_NAME: ${{ inputs.rotation-sla-vault-name || inputs.keyvault-name }}
+        run: |
+          set -euo pipefail
+          case "$APP_KIND" in
+            functionapp|webapp) ;;
+            *)
+              echo "::error::app-kind must be 'functionapp' or 'webapp'"
+              exit 1
+              ;;
+          esac
+
+          if [ -n "$KEYVAULT_NAME" ] && [ -z "$SMOKE_SECRET_NAME" ]; then
+            echo "::error::kv-smoke-test-secret-name is required when keyvault-name is set"
+            exit 1
+          fi
+
+          if [ "$CHECK_SLA" = "true" ]; then
+            if [ -z "$WORKSPACE_ID" ]; then
+              echo "::error::workspace-id is required when check-sla is true"
+              exit 1
+            fi
+            if [ -z "$SLA_VAULT_NAME" ]; then
+              echo "::error::rotation-sla-vault-name or keyvault-name is required when check-sla is true"
+              exit 1
+            fi
+          fi
+
+      - name: Resolve actions checkout ref
+        id: resolve-ref
+        if: ${{ inputs.check-sla }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_REF="${{ inputs.actions-ref }}"
+          if [ -n "$INPUT_REF" ]; then
+            echo "ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout HoneyDrunk.Actions
+        if: ${{ inputs.check-sla }}
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ steps.resolve-ref.outputs.ref }}
+          path: .actions
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ inputs.client-id }}
+          tenant-id: ${{ inputs.tenant-id }}
+          subscription-id: ${{ inputs.subscription-id }}
+
+      - name: Validate target app
+        shell: bash
+        env:
+          APP_KIND: ${{ inputs.app-kind }}
+          APP_NAME: ${{ inputs.app-name }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          if [ "$APP_KIND" = "functionapp" ]; then
+            az functionapp show \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query id \
+              --output tsv >/dev/null
+          else
+            az webapp show \
+              --name "$APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query id \
+              --output tsv >/dev/null
+          fi
+
+      - name: Key Vault smoke test
+        if: ${{ inputs.keyvault-name != '' }}
+        shell: bash
+        env:
+          VAULT_NAME: ${{ inputs.keyvault-name }}
+          SECRET_NAME: ${{ inputs.kv-smoke-test-secret-name }}
+        run: |
+          set -euo pipefail
+          SECRET_ID=$(az keyvault secret show \
+            --vault-name "$VAULT_NAME" \
+            --name "$SECRET_NAME" \
+            --query id \
+            --output tsv)
+
+          if [ -z "$SECRET_ID" ]; then
+            echo "::error::Key Vault smoke test did not return a secret id"
+            exit 1
+          fi
+
+          echo "Key Vault smoke test succeeded for secret name '$SECRET_NAME'"
+
+      - name: Check secret rotation SLA
+        if: ${{ inputs.check-sla }}
+        uses: ./.actions/actions/check-rotation-sla
+        with:
+          workspace-id: ${{ inputs.workspace-id }}
+          vault-name: ${{ inputs.rotation-sla-vault-name || inputs.keyvault-name }}
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy Function App
+        if: ${{ inputs.app-kind == 'functionapp' }}
+        uses: azure/functions-action@v1
+        with:
+          app-name: ${{ inputs.app-name }}
+          package: ${{ inputs.artifact-path }}
+          slot-name: ${{ inputs.slot-name }}
+
+      - name: Deploy Web App
+        if: ${{ inputs.app-kind == 'webapp' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.app-name }}
+          package: ${{ inputs.artifact-path }}
+          slot-name: ${{ inputs.slot-name }}
+
+      - name: Deployment summary
+        shell: bash
+        run: |
+          {
+            echo "# Azure OIDC Deploy"
+            echo ""
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| App | ${{ inputs.app-name }} |"
+            echo "| Kind | ${{ inputs.app-kind }} |"
+            echo "| Environment | ${{ inputs.environment }} |"
+            echo "| Resource group | ${{ inputs.resource-group }} |"
+            echo "| Artifact | ${{ inputs.artifact-name }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

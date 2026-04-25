@@ -1,0 +1,40 @@
+# Example: Build and deploy an Azure Container App
+# Consumer repo workflow that builds a Docker image and deploys it using HoneyDrunk.Actions.
+
+name: Release & Deploy Container App
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Build and Deploy Container App
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container-app.yml@main
+    with:
+      acr-registry: acrhdshareddev.azurecr.io
+      build-context: .
+      dockerfile: Dockerfile
+      image-name: honeydrunk-notify-worker
+      image-tag: ${{ github.ref_name }}
+      container-app: ca-hd-notify-worker-dev
+      resource-group: rg-hd-platform-dev
+      health-check-url: /healthz
+      traffic-shift-mode: full
+      # Optional: keep the new revision at 0% for manual verification
+      # traffic-shift-mode: hold
+      # Optional: shift only 10% to the new revision after health succeeds
+      # traffic-shift-mode: canary:10
+      # Optional: expose Key Vault secrets as Container App env vars via secret references
+      # keyvault-name: kv-hd-dev
+      # keyvault-secrets: |
+      #   ConnectionStrings--AppDb
+      #   Resend--ApiKey=RESEND_API_KEY
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}

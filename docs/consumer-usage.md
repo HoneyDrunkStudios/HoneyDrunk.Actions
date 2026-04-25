@@ -8,6 +8,7 @@ This document provides sample workflows for consuming repos to adopt the HoneyDr
 - [PR SDK Workflow](#pr-sdk-workflow)
 - [Release Workflow](#release-workflow)
 - [Deploy Container to Azure App Service](#deploy-container-to-azure-app-service)
+- [Deploy Azure Container App](#deploy-azure-container-app)
 - [Deploy Azure Function App](#deploy-azure-function-app)
 - [Nightly Security Workflow](#nightly-security-workflow)
 - [Nightly Dependencies Workflow](#nightly-dependencies-workflow)
@@ -319,11 +320,11 @@ jobs:
       docker-build-context: 'HoneyDrunk.Pulse'
       container-registry: 'myregistry.azurecr.io'
       container-image-name: 'honeydrunkstudios/pulse-collector'
-    secrets:
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
 
 permissions:
   contents: read
@@ -335,9 +336,9 @@ permissions:
 
 ## Azure Authentication
 
-HoneyDrunk.Actions supports three Azure auth methods, listed in order of preference:
+HoneyDrunk.Actions supports Azure auth through GitHub OIDC federation only.
 
-### 1. OIDC Federation (Recommended)
+### OIDC Federation
 
 No long-lived secrets. GitHub issues a short-lived token; Azure trusts it via a federated credential on an App Registration.
 
@@ -349,29 +350,18 @@ No long-lived secrets. GitHub issues a short-lived token; Azure trusts it via a 
 **Azure side setup:**
 1. Create an App Registration
 2. Add a federated credential for `repo:HoneyDrunkStudios/<repo>:environment:<env>` (or `:ref:refs/tags/v*` for tag-based releases)
-3. Assign roles at narrowest scope: `AcrPush` on ACR, `Website Contributor` on App Service, `Key Vault Secrets User` if reading secrets
+3. Assign roles at narrowest scope: `AcrPush` on ACR, `Website Contributor` on App Service, `Container Apps Contributor` on Container Apps, `Key Vault Secrets User` if reading secrets
 
 ```yaml
-    secrets:
+    with:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 ```
 
-### 2. Service Principal (Fallback)
+### Non-Azure Container Registries
 
-Uses a client secret. Requires rotation. Use only if OIDC federation is not available.
-
-```yaml
-    secrets:
-      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-      azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-```
-
-### 3. ACR Admin Credentials (Not Recommended)
-
-Static username/password. No Azure CLI access (no slot swaps, no Key Vault).
+Non-Azure registries may still require registry-native credentials until they are migrated to workload federation.
 
 ```yaml
     secrets:
@@ -405,7 +395,6 @@ jobs:
       dockerfile-path: './Pulse.Collector/Dockerfile'
       container-registry: 'myregistry.azurecr.io'
       container-image-name: 'pulse-collector'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -421,7 +410,6 @@ jobs:
       slot-name: 'staging'
       swap-to-production: true
       health-check-url: '/healthz'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -444,7 +432,6 @@ permissions:
       app-name: 'my-app-service'
       resource-group: 'rg-honeydrunk'
       slot-name: 'production'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -469,7 +456,6 @@ Fetch secrets from Azure Key Vault and apply them as App Service configuration b
         PostHog--ApiKey=POSTHOG_API_KEY
         Sentry--Dsn=SENTRY_DSN
         ApplicationInsights--ConnectionString
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -494,6 +480,136 @@ The `azure/keyvault-fetch` action can be used independently in any workflow:
           export-as: 'env'          # or 'output' or 'both'
           config-file: './appsettings.Production.json'  # optional token substitution
 ```
+
+---
+
+## Deploy Azure Container App
+
+**Purpose:** Deploy a containerized Node to Azure Container Apps using ADR-0015 revision traffic shifting.
+
+**When to Use:** Containerized HoneyDrunk Nodes named `ca-hd-{service}-{env}` that run in Container Apps with revision mode `Multiple`.
+
+### Minimal Example with Prebuilt Image
+
+```yaml
+name: Deploy Container App
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container-app.yml@main
+    with:
+      acr-registry: 'acrhdshareddev.azurecr.io'
+      container-image: 'acrhdshareddev.azurecr.io/honeydrunk-notify-worker:${{ github.ref_name }}'
+      container-app: 'ca-hd-notify-worker-dev'
+      resource-group: 'rg-hd-platform-dev'
+      health-check-url: '/healthz'
+      traffic-shift-mode: 'full'
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+```
+
+### Build and Deploy from Docker Context
+
+```yaml
+jobs:
+  deploy:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container-app.yml@main
+    with:
+      acr-registry: 'acrhdshareddev.azurecr.io'
+      build-context: '.'
+      dockerfile: 'Dockerfile'
+      image-name: 'honeydrunk-notify-worker'
+      image-tag: ${{ github.ref_name }}
+      container-app: 'ca-hd-notify-worker-dev'
+      resource-group: 'rg-hd-platform-dev'
+      health-check-url: '/healthz'
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+```
+
+### Deploy with Key Vault Runtime Secret References
+
+Secret values are not fetched into the workflow. The workflow creates Container App secrets that reference Key Vault and sets env vars to `secretref:` pointers.
+
+```yaml
+  deploy:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-container-app.yml@main
+    with:
+      acr-registry: 'acrhdshareddev.azurecr.io'
+      container-image: 'acrhdshareddev.azurecr.io/honeydrunk-notify-worker:${{ github.ref_name }}'
+      container-app: 'ca-hd-notify-worker-dev'
+      resource-group: 'rg-hd-platform-dev'
+      keyvault-name: 'kv-hd-dev'
+      keyvault-secrets: |
+        ConnectionStrings--AppDb
+        Resend--ApiKey=RESEND_API_KEY
+        ApplicationInsights--ConnectionString
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+```
+
+Secret name mapping:
+- `ConnectionStrings--AppDb` -> env var `ConnectionStrings__AppDb`
+- `Resend--ApiKey=RESEND_API_KEY` -> env var `RESEND_API_KEY`
+
+### Inputs
+
+| Input | Required | Default | Description |
+|---|---:|---|---|
+| `runs-on` | No | `ubuntu-latest` | GitHub runner label. |
+| `container-image` | Conditional | `''` | Full image reference. Required when `build-context` is empty. |
+| `build-context` | No | `''` | Docker build context. When set, the workflow builds and pushes before deploy. |
+| `image-name` | Conditional | `''` | Short image name. Required with `build-context`. |
+| `image-tag` | Conditional | `''` | Explicit image tag. Required with `build-context`. |
+| `dockerfile` | No | `Dockerfile` | Dockerfile path relative to `build-context`. |
+| `acr-registry` | Yes | n/a | ACR login server. |
+| `container-app` | Yes | n/a | Target Container App. Must match `ca-hd-{service}-{env}`. |
+| `resource-group` | Yes | n/a | Resource group containing the Container App. |
+| `revision-suffix` | No | `ca-${{ github.run_id }}-${{ github.run_attempt }}` | Traceable suffix for the new revision. |
+| `health-check-url` | No | `''` | Absolute URL or path relative to the revision FQDN. Empty skips probing. |
+| `health-check-timeout` | No | `120` | Seconds to wait for revision readiness and health. |
+| `startup-wait` | No | `15` | Seconds to wait after revision reaches Running before probing. |
+| `traffic-shift-mode` | No | `full` | `full`, `hold`, or `canary:N`. |
+| `keyvault-name` | No | `''` | Key Vault used for runtime secret references. |
+| `keyvault-secrets` | No | `''` | Newline-separated `SECRET_NAME` or `SECRET_NAME=ENV_VAR_NAME`. |
+| `azure-client-id` | Yes | n/a | Azure client ID for OIDC federation. |
+| `azure-tenant-id` | Yes | n/a | Azure tenant ID for OIDC federation. |
+| `azure-subscription-id` | Yes | n/a | Azure subscription ID for OIDC federation. |
+| `actions-ref` | No | `''` | Ref of `HoneyDrunk.Actions` to check out for composite actions. Empty uses the called workflow ref. |
+
+### Outputs
+
+| Output | Description |
+|---|---|
+| `revision-name` | Created Container App revision name. |
+| `revision-fqdn` | Revision-specific FQDN when available. |
+| `deployment-status` | `success`, `health-check-failed`, or `deploy-failed`. |
+
+### Traffic Shift Modes
+
+| Mode | Behavior |
+|---|---|
+| `full` | Shift 100% of traffic to the new revision after health succeeds. |
+| `hold` | Leave the new revision active at 0% traffic for manual validation. |
+| `canary:N` | Shift `N` percent to the new revision and keep the remainder on the previous traffic target. |
+
+### Target Prerequisites
+
+- Container App name must match `ca-hd-{service}-{env}`.
+- Container App `activeRevisionsMode` must be `Multiple`.
+- Container App must have system-assigned Managed Identity enabled.
+- For Key Vault references, that managed identity must have access to the referenced Key Vault secrets.
+- For OIDC deploys, the federated credential needs `AcrPush` on the shared ACR and `Container Apps Contributor` on the target Container App.
 
 ---
 
@@ -533,7 +649,6 @@ jobs:
     with:
       functions-app: 'my-function-app'
       resource-group: 'rg-honeydrunk'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -555,7 +670,6 @@ permissions:
       slot-name: 'staging'
       swap-to-production: true
       health-check-url: '/api/health'
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -576,7 +690,6 @@ permissions:
         Resend--ApiKey=RESEND_API_KEY
         Twilio--AccountSid=TWILIO_ACCOUNT_SID
         Twilio--AuthToken=TWILIO_AUTH_TOKEN
-    secrets:
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}

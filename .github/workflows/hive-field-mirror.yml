@@ -28,6 +28,9 @@ on:
       hive-field-mirror-token:
         description: Token with issues read + organization projects write scopes.
         required: true
+      HIVE_FIELD_MIRROR_TOKEN:
+        description: Legacy org/repo secret name accepted for direct workflow triggers.
+        required: false
 
 permissions:
   contents: read
