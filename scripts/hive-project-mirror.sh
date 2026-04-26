@@ -68,7 +68,48 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-ISSUE_JSON="$(gh api "repos/${ISSUE_OWNER}/${ISSUE_REPO}/issues/${ISSUE_NUMBER}")"
+# Retry a `gh` invocation up to 3 times when stderr indicates a rate-limit.
+# Backoff is exponential, capped at 60s. Non-rate-limit failures return the
+# original exit code so the caller can react. Keep stderr behavior identical
+# to a plain `gh` call on success and on terminal failure.
+gh_retry() {
+  local attempt=1
+  local max_attempts=3
+  local stderr_file output exit_code stderr_content
+  stderr_file="$(mktemp)"
+  while :; do
+    if output="$(gh "$@" 2>"$stderr_file")"; then
+      cat "$stderr_file" >&2
+      rm -f "$stderr_file"
+      printf '%s' "$output"
+      return 0
+    fi
+    exit_code=$?
+    stderr_content="$(<"$stderr_file")"
+    if [[ "$stderr_content" == *"rate limit"* ]] \
+      || [[ "$stderr_content" == *"secondary rate limit"* ]] \
+      || [[ "$stderr_content" == *"abuse detection"* ]]; then
+      if (( attempt >= max_attempts )); then
+        echo "$stderr_content" >&2
+        echo "::error::gh exhausted ${max_attempts} retries after rate-limit responses" >&2
+        rm -f "$stderr_file"
+        return "$exit_code"
+      fi
+      local backoff=$(( 2 ** attempt ))
+      (( backoff > 60 )) && backoff=60
+      echo "::warning::gh rate-limited; retrying in ${backoff}s (attempt ${attempt}/${max_attempts})" >&2
+      sleep "$backoff"
+      attempt=$(( attempt + 1 ))
+      : > "$stderr_file"
+      continue
+    fi
+    cat "$stderr_file" >&2
+    rm -f "$stderr_file"
+    return "$exit_code"
+  done
+}
+
+ISSUE_JSON="$(gh_retry api "repos/${ISSUE_OWNER}/${ISSUE_REPO}/issues/${ISSUE_NUMBER}")"
 ISSUE_NODE_ID="$(jq -r '.node_id' <<<"$ISSUE_JSON")"
 if [[ -z "$ISSUE_NODE_ID" || "$ISSUE_NODE_ID" == "null" ]]; then
   echo "Could not resolve issue node ID" >&2
@@ -116,7 +157,11 @@ print(value)
 PY
 )"
 
-PROJECT_JSON="$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+if [[ -n "${HIVE_PROJECT_METADATA_JSON:-}" ]]; then
+  PROJECT_JSON="$(jq -c '.project' <<<"$HIVE_PROJECT_METADATA_JSON")"
+else
+  PROJECT_JSON="$(gh_retry project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+fi
 PROJECT_ID="$(jq -r '.id' <<<"$PROJECT_JSON")"
 if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "null" ]]; then
   echo "Failed to resolve project id for ${PROJECT_OWNER}/${PROJECT_NUMBER}" >&2
@@ -151,7 +196,11 @@ if [[ -z "$ITEM_ID" ]]; then
   exit 1
 fi
 
-FIELDS_JSON="$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+if [[ -n "${HIVE_PROJECT_METADATA_JSON:-}" ]]; then
+  FIELDS_JSON="$(jq -c '.fields' <<<"$HIVE_PROJECT_METADATA_JSON")"
+else
+  FIELDS_JSON="$(gh_retry project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+fi
 
 get_field_id() {
   local name="$1"
@@ -170,16 +219,20 @@ get_single_option_id() {
   ' <<<"$FIELDS_JSON" | head -n1
 }
 
-# Append a new option to a single-select field via GraphQL. Echoes the new
-# option id on success, empty on failure. Existing options are preserved with
-# their original color and description (gh field-list omits these, so we query
-# them via GraphQL).
+# Ensure a single-select field has the given option. Echoes the option's id
+# on success (existing or newly created), empty on failure. Idempotent: if the
+# option already exists on the field per a fresh live query, returns its id
+# without mutating. This matters when batch metadata is cached upstream — a
+# stale FIELDS_JSON in the parent script can route a packet here even though
+# a previous packet in the same batch already added the option.
+# Existing options are preserved with their original color and description
+# (gh field-list omits these, so we query them via GraphQL).
 ensure_single_select_option() {
   local field_name="$1"
   local option_name="$2"
   local existing
   if ! existing="$(gh api graphql \
-    -f query='query($p:ID!,$f:String!){node(id:$p){... on ProjectV2{field(name:$f){... on ProjectV2SingleSelectField{id options{name color description}}}}}}' \
+    -f query='query($p:ID!,$f:String!){node(id:$p){... on ProjectV2{field(name:$f){... on ProjectV2SingleSelectField{id options{id name color description}}}}}}' \
     -f p="$PROJECT_ID" -f f="$field_name" 2>&1)"; then
     echo "ensure_single_select_option: query failed for field '$field_name': $existing" >&2
     return 1
@@ -188,6 +241,19 @@ ensure_single_select_option() {
   field_id="$(jq -r '.data.node.field.id // empty' <<<"$existing")"
   if [[ -z "$field_id" ]]; then
     return 1
+  fi
+  # Idempotency: if the option is already present on the live field, return
+  # its id and skip the mutate. Avoids GitHub-side duplicate-rejection when
+  # cached metadata is stale.
+  local existing_id
+  existing_id="$(jq -r --arg name "$option_name" '
+    .data.node.field.options[]?
+    | select(.name == $name)
+    | .id
+  ' <<<"$existing" | head -n1)"
+  if [[ -n "$existing_id" ]]; then
+    printf '%s' "$existing_id"
+    return 0
   fi
   local options_literal
   options_literal="$(jq -r --arg name "$option_name" '
@@ -214,7 +280,7 @@ update_single_select() {
     return 0
   fi
   local query='mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) { updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}) { projectV2Item { id } } }'
-  gh api graphql -f query="$query" -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$field_id" -f option="$option_id" >/dev/null
+  gh_retry api graphql -f query="$query" -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$field_id" -f option="$option_id" >/dev/null
 }
 
 update_text() {
@@ -226,7 +292,7 @@ update_text() {
     return 0
   fi
   local query='mutation($project:ID!, $item:ID!, $field:ID!, $text:String!) { updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{text:$text}}) { projectV2Item { id } } }'
-  gh api graphql -f query="$query" -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$field_id" -f text="$text" >/dev/null
+  gh_retry api graphql -f query="$query" -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$field_id" -f text="$text" >/dev/null
 }
 
 WAVE_FIELD_ID="$(get_field_id 'Wave')"

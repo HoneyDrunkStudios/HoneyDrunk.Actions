@@ -40,8 +40,25 @@ on:
         default: ''
     secrets:
       hive-field-mirror-token:
-        description: Token with issues:write on target repos, projects:write on The Hive, and contents:write on the Architecture repo.
-        required: true
+        description: >-
+          PAT with issues:write on target repos, projects:write on The Hive,
+          and contents:write on the Architecture repo. Used when App auth is
+          not configured. Required if neither app-id nor app-private-key is
+          provided.
+        required: false
+      app-id:
+        description: >-
+          GitHub App ID for the dedicated file-packets App. When provided
+          together with app-private-key, the workflow mints an installation
+          token via actions/create-github-app-token and uses it for every
+          subsequent gh call. Falls back to hive-field-mirror-token when
+          either is absent.
+        required: false
+      app-private-key:
+        description: >-
+          GitHub App private key (PEM contents) paired with app-id. See
+          app-id description for fallback semantics.
+        required: false
 
 permissions:
   contents: read
@@ -73,6 +90,30 @@ jobs:
             echo "actions=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Mint GitHub App installation token
+        id: app-token
+        if: secrets.app-id != '' && secrets.app-private-key != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ inputs.project-owner }}
+
+      - name: Announce auth path
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          PAT_FALLBACK: ${{ secrets.hive-field-mirror-token }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${APP_TOKEN}" ]]; then
+            echo "Auth path: GitHub App"
+          elif [[ -n "${PAT_FALLBACK}" ]]; then
+            echo "Auth path: PAT fallback (hive-field-mirror-token)"
+          else
+            echo "::error::Neither GitHub App auth (app-id + app-private-key) nor hive-field-mirror-token PAT was provided"
+            exit 1
+          fi
+
       - name: Checkout HoneyDrunk.Architecture
         id: checkout-architecture
         uses: actions/checkout@v4
@@ -80,7 +121,7 @@ jobs:
           repository: ${{ inputs.architecture-repo }}
           ref: ${{ steps.refs.outputs.architecture }}
           path: architecture
-          token: ${{ secrets.hive-field-mirror-token }}
+          token: ${{ steps.app-token.outputs.token || secrets.hive-field-mirror-token }}
           persist-credentials: true
 
       - name: Checkout HoneyDrunk.Actions
@@ -95,8 +136,8 @@ jobs:
 
       - name: File packets
         env:
-          GH_TOKEN: ${{ secrets.hive-field-mirror-token }}
-          HIVE_FIELD_MIRROR_TOKEN: ${{ secrets.hive-field-mirror-token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.hive-field-mirror-token }}
+          HIVE_FIELD_MIRROR_TOKEN: ${{ steps.app-token.outputs.token || secrets.hive-field-mirror-token }}
           PACKETS_DIR: architecture/${{ inputs.packets-dir }}
           MANIFEST: architecture/${{ inputs.manifest-path }}
           PROJECT_OWNER: ${{ inputs.project-owner }}
