@@ -90,29 +90,36 @@ jobs:
             echo "actions=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Mint GitHub App installation token
-        id: app-token
-        if: secrets.app-id != '' && secrets.app-private-key != ''
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.app-id }}
-          private-key: ${{ secrets.app-private-key }}
-          owner: ${{ inputs.project-owner }}
-
-      - name: Announce auth path
+      - name: Detect auth mode
+        # Workflow-level `if:` expressions cannot reference the `secrets`
+        # context, so we route the presence test through env vars and emit a
+        # step output the App-token step can gate on.
+        id: auth-mode
         env:
-          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_ID: ${{ secrets.app-id }}
+          APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
           PAT_FALLBACK: ${{ secrets.hive-field-mirror-token }}
         run: |
           set -euo pipefail
-          if [[ -n "${APP_TOKEN}" ]]; then
+          if [[ -n "${APP_ID}" && -n "${APP_PRIVATE_KEY}" ]]; then
+            echo "use-app=true" >> "$GITHUB_OUTPUT"
             echo "Auth path: GitHub App"
           elif [[ -n "${PAT_FALLBACK}" ]]; then
+            echo "use-app=false" >> "$GITHUB_OUTPUT"
             echo "Auth path: PAT fallback (hive-field-mirror-token)"
           else
             echo "::error::Neither GitHub App auth (app-id + app-private-key) nor hive-field-mirror-token PAT was provided"
             exit 1
           fi
+
+      - name: Mint GitHub App installation token
+        id: app-token
+        if: steps.auth-mode.outputs.use-app == 'true'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ inputs.project-owner }}
 
       - name: Checkout HoneyDrunk.Architecture
         id: checkout-architecture
