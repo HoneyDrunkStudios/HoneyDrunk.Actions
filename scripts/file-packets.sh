@@ -294,11 +294,11 @@ ensure_label() {
     while IFS= read -r existing; do
       [[ -z "$existing" ]] && continue
       LABELS_KNOWN["$repo|$existing"]=1
-    done < <(gh label list --repo "$repo" --limit 200 --json name -q '.[].name')
+    done < <(gh_retry label list --repo "$repo" --limit 200 --json name -q '.[].name')
     LABELS_LISTED["$repo"]=1
   fi
   if [[ -z "${LABELS_KNOWN[$repo|$name]:-}" ]]; then
-    gh label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-packets"
+    gh_retry label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-packets"
     LABELS_KNOWN["$repo|$name"]=1
   fi
 }
@@ -406,7 +406,7 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   done
 
   echo "file  $rel -> ${target_repo}"
-  issue_url="$(gh issue create \
+  issue_url="$(gh_retry issue create \
     --repo "$target_repo" \
     --title "$title" \
     --body-file "$body_file" \
@@ -440,15 +440,22 @@ done
 # Cache exists for the lifetime of one run only.
 declare -A LINKED_BLOCKERS_CACHE=()
 
-# List the dep URLs already mentioned as `Blocked by <url>` lines on a given
-# dependent issue. Caches per dependent_url to avoid re-paginating comments
-# when the same issue has multiple dependencies.
+# Populate LINKED_BLOCKERS_CACHE[dependent_url] with a leading/trailing-newline-
+# wrapped concatenation of every existing comment body on the dependent issue.
+# Returns 0 on success (cache populated, even if the issue has zero comments)
+# or non-zero on REST fetch failure. The caller MUST check the return code —
+# treating a fetch failure as "no blockers exist" would silently re-post
+# `Blocked by <URL>` comments and break Change A's idempotency contract.
 load_existing_blockers() {
   local dependent_url="$1"
-  if [[ -n "${LINKED_BLOCKERS_CACHE[$dependent_url]:-}" ]]; then
+  # `+set` parameter expansion distinguishes "key present (loaded)" from
+  # "key absent (not yet loaded)" without confusing the empty-string case.
+  if [[ -n "${LINKED_BLOCKERS_CACHE[$dependent_url]+set}" ]]; then
     return 0
   fi
   if [[ ! "$dependent_url" =~ ^https://github.com/([^/]+)/([^/]+)/issues/([0-9]+)$ ]]; then
+    # Malformed URL is treated as a permanent skip — cache an empty body so
+    # repeated lookups remain consistent and we don't pretend a fetch failed.
     LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'
     return 0
   fi
@@ -456,17 +463,26 @@ load_existing_blockers() {
   local repo="${BASH_REMATCH[2]}"
   local num="${BASH_REMATCH[3]}"
   local bodies
-  bodies="$(gh_retry api "repos/${owner}/${repo}/issues/${num}/comments" --paginate --jq '.[].body')" || bodies=""
-  # Stash with a leading and trailing newline so grep -F line-anchored matches
-  # are robust regardless of the comment body's own newline endings.
+  if ! bodies="$(gh_retry api "repos/${owner}/${repo}/issues/${num}/comments" --paginate --jq '.[].body')"; then
+    # Do NOT cache. A retry on a later loop iteration may succeed, and we
+    # want the failure to keep propagating so the caller can skip linking
+    # for this dependent rather than silently risk a duplicate post.
+    return 1
+  fi
+  # Stash with a leading and trailing newline so line-anchored matches
+  # against `\nBlocked by URL\n` work regardless of the comment body's own
+  # line-ending behaviour (most are LF-terminated; defensive padding here
+  # is cheaper than per-call normalization).
   LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'"${bodies}"$'\n'
+  return 0
 }
 
+# Pure cache lookup. Caller is responsible for having called
+# load_existing_blockers (and checked its return code) before invoking.
 already_linked() {
   local dependent_url="$1"
   local dep_url="$2"
-  load_existing_blockers "$dependent_url"
-  local cached="${LINKED_BLOCKERS_CACHE[$dependent_url]}"
+  local cached="${LINKED_BLOCKERS_CACHE[$dependent_url]:-}"
   [[ "$cached" == *$'\n'"Blocked by ${dep_url}"$'\n'* ]]
 }
 
@@ -486,6 +502,14 @@ if [[ $LINK_DEPS -eq 1 ]]; then
     packet_json="$(parse_packet "$packet")"
     mapfile -t deps < <(jq -r '.dependencies[]?' <<<"$packet_json")
     [[ ${#deps[@]} -eq 0 ]] && continue
+
+    # Load existing comments once per dependent up front. If the fetch fails,
+    # skip this dependent for the run — re-posting blockers without a clean
+    # idempotency signal risks duplicates. A future run will retry.
+    if ! load_existing_blockers "$dependent_url"; then
+      echo "::warning::Could not load existing comments for $dependent_url; skipping dep-link this run to preserve idempotency"
+      continue
+    fi
 
     new_blockers=()
     skipped_blockers=()
@@ -522,8 +546,9 @@ if [[ $LINK_DEPS -eq 1 ]]; then
     rm -f "$body_file"
 
     # Reflect newly-posted blockers in the in-process cache so any later
-    # packet that depends on this dependent_url for its own check sees them.
-    LINKED_BLOCKERS_CACHE[$dependent_url]+=""
+    # packet that uses this dependent_url for its own already_linked check
+    # sees them. The cache key is guaranteed to exist here because
+    # load_existing_blockers above succeeded for $dependent_url.
     for b in "${new_blockers[@]}"; do
       LINKED_BLOCKERS_CACHE[$dependent_url]+="Blocked by ${b}"$'\n'
     done
