@@ -93,6 +93,47 @@ if [[ ! -x "$MIRROR_SCRIPT" ]]; then
   exit 1
 fi
 
+# Retry a `gh` invocation up to 3 times when stderr contains a rate-limit
+# signature. Backoff is exponential, capped at 60s. Non-rate-limit failures
+# return immediately with the original exit code. Successful calls return
+# stdout unchanged. Keep stderr behavior identical to a plain `gh` call.
+gh_retry() {
+  local attempt=1
+  local max_attempts=3
+  local stderr_file output exit_code stderr_content
+  stderr_file="$(mktemp)"
+  while :; do
+    if output="$(gh "$@" 2>"$stderr_file")"; then
+      cat "$stderr_file" >&2
+      rm -f "$stderr_file"
+      printf '%s' "$output"
+      return 0
+    fi
+    exit_code=$?
+    stderr_content="$(<"$stderr_file")"
+    if [[ "$stderr_content" == *"rate limit"* ]] \
+      || [[ "$stderr_content" == *"secondary rate limit"* ]] \
+      || [[ "$stderr_content" == *"abuse detection"* ]]; then
+      if (( attempt >= max_attempts )); then
+        echo "$stderr_content" >&2
+        echo "::error::gh exhausted ${max_attempts} retries after rate-limit responses" >&2
+        rm -f "$stderr_file"
+        return "$exit_code"
+      fi
+      local backoff=$(( 2 ** attempt ))
+      (( backoff > 60 )) && backoff=60
+      echo "::warning::gh rate-limited; retrying in ${backoff}s (attempt ${attempt}/${max_attempts})" >&2
+      sleep "$backoff"
+      attempt=$(( attempt + 1 ))
+      : > "$stderr_file"
+      continue
+    fi
+    cat "$stderr_file" >&2
+    rm -f "$stderr_file"
+    return "$exit_code"
+  done
+}
+
 # Extract frontmatter + body + title as a tab-separated JSON blob.
 # Emits one line: <json>\n where json has: title, body, target_repo, labels[], initiative, actor, dependencies[], adrs[]
 parse_packet() {
@@ -193,8 +234,9 @@ dep_lookup_url() {
 
 # Collected summary rows: "packet\turl\tblockers"
 SUMMARY_ROWS=()
-# Packets filed during THIS run; used to scope the dependency-linking pass so
-# re-runs do not repost "Blocked by" comments on already-linked issues.
+# Packets filed during THIS run. The dependency-linking pass walks every
+# packet in the manifest (idempotent across runs) but only newly-filed
+# packets get their blocker list reflected back into SUMMARY_ROWS.
 declare -A NEW_PACKETS=()
 
 # Repo-existence cache — avoids one `gh repo view` per packet for the same
@@ -252,16 +294,30 @@ ensure_label() {
     while IFS= read -r existing; do
       [[ -z "$existing" ]] && continue
       LABELS_KNOWN["$repo|$existing"]=1
-    done < <(gh label list --repo "$repo" --limit 200 --json name -q '.[].name')
+    done < <(gh_retry label list --repo "$repo" --limit 200 --json name -q '.[].name')
     LABELS_LISTED["$repo"]=1
   fi
   if [[ -z "${LABELS_KNOWN[$repo|$name]:-}" ]]; then
-    gh label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-packets"
+    gh_retry label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-packets"
     LABELS_KNOWN["$repo|$name"]=1
   fi
 }
 
 shopt -s globstar nullglob
+
+# Resolve The Hive project metadata (project ID + field list) once up front,
+# then export it as a JSON blob so each mirror invocation in the loop reuses
+# the cached structure instead of re-querying. The mirror script reads
+# HIVE_PROJECT_METADATA_JSON if set and falls back to its own per-call
+# resolution otherwise.
+echo "Resolving project metadata for ${PROJECT_OWNER}/${PROJECT_NUMBER}"
+PROJECT_VIEW_JSON="$(gh_retry project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+PROJECT_FIELDS_JSON="$(gh_retry project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+HIVE_PROJECT_METADATA_JSON="$(jq -n \
+  --argjson project "$PROJECT_VIEW_JSON" \
+  --argjson fields "$PROJECT_FIELDS_JSON" \
+  '{project: $project, fields: $fields}')"
+export HIVE_PROJECT_METADATA_JSON
 
 echo "Scanning packets under: $PACKETS_DIR_ABS"
 for packet in "$PACKETS_DIR_ABS"/**/*.md; do
@@ -350,7 +406,7 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   done
 
   echo "file  $rel -> ${target_repo}"
-  issue_url="$(gh issue create \
+  issue_url="$(gh_retry issue create \
     --repo "$target_repo" \
     --title "$title" \
     --body-file "$body_file" \
@@ -376,25 +432,87 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   SUMMARY_ROWS+=("${rel}"$'\t'"${issue_url}"$'\t')
 done
 
-# Dependency-linking pass — only for packets filed during THIS run, so re-runs
-# do not post duplicate "Blocked by" comments on issues we already linked.
+# Dependency-linking pass — runs over every packet in the manifest, not just
+# packets filed during the current run, so a partial-failure run can recover
+# its missing blocking edges on a re-run. Idempotency is enforced per-(dependent,
+# blocker): before posting a `Blocked by <URL>` line for a given pair, we
+# verify it's not already present in any prior comment on the dependent issue.
+# Cache exists for the lifetime of one run only.
+declare -A LINKED_BLOCKERS_CACHE=()
+
+# Populate LINKED_BLOCKERS_CACHE[dependent_url] with a leading/trailing-newline-
+# wrapped concatenation of every existing comment body on the dependent issue.
+# Returns 0 on success (cache populated, even if the issue has zero comments)
+# or non-zero on REST fetch failure. The caller MUST check the return code —
+# treating a fetch failure as "no blockers exist" would silently re-post
+# `Blocked by <URL>` comments and break Change A's idempotency contract.
+load_existing_blockers() {
+  local dependent_url="$1"
+  # `+set` parameter expansion distinguishes "key present (loaded)" from
+  # "key absent (not yet loaded)" without confusing the empty-string case.
+  if [[ -n "${LINKED_BLOCKERS_CACHE[$dependent_url]+set}" ]]; then
+    return 0
+  fi
+  if [[ ! "$dependent_url" =~ ^https://github.com/([^/]+)/([^/]+)/issues/([0-9]+)$ ]]; then
+    # Malformed URL is treated as a permanent skip — cache an empty body so
+    # repeated lookups remain consistent and we don't pretend a fetch failed.
+    LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'
+    return 0
+  fi
+  local owner="${BASH_REMATCH[1]}"
+  local repo="${BASH_REMATCH[2]}"
+  local num="${BASH_REMATCH[3]}"
+  local bodies
+  if ! bodies="$(gh_retry api "repos/${owner}/${repo}/issues/${num}/comments" --paginate --jq '.[].body')"; then
+    # Do NOT cache. A retry on a later loop iteration may succeed, and we
+    # want the failure to keep propagating so the caller can skip linking
+    # for this dependent rather than silently risk a duplicate post.
+    return 1
+  fi
+  # Stash with a leading and trailing newline so line-anchored matches
+  # against `\nBlocked by URL\n` work regardless of the comment body's own
+  # line-ending behaviour (most are LF-terminated; defensive padding here
+  # is cheaper than per-call normalization).
+  LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'"${bodies}"$'\n'
+  return 0
+}
+
+# Pure cache lookup. Caller is responsible for having called
+# load_existing_blockers (and checked its return code) before invoking.
+already_linked() {
+  local dependent_url="$1"
+  local dep_url="$2"
+  local cached="${LINKED_BLOCKERS_CACHE[$dependent_url]:-}"
+  [[ "$cached" == *$'\n'"Blocked by ${dep_url}"$'\n'* ]]
+}
+
 if [[ $LINK_DEPS -eq 1 ]]; then
-  echo "Running dependency-linking pass"
+  echo "Running dependency-linking pass (idempotent across runs)"
   for packet in "$PACKETS_DIR_ABS"/**/*.md; do
     [[ -f "$packet" ]] || continue
     rel="${packet#"$REPO_ROOT/"}"
-    [[ -n "${NEW_PACKETS[$rel]:-}" ]] || continue
+
+    dependent_url="$(manifest_get "$rel")"
+    if [[ -z "$dependent_url" ]]; then
+      # Packet not yet filed (no manifest entry yet, or coordination doc
+      # without frontmatter). Skip silently — earlier loop logged the reason.
+      continue
+    fi
+
     packet_json="$(parse_packet "$packet")"
     mapfile -t deps < <(jq -r '.dependencies[]?' <<<"$packet_json")
     [[ ${#deps[@]} -eq 0 ]] && continue
 
-    dependent_url="$(manifest_get "$rel")"
-    if [[ -z "$dependent_url" ]]; then
-      echo "::warning::Skipping dep-link for $rel: no manifest entry (not filed)"
+    # Load existing comments once per dependent up front. If the fetch fails,
+    # skip this dependent for the run — re-posting blockers without a clean
+    # idempotency signal risks duplicates. A future run will retry.
+    if ! load_existing_blockers "$dependent_url"; then
+      echo "::warning::Could not load existing comments for $dependent_url; skipping dep-link this run to preserve idempotency"
       continue
     fi
 
-    blockers=()
+    new_blockers=()
+    skipped_blockers=()
     for dep in "${deps[@]}"; do
       [[ -z "$dep" ]] && continue
       dep_url="$(dep_lookup_url "$dep")"
@@ -402,34 +520,53 @@ if [[ $LINK_DEPS -eq 1 ]]; then
         echo "::warning::Dependency not found in manifest for $rel: $dep"
         continue
       fi
-      blockers+=("$dep_url")
+      if already_linked "$dependent_url" "$dep_url"; then
+        skipped_blockers+=("$dep_url")
+        continue
+      fi
+      new_blockers+=("$dep_url")
     done
 
-    [[ ${#blockers[@]} -eq 0 ]] && continue
+    if [[ ${#new_blockers[@]} -eq 0 ]]; then
+      if [[ ${#skipped_blockers[@]} -gt 0 ]]; then
+        echo "skip  $rel -> all ${#skipped_blockers[@]} blocker(s) already linked"
+      fi
+      continue
+    fi
 
     body_file="$(mktemp)"
     {
-      for b in "${blockers[@]}"; do
+      for b in "${new_blockers[@]}"; do
         printf 'Blocked by %s\n' "$b"
       done
     } > "$body_file"
 
-    echo "link  $rel -> ${#blockers[@]} blocker(s)"
-    gh issue comment "$dependent_url" --body-file "$body_file" >/dev/null
+    echo "link  $rel -> ${#new_blockers[@]} new blocker(s) (${#skipped_blockers[@]} already linked)"
+    gh_retry issue comment "$dependent_url" --body-file "$body_file" >/dev/null
     rm -f "$body_file"
 
-    # Update summary row if this packet was newly filed this run.
-    for i in "${!SUMMARY_ROWS[@]}"; do
-      row="${SUMMARY_ROWS[$i]}"
-      row_rel="${row%%$'\t'*}"
-      if [[ "$row_rel" == "$rel" ]]; then
-        blockers_joined="$(IFS=', '; echo "${blockers[*]}")"
-        rest="${row#*$'\t'}"
-        row_url="${rest%%$'\t'*}"
-        SUMMARY_ROWS[$i]="${rel}"$'\t'"${row_url}"$'\t'"${blockers_joined}"
-        break
-      fi
+    # Reflect newly-posted blockers in the in-process cache so any later
+    # packet that uses this dependent_url for its own already_linked check
+    # sees them. The cache key is guaranteed to exist here because
+    # load_existing_blockers above succeeded for $dependent_url.
+    for b in "${new_blockers[@]}"; do
+      LINKED_BLOCKERS_CACHE[$dependent_url]+="Blocked by ${b}"$'\n'
     done
+
+    # Update summary row only if this packet was newly filed this run.
+    if [[ -n "${NEW_PACKETS[$rel]:-}" ]]; then
+      for i in "${!SUMMARY_ROWS[@]}"; do
+        row="${SUMMARY_ROWS[$i]}"
+        row_rel="${row%%$'\t'*}"
+        if [[ "$row_rel" == "$rel" ]]; then
+          blockers_joined="$(IFS=', '; echo "${new_blockers[*]}")"
+          rest="${row#*$'\t'}"
+          row_url="${rest%%$'\t'*}"
+          SUMMARY_ROWS[$i]="${rel}"$'\t'"${row_url}"$'\t'"${blockers_joined}"
+          break
+        fi
+      done
+    fi
   done
 fi
 
