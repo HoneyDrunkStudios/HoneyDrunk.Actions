@@ -171,7 +171,18 @@ jobs:
         with:
           category: ${{ inputs.category }}
           output: ${{ inputs.working-directory }}/codeql-results
-          upload: true
+          upload: never
+
+      - name: Filter generated-code findings from SARIF
+        uses: ./.github/actions-repo/.github/actions/security/filter-sarif
+        with:
+          sarif-dir: ${{ inputs.working-directory }}/codeql-results
+
+      - name: Upload filtered SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ inputs.working-directory }}/codeql-results
+          category: ${{ inputs.category }}
           wait-for-processing: true
 
       - name: Evaluate findings
@@ -192,9 +203,9 @@ jobs:
           # from the local SARIF — that way dismissed alerts (e.g. false
           # positives, tests) are excluded from the PR gate and summary even
           # though CodeQL still re-detects them on every run.
-          # `analyze@v3` with `wait-for-processing: true` already blocks until
-          # GitHub has ingested the SARIF and matched dismissals, so we can
-          # query the API directly here without a manual sleep.
+          # The `Upload filtered SARIF` step (upload-sarif@v3) runs with
+          # `wait-for-processing: true` so GitHub has ingested the SARIF and
+          # matched dismissals by the time we query the API here.
 
           QUERY="state=open&tool_name=CodeQL&per_page=100"
           if [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "pull_request_target" ]; then

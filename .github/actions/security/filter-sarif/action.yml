@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: 'Filter generated-code findings from SARIF'
+description: >-
+  Strip results pointing to generated/build-output files from CodeQL SARIF
+  before upload. Works around the CodeQL `paths-ignore` limitation on compiled
+  languages (C#/Java/Go/Kotlin) — those files get extracted as a side effect
+  of the build and re-appear as alerts no matter what the config file says.
+inputs:
+  sarif-dir:
+    description: 'Directory containing *.sarif files to filter (in place)'
+    required: true
+  pattern:
+    description: >-
+      Regex (jq `test`) matched against each result's
+      `locations[].physicalLocation.artifactLocation.uri`; results are
+      dropped if any location URI matches.
+    required: false
+    default: '(^|/)(obj|bin)/|\.g\.cs$|\.Designer\.cs$|\.AssemblyInfo\.cs$'
+runs:
+  using: 'composite'
+  steps:
+    - name: Filter SARIF files
+      shell: bash
+      env:
+        SARIF_DIR: ${{ inputs.sarif-dir }}
+        FILTER_PATTERN: ${{ inputs.pattern }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -d "$SARIF_DIR" ]; then
+          echo "::warning::SARIF directory '$SARIF_DIR' not found; nothing to filter."
+          exit 0
+        fi
+
+        shopt -s nullglob
+        files=("$SARIF_DIR"/*.sarif)
+        if [ "${#files[@]}" -eq 0 ]; then
+          echo "::warning::No *.sarif files in '$SARIF_DIR'; nothing to filter."
+          exit 0
+        fi
+
+        for f in "${files[@]}"; do
+          before=$(jq '[.runs[].results[]?] | length' "$f")
+          jq --arg pat "$FILTER_PATTERN" '
+            .runs[].results |= map(
+              select(
+                ([.locations[]?.physicalLocation.artifactLocation.uri // ""]
+                  | map(test($pat)) | any) | not
+              )
+            )
+          ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          after=$(jq '[.runs[].results[]?] | length' "$f")
+          dropped=$((before - after))
+          echo "$(basename "$f"): $before → $after results (dropped $dropped generated-code findings)"
+        done

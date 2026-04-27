@@ -3,6 +3,14 @@ name: HoneyDrunk Grid default CodeQL config
 # Shared CodeQL configuration used by job-codeql.yml when a consuming repo
 # does not ship its own ./.github/codeql/codeql-config.yml. Repos can override
 # by creating that file locally.
+#
+# NOTE: `paths-ignore` is documented as ineffective for compiled languages
+# (C#/Java/Go/Kotlin) — generated files are extracted as a side effect of
+# the build and re-appear as alerts regardless of this list. The actual
+# enforcement happens in the `security/filter-sarif` composite action,
+# which strips matching results from the SARIF before upload. This list
+# is kept for parity with non-compiled-language repos and as documentation
+# of intent.
 
 paths-ignore:
   - '**/obj/**'
