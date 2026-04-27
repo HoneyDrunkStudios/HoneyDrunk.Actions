@@ -407,19 +407,19 @@ jobs:
           IAC_COUNT=0
           if find . \( -name "*.tf" -o -name "*.tfvars" \) | grep -q .; then
             echo "Terraform files detected"
-            ((IAC_COUNT++))
+            IAC_COUNT=$((IAC_COUNT + 1))
           fi
           if find . \( -name "*.bicep" -o -name "*.json" \) | xargs grep -l "Microsoft.Resources" 2>/dev/null | grep -q .; then
             echo "Azure Bicep/ARM templates detected"
-            ((IAC_COUNT++))
+            IAC_COUNT=$((IAC_COUNT + 1))
           fi
           if find . \( -name "docker-compose*.yml" -o -name "Dockerfile*" \) | grep -q .; then
             echo "Docker files detected"
-            ((IAC_COUNT++))
+            IAC_COUNT=$((IAC_COUNT + 1))
           fi
           if find . \( -name "*.yaml" -o -name "*.yml" \) | xargs grep -l "apiVersion:" 2>/dev/null | grep -q .; then
             echo "Kubernetes manifests detected"
-            ((IAC_COUNT++))
+            IAC_COUNT=$((IAC_COUNT + 1))
           fi
           
           if [ $IAC_COUNT -gt 0 ]; then
