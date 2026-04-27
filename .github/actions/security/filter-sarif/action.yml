@@ -11,8 +11,9 @@ inputs:
     required: true
   pattern:
     description: >-
-      Regex (jq `test`) matched against each result's primary
-      `location.uri`; matching results are dropped.
+      Regex (jq `test`) matched against each result's
+      `locations[].physicalLocation.artifactLocation.uri`; results are
+      dropped if any location URI matches.
     required: false
     default: '(^|/)(obj|bin)/|\.g\.cs$|\.Designer\.cs$|\.AssemblyInfo\.cs$'
 runs:
