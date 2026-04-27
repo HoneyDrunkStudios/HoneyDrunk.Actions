@@ -251,7 +251,19 @@ jobs:
         with:
           category: nightly-sast
           output: ${{ inputs.working-directory }}/security-reports
-          upload: true
+          upload: never
+
+      - name: Filter generated-code findings from SARIF
+        uses: ./.github/actions-repo/.github/actions/security/filter-sarif
+        with:
+          sarif-dir: ${{ inputs.working-directory }}/security-reports
+
+      - name: Upload filtered SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ inputs.working-directory }}/security-reports
+          category: nightly-sast
+          wait-for-processing: true
 
       - name: Upload SAST report
         if: always()
