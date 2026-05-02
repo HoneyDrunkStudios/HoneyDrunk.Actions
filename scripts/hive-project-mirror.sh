@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Projects v2 is GraphQL-only; the legacy REST Projects API was sunset in
+# 2022. Field updates, item adds, and option ensures cannot be moved off
+# GraphQL. Issue labels are already read from the REST issue payload; this
+# script does not write labels. To reduce per-invocation GraphQL cost, this
+# script reads the project, field, and option metadata from a cached JSON blob
+# via the HIVE_PROJECT_METADATA_JSON env var when set. The cache is refreshed
+# weekly by .github/workflows/refresh-hive-project-metadata.yml. When the env
+# var is absent, the script live-fetches via gh project view and gh project
+# field-list for standalone CLI compatibility.
+
 PROJECT_OWNER="HoneyDrunkStudios"
 PROJECT_NUMBER="4"
 ISSUE_URL=""
@@ -168,7 +178,7 @@ if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "null" ]]; then
   exit 1
 fi
 
-add_item_query='mutation($project:ID!, $content:ID!) { addProjectV2ItemById(input:{projectId:$project, contentId:$content}) { item { id } } }'
+add_item_query="mutation(\$project:ID!, \$content:ID!) { addProjectV2ItemById(input:{projectId:\$project, contentId:\$content}) { item { id } } }"
 
 ITEM_ID=""
 set +e
@@ -183,7 +193,7 @@ else
 fi
 
 if [[ -z "$ITEM_ID" ]]; then
-  lookup_query='query($issue: ID!) { node(id: $issue) { ... on Issue { projectItems(first: 100) { nodes { id project { id } } } } } }'
+  lookup_query="query(\$issue: ID!) { node(id: \$issue) { ... on Issue { projectItems(first: 100) { nodes { id project { id } } } } } }"
   LOOKUP_JSON="$(gh api graphql -f query="$lookup_query" -f issue="$ISSUE_NODE_ID")"
   ITEM_ID="$(jq -r --arg project_id "$PROJECT_ID" '.data.node.projectItems.nodes[] | select(.project.id == $project_id) | .id' <<<"$LOOKUP_JSON" | head -n1)"
 fi
@@ -232,7 +242,7 @@ ensure_single_select_option() {
   local option_name="$2"
   local existing
   if ! existing="$(gh api graphql \
-    -f query='query($p:ID!,$f:String!){node(id:$p){... on ProjectV2{field(name:$f){... on ProjectV2SingleSelectField{id options{id name color description}}}}}}' \
+    -f query="query(\$p:ID!,\$f:String!){node(id:\$p){... on ProjectV2{field(name:\$f){... on ProjectV2SingleSelectField{id options{id name color description}}}}}}" \
     -f p="$PROJECT_ID" -f f="$field_name" 2>&1)"; then
     echo "ensure_single_select_option: query failed for field '$field_name': $existing" >&2
     return 1
@@ -279,7 +289,7 @@ update_single_select() {
     echo "::warning::Skipping ${label}; missing field/option id"
     return 0
   fi
-  local query='mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) { updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}) { projectV2Item { id } } }'
+  local query="mutation(\$project:ID!, \$item:ID!, \$field:ID!, \$option:String!) { updateProjectV2ItemFieldValue(input:{projectId:\$project,itemId:\$item,fieldId:\$field,value:{singleSelectOptionId:\$option}}) { projectV2Item { id } } }"
   gh_retry api graphql -f query="$query" -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$field_id" -f option="$option_id" >/dev/null
 }
 
@@ -291,7 +301,7 @@ update_text() {
     echo "::warning::Skipping ${label}; missing field id"
     return 0
   fi
-  local query='mutation($project:ID!, $item:ID!, $field:ID!, $text:String!) { updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{text:$text}}) { projectV2Item { id } } }'
+  local query="mutation(\$project:ID!, \$item:ID!, \$field:ID!, \$text:String!) { updateProjectV2ItemFieldValue(input:{projectId:\$project,itemId:\$item,fieldId:\$field,value:{text:\$text}}) { projectV2Item { id } } }"
   gh_retry api graphql -f query="$query" -f project="$PROJECT_ID" -f item="$ITEM_ID" -f field="$field_id" -f text="$text" >/dev/null
 }
 
