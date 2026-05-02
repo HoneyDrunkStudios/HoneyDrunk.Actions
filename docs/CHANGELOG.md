@@ -136,6 +136,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Consolidated report: automated finding counts from all SARIF/JSON artifacts
   - GitHub issue creation: auto-create or update issues labeled `security,automated`
   - Rich GitHub Step Summary with scanner breakdown table
+- Refresh Hive project metadata workflow (`refresh-hive-project-metadata.yml`) for weekly and manual cache refresh.
+- Hive project metadata cache (`.github/config/hive-project-metadata.json`) for stable project, field, and option IDs.
+
+### Changed
+- `hive-field-mirror.yml`: accept `app-id` and `app-private-key` for GitHub App auth; PAT auth remains available as a fallback.
+- `hive-field-mirror.yml`: load cached Hive project metadata before per-issue mirror runs, falling back to live GraphQL lookup when the cache is absent, invalid, or stale.
 
 ### Planned
 - Integration with SonarQube

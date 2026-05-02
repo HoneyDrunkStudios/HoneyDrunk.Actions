@@ -26,10 +26,31 @@ on:
         default: ''
     secrets:
       hive-field-mirror-token:
-        description: Token with issues read + organization projects write scopes.
-        required: true
+        description: >-
+          PAT with issues:read on target repos and projects:write on The Hive.
+          Used when App auth is not configured. Required if neither app-id nor
+          app-private-key is provided.
+        required: false
       HIVE_FIELD_MIRROR_TOKEN:
         description: Legacy org/repo secret name accepted for direct workflow triggers.
+        required: false
+      app-id:
+        description: >-
+          GitHub App ID for the dedicated Hive App. When provided together with
+          app-private-key, the workflow mints an installation token via
+          actions/create-github-app-token and uses it for every subsequent gh
+          call. Falls back to hive-field-mirror-token when either is absent.
+        required: false
+      app-private-key:
+        description: >-
+          GitHub App private key (PEM contents) paired with app-id. See app-id
+          description for fallback semantics.
+        required: false
+      HIVE_APP_ID:
+        description: Legacy org/repo App ID secret name accepted for direct workflow triggers.
+        required: false
+      HIVE_APP_PRIVATE_KEY:
+        description: Legacy org/repo App private key secret name accepted for direct workflow triggers.
         required: false
 
 permissions:
@@ -40,6 +61,37 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
+      - name: Detect auth mode
+        # Workflow-level `if:` expressions cannot reference the `secrets`
+        # context, so we route the presence test through env vars and emit a
+        # step output the App-token step can gate on.
+        id: auth-mode
+        env:
+          APP_ID: ${{ secrets.app-id || secrets.HIVE_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.app-private-key || secrets.HIVE_APP_PRIVATE_KEY }}
+          PAT_FALLBACK: ${{ secrets.hive-field-mirror-token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${APP_ID}" && -n "${APP_PRIVATE_KEY}" ]]; then
+            echo "use-app=true" >> "$GITHUB_OUTPUT"
+            echo "Auth path: GitHub App"
+          elif [[ -n "${PAT_FALLBACK}" ]]; then
+            echo "use-app=false" >> "$GITHUB_OUTPUT"
+            echo "Auth path: PAT fallback (hive-field-mirror-token)"
+          else
+            echo "::error::Neither GitHub App auth (app-id + app-private-key) nor hive-field-mirror-token PAT was provided"
+            exit 1
+          fi
+
+      - name: Mint GitHub App installation token
+        id: app-token
+        if: steps.auth-mode.outputs.use-app == 'true'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.app-id || secrets.HIVE_APP_ID }}
+          private-key: ${{ secrets.app-private-key || secrets.HIVE_APP_PRIVATE_KEY }}
+          owner: ${{ github.event_name == 'workflow_call' && inputs.project-owner || 'HoneyDrunkStudios' }}
+
       - name: Resolve actions checkout ref
         id: resolve-ref
         run: |
@@ -59,6 +111,43 @@ jobs:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ steps.resolve-ref.outputs.ref }}
           path: honeydrunk-actions
+
+      - name: Load cached project metadata
+        id: load-cache
+        env:
+          CACHE_PATH: ./honeydrunk-actions/.github/config/hive-project-metadata.json
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$CACHE_PATH" ]]; then
+            echo "::warning::Project metadata cache not found at $CACHE_PATH; falling back to live GraphQL lookup."
+            echo "use-cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! jq -e '._meta.schema_version == "1.0"' "$CACHE_PATH" >/dev/null; then
+            echo "::warning::Cache schema mismatch; falling back to live lookup."
+            echo "use-cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LAST_REFRESH="$(jq -r '._meta.last_refreshed_utc // empty' "$CACHE_PATH")"
+          if ! REFRESH_EPOCH="$(date -u -d "$LAST_REFRESH" +%s 2>/dev/null)"; then
+            echo "::warning::Cache refresh timestamp is invalid; falling back to live lookup."
+            echo "use-cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NOW_EPOCH="$(date -u +%s)"
+          AGE_DAYS=$(( (NOW_EPOCH - REFRESH_EPOCH) / 86400 ))
+          if (( AGE_DAYS > 14 )); then
+            echo "::warning::Cache is ${AGE_DAYS} days old (max 14); falling back to live lookup. Run refresh-hive-project-metadata.yml to fix."
+            echo "use-cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "HIVE_PROJECT_METADATA_JSON<<METADATA_EOF"
+            cat "$CACHE_PATH"
+            echo "METADATA_EOF"
+          } >> "$GITHUB_ENV"
+          echo "use-cache=true" >> "$GITHUB_OUTPUT"
+          echo "Loaded project metadata cache (age: ${AGE_DAYS} days)."
 
       - name: Resolve issue URL
         id: issue
@@ -81,7 +170,7 @@ jobs:
         env:
           PROJECT_OWNER: ${{ github.event_name == 'workflow_call' && inputs.project-owner || 'HoneyDrunkStudios' }}
           PROJECT_NUMBER: ${{ github.event_name == 'workflow_call' && inputs.project-number || 4 }}
-          HIVE_FIELD_MIRROR_TOKEN: ${{ secrets.hive-field-mirror-token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
+          HIVE_FIELD_MIRROR_TOKEN: ${{ steps.app-token.outputs.token || secrets.hive-field-mirror-token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
           ISSUE_URL: ${{ steps.issue.outputs.issue_url }}
         run: |
           set -euo pipefail
@@ -89,7 +178,7 @@ jobs:
             echo "HIVE_FIELD_MIRROR_TOKEN is not configured." >&2
             exit 1
           fi
-          # Token may come from workflow_call secret or repo/org secret fallback.
+          # Token may come from App auth, workflow_call secret, or repo/org secret fallback.
           ./honeydrunk-actions/scripts/hive-project-mirror.sh \
             --url "${ISSUE_URL}" \
             --project-owner "${PROJECT_OWNER}" \

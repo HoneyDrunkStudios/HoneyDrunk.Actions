@@ -1,0 +1,92 @@
+name: Refresh Hive Project Metadata Cache
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-hive-project-metadata
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect auth mode
+        id: auth-mode
+        env:
+          APP_ID: ${{ secrets.HIVE_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.HIVE_APP_PRIVATE_KEY }}
+          PAT_FALLBACK: ${{ secrets.HIVE_FIELD_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${APP_ID}" && -n "${APP_PRIVATE_KEY}" ]]; then
+            echo "use-app=true" >> "$GITHUB_OUTPUT"
+            echo "Auth path: GitHub App"
+          elif [[ -n "${PAT_FALLBACK}" ]]; then
+            echo "use-app=false" >> "$GITHUB_OUTPUT"
+            echo "Auth path: PAT fallback (hive-field-mirror-token)"
+          else
+            echo "::error::Neither GitHub App auth (HIVE_APP_ID + HIVE_APP_PRIVATE_KEY) nor HIVE_FIELD_MIRROR_TOKEN PAT was provided"
+            exit 1
+          fi
+
+      - name: Mint GitHub App installation token
+        id: app-token
+        if: steps.auth-mode.outputs.use-app == 'true'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HIVE_APP_ID }}
+          private-key: ${{ secrets.HIVE_APP_PRIVATE_KEY }}
+          owner: HoneyDrunkStudios
+
+      - name: Refresh metadata cache
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.HIVE_FIELD_MIRROR_TOKEN }}
+          PROJECT_OWNER: HoneyDrunkStudios
+          PROJECT_NUMBER: 4
+          CACHE_PATH: .github/config/hive-project-metadata.json
+        run: |
+          set -euo pipefail
+          PROJECT_JSON="$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+          FIELDS_JSON="$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)"
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg now "$NOW" \
+            --arg owner "$PROJECT_OWNER" \
+            --argjson number "$PROJECT_NUMBER" \
+            --argjson project "$PROJECT_JSON" \
+            --argjson fields "$FIELDS_JSON" \
+            '{
+              _meta: {
+                schema_version: "1.0",
+                last_refreshed_utc: $now,
+                project_owner: $owner,
+                project_number: $number,
+                refresh_workflow: ".github/workflows/refresh-hive-project-metadata.yml"
+              },
+              project: { id: $project.id },
+              fields: $fields.fields
+            }' > "$CACHE_PATH"
+
+      - name: Commit cache update
+        env:
+          CACHE_PATH: .github/config/hive-project-metadata.json
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "$CACHE_PATH"; then
+            echo "Cache unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$CACHE_PATH"
+          git commit -m "chore(hive): refresh project metadata cache [skip ci]"
+          git push
