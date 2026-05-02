@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": "1.0",
-    "last_refreshed_utc": "2026-05-02T12:13:01Z",
+    "last_refreshed_utc": "2026-05-02T12:24:13Z",
     "project_owner": "HoneyDrunkStudios",
     "project_number": 4,
     "refresh_workflow": ".github/workflows/refresh-hive-project-metadata.yml"
@@ -9,278 +9,281 @@
   "project": {
     "id": "PVT_kwDOCxPmns4BUMbi"
   },
-  "fields": [
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNM",
-      "name": "Title",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNQ",
-      "name": "Assignees",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTSSF_lADOCxPmns4BUMbizhBWQNU",
-      "name": "Status",
-      "options": [
-        {
-          "id": "f75ad846",
-          "name": "Backlog"
-        },
-        {
-          "id": "7bddaab6",
-          "name": "Ready"
-        },
-        {
-          "id": "47fc9ee4",
-          "name": "In Progress"
-        },
-        {
-          "id": "9193871d",
-          "name": "In Progress - Agent"
-        },
-        {
-          "id": "98236657",
-          "name": "Done"
-        },
-        {
-          "id": "2b646205",
-          "name": "Blocked"
-        }
-      ],
-      "type": "ProjectV2SingleSelectField"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNY",
-      "name": "Labels",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNc",
-      "name": "Linked pull requests",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNg",
-      "name": "Milestone",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNk",
-      "name": "Repository",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNs",
-      "name": "Reviewers",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQNw",
-      "name": "Parent issue",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWQN0",
-      "name": "Sub-issues progress",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTSSF_lADOCxPmns4BUMbizhBWQ88",
-      "name": "Wave",
-      "options": [
-        {
-          "id": "cf93b1ff",
-          "name": "Wave 1"
-        },
-        {
-          "id": "6c855f03",
-          "name": "Wave 2"
-        },
-        {
-          "id": "08ef9f77",
-          "name": "Wave 3"
-        },
-        {
-          "id": "7f870acb",
-          "name": "N/A"
-        }
-      ],
-      "type": "ProjectV2SingleSelectField"
-    },
-    {
-      "id": "PVTSSF_lADOCxPmns4BUMbizhBWRTQ",
-      "name": "Initiative",
-      "options": [
-        {
-          "id": "4912648b",
-          "name": "adr-0005-0006-rollout"
-        },
-        {
-          "id": "25b89f58",
-          "name": "honeydrunk-lore-bringup"
-        },
-        {
-          "id": "ad1300ef",
-          "name": "adr-0009-package-scanning-rollout"
-        },
-        {
-          "id": "a2b61615",
-          "name": "standalone"
-        },
-        {
-          "id": "35ad711d",
-          "name": "adr-0010-observe-ai-routing-phase-1"
-        },
-        {
-          "id": "8e53c06a",
-          "name": "adr-0015-container-apps-rollout"
-        },
-        {
-          "id": "a6b15048",
-          "name": "adr-0011-code-review-pipeline"
-        },
-        {
-          "id": "b7b8ae4c",
-          "name": "adr-0012-grid-cicd-control-plane"
-        }
-      ],
-      "type": "ProjectV2SingleSelectField"
-    },
-    {
-      "id": "PVTSSF_lADOCxPmns4BUMbizhBWSTA",
-      "name": "Node",
-      "options": [
-        {
-          "id": "3d8a9b1e",
-          "name": "honeydrunk-kernel"
-        },
-        {
-          "id": "ab216194",
-          "name": "honeydrunk-transport"
-        },
-        {
-          "id": "41f8808e",
-          "name": "honeydrunk-vault"
-        },
-        {
-          "id": "a0556f9a",
-          "name": "honeydrunk-auth"
-        },
-        {
-          "id": "859ce664",
-          "name": "honeydrunk-web-rest"
-        },
-        {
-          "id": "1ff4dbfb",
-          "name": "honeydrunk-data"
-        },
-        {
-          "id": "c23f7a9b",
-          "name": "pulse"
-        },
-        {
-          "id": "7ce4d8ad",
-          "name": "honeydrunk-notify"
-        },
-        {
-          "id": "80f827e5",
-          "name": "honeydrunk-actions"
-        },
-        {
-          "id": "f9330322",
-          "name": "honeydrunk-architecture"
-        },
-        {
-          "id": "86ae7f5e",
-          "name": "honeydrunk-studios"
-        },
-        {
-          "id": "6239c7de",
-          "name": "honeydrunk-ai"
-        },
-        {
-          "id": "4a5f1359",
-          "name": "honeydrunk-capabilities"
-        },
-        {
-          "id": "ed58d574",
-          "name": "honeydrunk-agents"
-        },
-        {
-          "id": "bdf006d9",
-          "name": "honeydrunk-memory"
-        },
-        {
-          "id": "f0f854de",
-          "name": "honeydrunk-knowledge"
-        },
-        {
-          "id": "32133319",
-          "name": "honeydrunk-flow"
-        },
-        {
-          "id": "3c326960",
-          "name": "honeydrunk-operator"
-        },
-        {
-          "id": "bcc89b82",
-          "name": "honeydrunk-evals"
-        },
-        {
-          "id": "d97442dd",
-          "name": "honeydrunk-sim"
-        },
-        {
-          "id": "7b2cd20f",
-          "name": "honeydrunk-lore"
-        },
-        {
-          "id": "929b1a7f",
-          "name": "honeydrunk-standards"
-        }
-      ],
-      "type": "ProjectV2SingleSelectField"
-    },
-    {
-      "id": "PVTSSF_lADOCxPmns4BUMbizhBWS1w",
-      "name": "Tier",
-      "options": [
-        {
-          "id": "a3197d54",
-          "name": "1"
-        },
-        {
-          "id": "7f7b79fa",
-          "name": "2"
-        },
-        {
-          "id": "943833d9",
-          "name": "3"
-        }
-      ],
-      "type": "ProjectV2SingleSelectField"
-    },
-    {
-      "id": "PVTF_lADOCxPmns4BUMbizhBWS4U",
-      "name": "ADR",
-      "type": "ProjectV2Field"
-    },
-    {
-      "id": "PVTSSF_lADOCxPmns4BUMbizhBbxQE",
-      "name": "Actor",
-      "options": [
-        {
-          "id": "b32d157e",
-          "name": "Agent"
-        },
-        {
-          "id": "846468b6",
-          "name": "Human"
-        }
-      ],
-      "type": "ProjectV2SingleSelectField"
-    }
-  ]
+  "fields": {
+    "fields": [
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNM",
+        "name": "Title",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNQ",
+        "name": "Assignees",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTSSF_lADOCxPmns4BUMbizhBWQNU",
+        "name": "Status",
+        "options": [
+          {
+            "id": "f75ad846",
+            "name": "Backlog"
+          },
+          {
+            "id": "7bddaab6",
+            "name": "Ready"
+          },
+          {
+            "id": "47fc9ee4",
+            "name": "In Progress"
+          },
+          {
+            "id": "9193871d",
+            "name": "In Progress - Agent"
+          },
+          {
+            "id": "98236657",
+            "name": "Done"
+          },
+          {
+            "id": "2b646205",
+            "name": "Blocked"
+          }
+        ],
+        "type": "ProjectV2SingleSelectField"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNY",
+        "name": "Labels",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNc",
+        "name": "Linked pull requests",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNg",
+        "name": "Milestone",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNk",
+        "name": "Repository",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNs",
+        "name": "Reviewers",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQNw",
+        "name": "Parent issue",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQN0",
+        "name": "Sub-issues progress",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTSSF_lADOCxPmns4BUMbizhBWQ88",
+        "name": "Wave",
+        "options": [
+          {
+            "id": "cf93b1ff",
+            "name": "Wave 1"
+          },
+          {
+            "id": "6c855f03",
+            "name": "Wave 2"
+          },
+          {
+            "id": "08ef9f77",
+            "name": "Wave 3"
+          },
+          {
+            "id": "7f870acb",
+            "name": "N/A"
+          }
+        ],
+        "type": "ProjectV2SingleSelectField"
+      },
+      {
+        "id": "PVTSSF_lADOCxPmns4BUMbizhBWRTQ",
+        "name": "Initiative",
+        "options": [
+          {
+            "id": "4912648b",
+            "name": "adr-0005-0006-rollout"
+          },
+          {
+            "id": "25b89f58",
+            "name": "honeydrunk-lore-bringup"
+          },
+          {
+            "id": "ad1300ef",
+            "name": "adr-0009-package-scanning-rollout"
+          },
+          {
+            "id": "a2b61615",
+            "name": "standalone"
+          },
+          {
+            "id": "35ad711d",
+            "name": "adr-0010-observe-ai-routing-phase-1"
+          },
+          {
+            "id": "8e53c06a",
+            "name": "adr-0015-container-apps-rollout"
+          },
+          {
+            "id": "a6b15048",
+            "name": "adr-0011-code-review-pipeline"
+          },
+          {
+            "id": "b7b8ae4c",
+            "name": "adr-0012-grid-cicd-control-plane"
+          }
+        ],
+        "type": "ProjectV2SingleSelectField"
+      },
+      {
+        "id": "PVTSSF_lADOCxPmns4BUMbizhBWSTA",
+        "name": "Node",
+        "options": [
+          {
+            "id": "3d8a9b1e",
+            "name": "honeydrunk-kernel"
+          },
+          {
+            "id": "ab216194",
+            "name": "honeydrunk-transport"
+          },
+          {
+            "id": "41f8808e",
+            "name": "honeydrunk-vault"
+          },
+          {
+            "id": "a0556f9a",
+            "name": "honeydrunk-auth"
+          },
+          {
+            "id": "859ce664",
+            "name": "honeydrunk-web-rest"
+          },
+          {
+            "id": "1ff4dbfb",
+            "name": "honeydrunk-data"
+          },
+          {
+            "id": "c23f7a9b",
+            "name": "pulse"
+          },
+          {
+            "id": "7ce4d8ad",
+            "name": "honeydrunk-notify"
+          },
+          {
+            "id": "80f827e5",
+            "name": "honeydrunk-actions"
+          },
+          {
+            "id": "f9330322",
+            "name": "honeydrunk-architecture"
+          },
+          {
+            "id": "86ae7f5e",
+            "name": "honeydrunk-studios"
+          },
+          {
+            "id": "6239c7de",
+            "name": "honeydrunk-ai"
+          },
+          {
+            "id": "4a5f1359",
+            "name": "honeydrunk-capabilities"
+          },
+          {
+            "id": "ed58d574",
+            "name": "honeydrunk-agents"
+          },
+          {
+            "id": "bdf006d9",
+            "name": "honeydrunk-memory"
+          },
+          {
+            "id": "f0f854de",
+            "name": "honeydrunk-knowledge"
+          },
+          {
+            "id": "32133319",
+            "name": "honeydrunk-flow"
+          },
+          {
+            "id": "3c326960",
+            "name": "honeydrunk-operator"
+          },
+          {
+            "id": "bcc89b82",
+            "name": "honeydrunk-evals"
+          },
+          {
+            "id": "d97442dd",
+            "name": "honeydrunk-sim"
+          },
+          {
+            "id": "7b2cd20f",
+            "name": "honeydrunk-lore"
+          },
+          {
+            "id": "929b1a7f",
+            "name": "honeydrunk-standards"
+          }
+        ],
+        "type": "ProjectV2SingleSelectField"
+      },
+      {
+        "id": "PVTSSF_lADOCxPmns4BUMbizhBWS1w",
+        "name": "Tier",
+        "options": [
+          {
+            "id": "a3197d54",
+            "name": "1"
+          },
+          {
+            "id": "7f7b79fa",
+            "name": "2"
+          },
+          {
+            "id": "943833d9",
+            "name": "3"
+          }
+        ],
+        "type": "ProjectV2SingleSelectField"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWS4U",
+        "name": "ADR",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTSSF_lADOCxPmns4BUMbizhBbxQE",
+        "name": "Actor",
+        "options": [
+          {
+            "id": "b32d157e",
+            "name": "Agent"
+          },
+          {
+            "id": "846468b6",
+            "name": "Human"
+          }
+        ],
+        "type": "ProjectV2SingleSelectField"
+      }
+    ],
+    "totalCount": 16
+  }
 }

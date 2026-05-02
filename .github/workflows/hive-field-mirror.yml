@@ -116,6 +116,8 @@ jobs:
         id: load-cache
         env:
           CACHE_PATH: ./honeydrunk-actions/.github/config/hive-project-metadata.json
+          EXPECTED_PROJECT_OWNER: ${{ github.event_name == 'workflow_call' && inputs.project-owner || 'HoneyDrunkStudios' }}
+          EXPECTED_PROJECT_NUMBER: ${{ github.event_name == 'workflow_call' && inputs.project-number || 4 }}
         run: |
           set -euo pipefail
           if [[ ! -f "$CACHE_PATH" ]]; then
@@ -125,6 +127,17 @@ jobs:
           fi
           if ! jq -e '._meta.schema_version == "1.0"' "$CACHE_PATH" >/dev/null; then
             echo "::warning::Cache schema mismatch; falling back to live lookup."
+            echo "use-cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! jq -e --arg owner "$EXPECTED_PROJECT_OWNER" --argjson number "$EXPECTED_PROJECT_NUMBER" \
+            '._meta.project_owner == $owner and ._meta.project_number == $number' "$CACHE_PATH" >/dev/null; then
+            echo "::warning::Cache project does not match requested project ${EXPECTED_PROJECT_OWNER}/${EXPECTED_PROJECT_NUMBER}; falling back to live lookup."
+            echo "use-cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! jq -e '(.fields | type) == "object" and (.fields.fields | type) == "array"' "$CACHE_PATH" >/dev/null; then
+            echo "::warning::Cache fields shape is invalid; falling back to live lookup."
             echo "use-cache=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi

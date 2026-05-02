@@ -73,7 +73,7 @@ jobs:
                 refresh_workflow: ".github/workflows/refresh-hive-project-metadata.yml"
               },
               project: { id: $project.id },
-              fields: $fields.fields
+              fields: $fields
             }' > "$CACHE_PATH"
 
       - name: Commit cache update
