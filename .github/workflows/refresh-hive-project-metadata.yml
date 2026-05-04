@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: refresh-hive-project-metadata
@@ -76,17 +77,17 @@ jobs:
               fields: $fields
             }' > "$CACHE_PATH"
 
-      - name: Commit cache update
-        env:
-          CACHE_PATH: .github/config/hive-project-metadata.json
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- "$CACHE_PATH"; then
-            echo "Cache unchanged."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- "$CACHE_PATH"
-          git commit -m "chore(hive): refresh project metadata cache [skip ci]"
-          git push
+      - name: Create cache update pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: .github/config/hive-project-metadata.json
+          branch: automation/refresh-hive-project-metadata
+          commit-message: "chore(hive): refresh project metadata cache"
+          title: "chore(hive): refresh project metadata cache"
+          body: |
+            Automated refresh of the Hive project metadata cache.
+
+            This workflow opens a PR instead of pushing directly to `main` so it stays compatible with repository rules.
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          delete-branch: true
