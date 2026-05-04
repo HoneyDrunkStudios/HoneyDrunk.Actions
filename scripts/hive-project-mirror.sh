@@ -331,7 +331,15 @@ fi
 
 if [[ -n "$NODE_OPTION" ]]; then
   NODE_OPTION_ID="$(get_single_option_id 'Node' "$NODE_OPTION")"
-  update_single_select "$NODE_FIELD_ID" "$NODE_OPTION_ID" 'Node'
+  if [[ -z "$NODE_OPTION_ID" ]]; then
+    echo "Auto-creating Node option: ${NODE_OPTION}"
+    NODE_OPTION_ID="$(ensure_single_select_option 'Node' "$NODE_OPTION")"
+  fi
+  if [[ -n "$NODE_OPTION_ID" ]]; then
+    update_single_select "$NODE_FIELD_ID" "$NODE_OPTION_ID" 'Node'
+  else
+    echo "::warning::Failed to resolve or create Node option: ${NODE_OPTION}"
+  fi
 else
   echo "::warning::No node mapping found for repository ${ISSUE_REPO}"
 fi
