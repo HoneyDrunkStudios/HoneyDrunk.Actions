@@ -179,21 +179,48 @@ jobs:
             exit 0
           fi
 
-          branch="${ARCHITECTURE_REF#refs/heads/}"
+          if [[ "$ARCHITECTURE_REF" == refs/heads/* ]]; then
+            branch="${ARCHITECTURE_REF#refs/heads/}"
+          elif [[ "$ARCHITECTURE_REF" == refs/* ]]; then
+            echo "::error::architecture-ref must be a branch name or refs/heads/* ref; got $ARCHITECTURE_REF"
+            exit 1
+          elif [[ "$ARCHITECTURE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::architecture-ref must be a branch name, not a SHA: $ARCHITECTURE_REF"
+            exit 1
+          else
+            branch="$ARCHITECTURE_REF"
+          fi
+
+          if ! git check-ref-format --branch "$branch" >/dev/null; then
+            echo "::error::Invalid architecture branch name: $branch"
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- "$MANIFEST_PATH"
           git commit -m "chore(packets): update filed-packets manifest [skip ci]"
 
           for attempt in 1 2 3; do
-            if git push origin HEAD:"$branch"; then
+            if git push origin HEAD:"refs/heads/$branch"; then
               exit 0
             fi
 
-            echo "Manifest push rejected; rebasing on latest $branch before retry $attempt/3."
-            git fetch origin "$branch"
-            git rebase "origin/$branch"
+            if [[ "$attempt" == "3" ]]; then
+              break
+            fi
+
+            echo "Manifest push rejected; rebasing on latest $branch before retry $((attempt + 1))/3."
+            if ! git fetch origin "$branch"; then
+              echo "::error::Unable to fetch latest $branch after manifest push rejection."
+              exit 1
+            fi
+            if ! git rebase "origin/$branch"; then
+              git rebase --abort || true
+              echo "::error::Unable to rebase manifest update onto latest $branch."
+              exit 1
+            fi
           done
 
-          echo "::error::Unable to push manifest update after 3 rebased attempts."
+          echo "::error::Unable to push manifest update after 3 attempts."
           exit 1
