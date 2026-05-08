@@ -171,14 +171,29 @@ jobs:
         working-directory: architecture
         env:
           MANIFEST_PATH: ${{ inputs.manifest-path }}
+          ARCHITECTURE_REF: ${{ steps.refs.outputs.architecture }}
         run: |
           set -euo pipefail
           if git diff --quiet -- "$MANIFEST_PATH"; then
             echo "No manifest changes to commit."
             exit 0
           fi
+
+          branch="${ARCHITECTURE_REF#refs/heads/}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- "$MANIFEST_PATH"
           git commit -m "chore(packets): update filed-packets manifest [skip ci]"
-          git push
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:"$branch"; then
+              exit 0
+            fi
+
+            echo "Manifest push rejected; rebasing on latest $branch before retry $attempt/3."
+            git fetch origin "$branch"
+            git rebase "origin/$branch"
+          done
+
+          echo "::error::Unable to push manifest update after 3 rebased attempts."
+          exit 1
