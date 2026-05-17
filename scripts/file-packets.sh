@@ -522,13 +522,34 @@ load_existing_blockers() {
   local owner="${BASH_REMATCH[1]}"
   local repo="${BASH_REMATCH[2]}"
   local num="${BASH_REMATCH[3]}"
-  local urls
-  if ! urls="$(gh_retry api graphql -f query="{ repository(owner:\"${owner}\", name:\"${repo}\") { issue(number:${num}) { blockedBy(first:50) { nodes { number repository { nameWithOwner } } } } } }" --jq '.data.repository.issue.blockedBy.nodes[]? | "https://github.com/\(.repository.nameWithOwner)/issues/\(.number)"')"; then
-    # Do NOT cache. A retry on a later loop iteration may succeed, and we
-    # want the failure to keep propagating so the caller can skip linking
-    # rather than silently risk a duplicate addBlockedBy call.
-    return 1
-  fi
+  # Paginate the blockedBy connection. GitHub caps `first` at 100; a single
+  # page would silently miss edges on a dependent with many blockers and break
+  # the idempotency guarantee (re-attempting addBlockedBy for already-linked
+  # blockers). Exhaust every page via pageInfo.endCursor before caching.
+  local urls="" cursor="null" resp page
+  while :; do
+    if ! resp="$(gh_retry api graphql -f query="{ repository(owner:\"${owner}\", name:\"${repo}\") { issue(number:${num}) { blockedBy(first:100, after:${cursor}) { nodes { number repository { nameWithOwner } } pageInfo { hasNextPage endCursor } } } } }")"; then
+      # Do NOT cache. A retry on a later loop iteration may succeed, and we
+      # want the failure to keep propagating so the caller can skip linking
+      # rather than silently risk a duplicate addBlockedBy call.
+      return 1
+    fi
+    # gh/jq emit CRLF on some shells (Git Bash); strip CR so URLs stay clean
+    # for the line-anchored cache match below.
+    resp="$(printf '%s' "$resp" | tr -d '\r')"
+    page="$(printf '%s' "$resp" | jq -r '.data.repository.issue.blockedBy.nodes[]? | "https://github.com/\(.repository.nameWithOwner)/issues/\(.number)"')"
+    if [[ -n "$page" ]]; then
+      if [[ -n "$urls" ]]; then
+        urls+=$'\n'"$page"
+      else
+        urls="$page"
+      fi
+    fi
+    if [[ "$(printf '%s' "$resp" | jq -r '.data.repository.issue.blockedBy.pageInfo.hasNextPage')" != "true" ]]; then
+      break
+    fi
+    cursor="\"$(printf '%s' "$resp" | jq -r '.data.repository.issue.blockedBy.pageInfo.endCursor')\""
+  done
   # Stash with a leading and trailing newline so line-anchored matches
   # against `\n<URL>\n` work regardless of input line-ending behaviour.
   LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'"${urls}"$'\n'
@@ -571,7 +592,6 @@ if [[ $LINK_DEPS -eq 1 ]]; then
 
     new_blockers=()
     skipped_blockers=()
-    rejected_deps=()
     for dep in "${deps[@]}"; do
       [[ -z "$dep" ]] && continue
       dep_url="$(resolve_dep_url "$dep" "$rel")"
@@ -580,7 +600,6 @@ if [[ $LINK_DEPS -eq 1 ]]; then
         # or a `packet:NN` ref to a packet not yet in the manifest. Both are
         # surfaced loudly — the historical silent-skip was the original bug.
         echo "::warning::Could not resolve dependency '$dep' in $rel (expected 'packet:NN' or '{Repo}#N')"
-        rejected_deps+=("$dep")
         continue
       fi
       if already_linked "$dependent_url" "$dep_url"; then

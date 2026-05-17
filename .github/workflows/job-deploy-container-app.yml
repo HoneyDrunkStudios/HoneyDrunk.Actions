@@ -173,9 +173,11 @@ jobs:
   deploy:
     name: Deploy to Container App
     runs-on: ${{ inputs.runs-on }}
-    # Empty string = no environment (backward compatible for existing callers).
-    # When set, the OIDC token subject becomes repo:ORG/REPO:environment:<name>.
-    environment: ${{ inputs.environment }}
+    # Empty input resolves to null (no environment) — backward compatible for
+    # callers that don't pass it. A non-empty value scopes the deploy job to
+    # that environment so the OIDC token subject becomes
+    # repo:ORG/REPO:environment:<name>.
+    environment: ${{ inputs.environment != '' && inputs.environment || null }}
     outputs:
       revision-name: ${{ steps.deploy-container-app.outputs.revision-name }}
       revision-fqdn: ${{ steps.deploy-container-app.outputs.revision-fqdn }}
