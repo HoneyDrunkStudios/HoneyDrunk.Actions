@@ -125,6 +125,18 @@ on:
         type: string
         default: 'main'
 
+      environment:
+        description: >
+          GitHub deployment environment for the deploy job. Set this so the
+          OIDC token subject is repo:ORG/REPO:environment:<name>, matching an
+          environment-scoped federated credential. Leave empty for no
+          environment (token subject falls back to the ref). Caller jobs that
+          use this reusable workflow cannot declare `environment:` themselves,
+          so it must be passed through here.
+        required: false
+        type: string
+        default: ''
+
     outputs:
       deployed-url:
         description: 'URL of the deployed Function App'
@@ -141,6 +153,11 @@ jobs:
   deploy:
     name: Deploy to Function App
     runs-on: ${{ inputs.runs-on }}
+    # Empty input resolves to null (no environment) — backward compatible for
+    # callers that don't pass it. A non-empty value scopes the deploy job to
+    # that environment so the OIDC token subject becomes
+    # repo:ORG/REPO:environment:<name>.
+    environment: ${{ inputs.environment != '' && inputs.environment || null }}
     outputs:
       deployed-url: ${{ steps.deploy-function.outputs.deployed-url }}
       deployment-status: ${{ steps.deploy-function.outputs.deployment-status }}

@@ -216,20 +216,81 @@ manifest_set() {
   mv "$tmp" "$MANIFEST"
 }
 
-# Look up a dependency issue URL by basename of the dependency path. Accepts
-# either the full packet filename ("01-foo.md") or its bare slug ("foo") by
-# normalizing both sides: strip a leading "NN-" prefix and trailing ".md".
-dep_lookup_url() {
+# Resolve a `dependencies:` frontmatter entry to an issue URL. Two forms:
+#
+#   "packet:NN"          — another packet in the SAME initiative folder, looked
+#                          up via the manifest. NN is the two-digit ordinal
+#                          prefix (or NN+letter, e.g. "07a").
+#   "{owner}/{repo}#N"   — direct issue reference. Owner defaults to
+#                          HoneyDrunkStudios when omitted (e.g. "Lore#1").
+#   "{repo}#N"           — same as above with implicit owner.
+#
+# Rejects bare integers, "Issue #N" prose, and anything else. Silent failure on
+# this step is what historically broke board blocking edges, so callers must
+# treat an empty return as a hard failure to log.
+resolve_dep_url() {
   local dep="$1"
-  local base
-  base="$(basename "$dep")"
-  jq -r --arg b "$base" '
-    def norm: sub("^[0-9]+-"; "") | sub("[.]md$"; "");
-    to_entries
-    | map(.key |= (split("/") | last))
-    | map(select(.key == $b or (.key | norm) == ($b | norm)))
-    | .[0].value // empty
-  ' "$MANIFEST"
+  local current_packet_rel="$2"
+
+  if [[ "$dep" =~ ^packet:([0-9]+[a-zA-Z]?)$ ]]; then
+    local prefix="${BASH_REMATCH[1]}"
+    local current_dir
+    current_dir="$(dirname "$current_packet_rel")"
+    jq -r --arg dir "$current_dir" --arg prefix "$prefix" '
+      to_entries
+      | map(select(
+          (.key | startswith($dir + "/")) and
+          ((.key | split("/") | last) | test("^" + $prefix + "-"))
+        ))
+      | .[0].value // empty
+    ' "$MANIFEST"
+    return 0
+  fi
+
+  if [[ "$dep" =~ ^([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?)#([0-9]+)$ ]]; then
+    local repo="${BASH_REMATCH[1]}"
+    local num="${BASH_REMATCH[3]}"
+    if [[ "$repo" != */* ]]; then
+      # Bare repo short-name (e.g. "Lore"); expand to the canonical repo slug.
+      # All Grid repos use the HoneyDrunk.* prefix.
+      if [[ "$repo" != HoneyDrunk.* ]]; then
+        repo="HoneyDrunk.$repo"
+      fi
+      repo="HoneyDrunkStudios/$repo"
+    fi
+    printf 'https://github.com/%s/issues/%s' "$repo" "$num"
+    return 0
+  fi
+
+  # Unrecognized — caller logs the rejection.
+  return 0
+}
+
+# Resolve an issue URL to its GraphQL node ID. Cached for the lifetime of
+# the run so repeated blockers against the same issue cost one fetch each.
+declare -A ISSUE_NODE_ID=()
+
+get_issue_node_id() {
+  local url="$1"
+  if [[ -n "${ISSUE_NODE_ID[$url]+set}" ]]; then
+    printf '%s' "${ISSUE_NODE_ID[$url]}"
+    return 0
+  fi
+  if [[ ! "$url" =~ ^https://github.com/([^/]+)/([^/]+)/issues/([0-9]+)$ ]]; then
+    return 1
+  fi
+  local owner="${BASH_REMATCH[1]}"
+  local repo="${BASH_REMATCH[2]}"
+  local num="${BASH_REMATCH[3]}"
+  local node_id
+  if ! node_id="$(gh_retry api graphql -f query="{ repository(owner:\"${owner}\", name:\"${repo}\") { issue(number:${num}) { id } } }" --jq '.data.repository.issue.id // empty')"; then
+    return 1
+  fi
+  if [[ -z "$node_id" ]]; then
+    return 1
+  fi
+  ISSUE_NODE_ID["$url"]="$node_id"
+  printf '%s' "$node_id"
 }
 
 # Collected summary rows: "packet\turl\tblockers"
@@ -435,17 +496,16 @@ done
 # Dependency-linking pass — runs over every packet in the manifest, not just
 # packets filed during the current run, so a partial-failure run can recover
 # its missing blocking edges on a re-run. Idempotency is enforced per-(dependent,
-# blocker): before posting a `Blocked by <URL>` line for a given pair, we
-# verify it's not already present in any prior comment on the dependent issue.
-# Cache exists for the lifetime of one run only.
+# blocker): before calling `addBlockedBy`, we verify the blocker is not already
+# present in the dependent issue's `blockedBy` connection. Cache exists for
+# the lifetime of one run only.
 declare -A LINKED_BLOCKERS_CACHE=()
 
 # Populate LINKED_BLOCKERS_CACHE[dependent_url] with a leading/trailing-newline-
-# wrapped concatenation of every existing comment body on the dependent issue.
-# Returns 0 on success (cache populated, even if the issue has zero comments)
-# or non-zero on REST fetch failure. The caller MUST check the return code —
-# treating a fetch failure as "no blockers exist" would silently re-post
-# `Blocked by <URL>` comments and break Change A's idempotency contract.
+# wrapped concatenation of every existing blockedBy URL on the dependent issue.
+# Uses the GraphQL `blockedBy` connection — the authoritative source for
+# native blocking relationships. Returns 0 on success (cache populated, even
+# if the issue has zero blockers) or non-zero on fetch failure.
 load_existing_blockers() {
   local dependent_url="$1"
   # `+set` parameter expansion distinguishes "key present (loaded)" from
@@ -462,18 +522,37 @@ load_existing_blockers() {
   local owner="${BASH_REMATCH[1]}"
   local repo="${BASH_REMATCH[2]}"
   local num="${BASH_REMATCH[3]}"
-  local bodies
-  if ! bodies="$(gh_retry api "repos/${owner}/${repo}/issues/${num}/comments" --paginate --jq '.[].body')"; then
-    # Do NOT cache. A retry on a later loop iteration may succeed, and we
-    # want the failure to keep propagating so the caller can skip linking
-    # for this dependent rather than silently risk a duplicate post.
-    return 1
-  fi
+  # Paginate the blockedBy connection. GitHub caps `first` at 100; a single
+  # page would silently miss edges on a dependent with many blockers and break
+  # the idempotency guarantee (re-attempting addBlockedBy for already-linked
+  # blockers). Exhaust every page via pageInfo.endCursor before caching.
+  local urls="" cursor="null" resp page
+  while :; do
+    if ! resp="$(gh_retry api graphql -f query="{ repository(owner:\"${owner}\", name:\"${repo}\") { issue(number:${num}) { blockedBy(first:100, after:${cursor}) { nodes { number repository { nameWithOwner } } pageInfo { hasNextPage endCursor } } } } }")"; then
+      # Do NOT cache. A retry on a later loop iteration may succeed, and we
+      # want the failure to keep propagating so the caller can skip linking
+      # rather than silently risk a duplicate addBlockedBy call.
+      return 1
+    fi
+    # gh/jq emit CRLF on some shells (Git Bash); strip CR so URLs stay clean
+    # for the line-anchored cache match below.
+    resp="$(printf '%s' "$resp" | tr -d '\r')"
+    page="$(printf '%s' "$resp" | jq -r '.data.repository.issue.blockedBy.nodes[]? | "https://github.com/\(.repository.nameWithOwner)/issues/\(.number)"')"
+    if [[ -n "$page" ]]; then
+      if [[ -n "$urls" ]]; then
+        urls+=$'\n'"$page"
+      else
+        urls="$page"
+      fi
+    fi
+    if [[ "$(printf '%s' "$resp" | jq -r '.data.repository.issue.blockedBy.pageInfo.hasNextPage')" != "true" ]]; then
+      break
+    fi
+    cursor="\"$(printf '%s' "$resp" | jq -r '.data.repository.issue.blockedBy.pageInfo.endCursor')\""
+  done
   # Stash with a leading and trailing newline so line-anchored matches
-  # against `\nBlocked by URL\n` work regardless of the comment body's own
-  # line-ending behaviour (most are LF-terminated; defensive padding here
-  # is cheaper than per-call normalization).
-  LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'"${bodies}"$'\n'
+  # against `\n<URL>\n` work regardless of input line-ending behaviour.
+  LINKED_BLOCKERS_CACHE[$dependent_url]=$'\n'"${urls}"$'\n'
   return 0
 }
 
@@ -483,7 +562,7 @@ already_linked() {
   local dependent_url="$1"
   local dep_url="$2"
   local cached="${LINKED_BLOCKERS_CACHE[$dependent_url]:-}"
-  [[ "$cached" == *$'\n'"Blocked by ${dep_url}"$'\n'* ]]
+  [[ "$cached" == *$'\n'"${dep_url}"$'\n'* ]]
 }
 
 if [[ $LINK_DEPS -eq 1 ]]; then
@@ -503,11 +582,11 @@ if [[ $LINK_DEPS -eq 1 ]]; then
     mapfile -t deps < <(jq -r '.dependencies[]?' <<<"$packet_json")
     [[ ${#deps[@]} -eq 0 ]] && continue
 
-    # Load existing comments once per dependent up front. If the fetch fails,
-    # skip this dependent for the run — re-posting blockers without a clean
-    # idempotency signal risks duplicates. A future run will retry.
+    # Load existing blockedBy edges once per dependent up front. If the fetch
+    # fails, skip this dependent for the run — issuing addBlockedBy without a
+    # clean idempotency signal risks duplicate-edge errors. A future run retries.
     if ! load_existing_blockers "$dependent_url"; then
-      echo "::warning::Could not load existing comments for $dependent_url; skipping dep-link this run to preserve idempotency"
+      echo "::warning::Could not load blockedBy for $dependent_url; skipping dep-link this run to preserve idempotency"
       continue
     fi
 
@@ -515,9 +594,12 @@ if [[ $LINK_DEPS -eq 1 ]]; then
     skipped_blockers=()
     for dep in "${deps[@]}"; do
       [[ -z "$dep" ]] && continue
-      dep_url="$(dep_lookup_url "$dep")"
+      dep_url="$(resolve_dep_url "$dep" "$rel")"
       if [[ -z "$dep_url" ]]; then
-        echo "::warning::Dependency not found in manifest for $rel: $dep"
+        # Either an unrecognized format (bare integer, narrative string, etc.)
+        # or a `packet:NN` ref to a packet not yet in the manifest. Both are
+        # surfaced loudly — the historical silent-skip was the original bug.
+        echo "::warning::Could not resolve dependency '$dep' in $rel (expected 'packet:NN' or '{Repo}#N')"
         continue
       fi
       if already_linked "$dependent_url" "$dep_url"; then
@@ -534,32 +616,43 @@ if [[ $LINK_DEPS -eq 1 ]]; then
       continue
     fi
 
-    body_file="$(mktemp)"
-    {
-      for b in "${new_blockers[@]}"; do
-        printf 'Blocked by %s\n' "$b"
-      done
-    } > "$body_file"
+    blocked_node_id="$(get_issue_node_id "$dependent_url")"
+    if [[ -z "$blocked_node_id" ]]; then
+      echo "::warning::Could not resolve node ID for $dependent_url; skipping dep-link"
+      continue
+    fi
 
-    echo "link  $rel -> ${#new_blockers[@]} new blocker(s) (${#skipped_blockers[@]} already linked)"
-    gh_retry issue comment "$dependent_url" --body-file "$body_file" >/dev/null
-    rm -f "$body_file"
-
-    # Reflect newly-posted blockers in the in-process cache so any later
-    # packet that uses this dependent_url for its own already_linked check
-    # sees them. The cache key is guaranteed to exist here because
-    # load_existing_blockers above succeeded for $dependent_url.
+    posted=0
+    posted_blockers=()
     for b in "${new_blockers[@]}"; do
-      LINKED_BLOCKERS_CACHE[$dependent_url]+="Blocked by ${b}"$'\n'
+      blocker_node_id="$(get_issue_node_id "$b")"
+      if [[ -z "$blocker_node_id" ]]; then
+        echo "::warning::Could not resolve node ID for blocker $b; skipping"
+        continue
+      fi
+      if gh_retry api graphql \
+        -f query='mutation($a:ID!, $b:ID!){ addBlockedBy(input:{issueId:$a, blockingIssueId:$b}){ issue{ number } } }' \
+        -f a="$blocked_node_id" \
+        -f b="$blocker_node_id" >/dev/null; then
+        # Reflect new blocker in the cache so later packets in this run that
+        # share the same dependent see it via already_linked.
+        LINKED_BLOCKERS_CACHE[$dependent_url]+="${b}"$'\n'
+        posted_blockers+=("$b")
+        posted=$((posted + 1))
+      else
+        echo "::warning::addBlockedBy failed for $rel ← $b"
+      fi
     done
 
+    echo "link  $rel -> ${posted} new blocker(s) (${#skipped_blockers[@]} already linked)"
+
     # Update summary row only if this packet was newly filed this run.
-    if [[ -n "${NEW_PACKETS[$rel]:-}" ]]; then
+    if [[ -n "${NEW_PACKETS[$rel]:-}" && ${#posted_blockers[@]} -gt 0 ]]; then
       for i in "${!SUMMARY_ROWS[@]}"; do
         row="${SUMMARY_ROWS[$i]}"
         row_rel="${row%%$'\t'*}"
         if [[ "$row_rel" == "$rel" ]]; then
-          blockers_joined="$(IFS=', '; echo "${new_blockers[*]}")"
+          blockers_joined="$(IFS=', '; echo "${posted_blockers[*]}")"
           rest="${row#*$'\t'}"
           row_url="${rest%%$'\t'*}"
           SUMMARY_ROWS[$i]="${rel}"$'\t'"${row_url}"$'\t'"${blockers_joined}"

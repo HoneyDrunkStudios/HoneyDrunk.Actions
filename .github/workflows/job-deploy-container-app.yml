@@ -142,6 +142,18 @@ on:
         type: string
         default: ''
 
+      environment:
+        description: >
+          GitHub deployment environment for the deploy job. Set this so the
+          OIDC token subject is repo:ORG/REPO:environment:<name>, matching an
+          environment-scoped federated credential. Leave empty for no
+          environment (token subject falls back to the ref). Caller jobs that
+          use this reusable workflow cannot declare `environment:` themselves,
+          so it must be passed through here.
+        required: false
+        type: string
+        default: ''
+
     outputs:
       revision-name:
         description: 'Name of the created Container App revision'
@@ -161,6 +173,11 @@ jobs:
   deploy:
     name: Deploy to Container App
     runs-on: ${{ inputs.runs-on }}
+    # Empty input resolves to null (no environment) — backward compatible for
+    # callers that don't pass it. A non-empty value scopes the deploy job to
+    # that environment so the OIDC token subject becomes
+    # repo:ORG/REPO:environment:<name>.
+    environment: ${{ inputs.environment != '' && inputs.environment || null }}
     outputs:
       revision-name: ${{ steps.deploy-container-app.outputs.revision-name }}
       revision-fqdn: ${{ steps.deploy-container-app.outputs.revision-fqdn }}
