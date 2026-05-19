@@ -679,8 +679,10 @@ jobs:
       
       - name: Write summary to GitHub
         shell: bash
+        env:
+          SUMMARY_TEXT: ${{ steps.message.outputs.text }}
         run: |
-          echo "${{ steps.message.outputs.text }}" >> $GITHUB_STEP_SUMMARY
+          printf "%s\n" "$SUMMARY_TEXT" >> "$GITHUB_STEP_SUMMARY"
       
       - name: Post PR comment
         if: ${{ inputs.post-pr-summary }}
@@ -769,7 +771,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${WORKING_DIRECTORY%/}/.github/coverage-baseline.json"
+          git add -f "${WORKING_DIRECTORY%/}/.github/coverage-baseline.json"
           if git diff --cached --quiet; then
             echo "Coverage baseline unchanged; nothing to commit."
             exit 0
