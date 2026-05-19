@@ -1,0 +1,175 @@
+# ==============================================================================
+# Coverage Baseline Ratchet Workflow
+# ==============================================================================
+# Purpose:
+#   Default-branch coverage baseline maintenance for consumer repositories.
+#   Kept separate from pr-core.yml so PR validation can run with contents: read
+#   while this push-only workflow receives contents: write for bot commits.
+# ==============================================================================
+
+name: Coverage Baseline Ratchet
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Release'
+
+      runs-on:
+        description: 'GitHub runner to use (ubuntu-latest, windows-latest, macos-latest)'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      working-directory:
+        description: 'Working directory for all operations'
+        required: false
+        type: string
+        default: '.'
+
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use (main, tag, or commit)'
+        required: false
+        type: string
+        default: 'main'
+
+    secrets:
+      github-token:
+        description: 'GitHub token for pushing baseline commits'
+        required: false
+
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-build-and-test.yml@main
+    with:
+      dotnet-version: ${{ inputs.dotnet-version }}
+      configuration: ${{ inputs.configuration }}
+      runs-on: ${{ inputs.runs-on }}
+      working-directory: ${{ inputs.working-directory }}
+      project-path: ${{ inputs.project-path }}
+      enable-cache: true
+      collect-coverage: true
+      actions-ref: ${{ inputs.actions-ref }}
+    permissions:
+      contents: read
+      checks: write
+
+  coverage-baseline-ratchet:
+    name: Coverage Baseline Ratchet
+    needs: [build-and-test]
+    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.github-token || github.token }}
+          fetch-depth: 0
+
+      - name: Download coverage reports artifact (if exists)
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports-${{ inputs.runs-on }}
+          path: TestResults
+        continue-on-error: true
+
+      - name: Ratchet committed coverage baseline
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json, os, sys, xml.etree.ElementTree as ET
+          from datetime import datetime, timezone
+          from pathlib import Path
+          workdir = Path(os.environ.get('WORKING_DIRECTORY') or '.').resolve()
+          test_projects = [p for p in workdir.rglob('*.csproj') if p.name.endswith('.Tests.csproj') or p.name.endswith('.Canary.csproj')]
+          cov_files = list(Path('TestResults').rglob('coverage.cobertura.xml'))
+          if not test_projects or not cov_files:
+              print('No test projects or coverage report found; skipping baseline ratchet.')
+              sys.exit(0)
+          rate = None
+          for cov in cov_files:
+              try:
+                  root = ET.parse(cov).getroot()
+                  rate = float(root.attrib.get('line-rate', '0')) * 100
+                  break
+              except Exception:
+                  continue
+          if rate is None:
+              print('No readable coverage report found; skipping baseline ratchet.')
+              sys.exit(0)
+          target = workdir / '.github' / 'coverage-baseline.json'
+          target.parent.mkdir(parents=True, exist_ok=True)
+          new_total = round(rate, 2)
+          if target.exists():
+              try:
+                  current_total = round(float(json.loads(target.read_text(encoding='utf-8')).get('totalLineCoverage')), 2)
+                  if current_total == new_total:
+                      print(f'Coverage baseline unchanged at {new_total:.2f}%; skipping commit.')
+                      sys.exit(0)
+              except Exception:
+                  print('Existing coverage baseline is unreadable; replacing it with the current measurement.')
+          payload = {
+              'totalLineCoverage': new_total,
+              'commit': os.environ.get('GITHUB_SHA', ''),
+              'measuredAtUtc': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+          }
+          target.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          print(f'Wrote {target} at {rate:.2f}%')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f "${WORKING_DIRECTORY%/}/.github/coverage-baseline.json"
+          if git diff --cached --quiet; then
+            echo "Coverage baseline unchanged; nothing to commit."
+            exit 0
+          fi
+
+          PCT=$(python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ.get('WORKING_DIRECTORY') or '.') / '.github' / 'coverage-baseline.json'
+          print(json.loads(p.read_text()).get('totalLineCoverage'))
+          PY
+          )
+          git commit -m "chore: ratchet coverage baseline to ${PCT}% [skip ci]"
+
+          for attempt in 1 2 3; do
+            git fetch origin "$DEFAULT_BRANCH"
+            if git rebase "origin/$DEFAULT_BRANCH" && git push origin "HEAD:$DEFAULT_BRANCH"; then
+              echo "Coverage baseline pushed."
+              exit 0
+            fi
+            echo "::warning::Coverage baseline push race on attempt $attempt; retrying."
+            git rebase --abort || true
+            sleep $((attempt * 2))
+          done
+          echo "::warning::Coverage baseline push race persisted after 3 attempts; next default-branch run will self-heal."
+          exit 0

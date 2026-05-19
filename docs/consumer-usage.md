@@ -31,8 +31,6 @@ name: PR Validation
 on:
   pull_request:
     branches: [main, develop]
-  push:
-    branches: [main, develop]
 
 jobs:
   pr-validation:
@@ -60,7 +58,7 @@ The baseline file is maintained in each consumer repo as:
 
 Treat `.github/coverage-baseline.json` as bot-maintained. A deliberate coverage regression should edit that file in the same PR so the change is reviewable.
 
-To let the baseline ratchet seed/update after merges, call `pr-core.yml` on `push` to the default branch as well as `pull_request`, and grant the reusable job `contents: write` so it can commit the bot-maintained baseline. A pull-request-only caller still enforces no-regress when `.github/coverage-baseline.json` already exists, but the baseline will not auto-ratchet after merges; if the file does not exist yet, PRs remain in bootstrap mode until it is seeded.
+To let the baseline ratchet seed/update after merges, call `coverage-baseline-ratchet.yml` from a separate `push`-to-default-branch job and grant only that job `contents: write` so it can commit the bot-maintained baseline. The `pr-core.yml` PR job should keep `contents: read`. A pull-request-only caller still enforces no-regress when `.github/coverage-baseline.json` already exists, but the baseline will not auto-ratchet after merges; if the file does not exist yet, PRs remain in bootstrap mode until it is seeded.
 
 Optional inputs:
 
@@ -78,19 +76,21 @@ name: PR Validation
 on:
   pull_request:
     branches: [main, develop]
+  push:
+    branches: [main]
 
 permissions:
   contents: read  # broader writes are granted per-job (least privilege)
 
 jobs:
   pr-validation:
+    if: github.event_name == 'pull_request'
     # security-events: write is scoped here because pr-core's CodeQL step
     # uploads SARIF to GitHub Code Scanning. checks: write and
     # pull-requests: write are scoped here too so additional jobs don't
-    # inherit them implicitly. contents: write is needed only for the
-    # default-branch coverage baseline ratchet.
+    # inherit them implicitly.
     permissions:
-      contents: write
+      contents: read
       checks: write
       pull-requests: write
       security-events: write
@@ -111,6 +111,22 @@ jobs:
       patch-coverage-threshold: 75
       absolute-coverage-floor: 70
       post-pr-summary: true
+      actions-ref: 'main'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  coverage-baseline-ratchet:
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      checks: write
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/coverage-baseline-ratchet.yml@main
+    with:
+      dotnet-version: '10.0.x'
+      configuration: 'Release'
+      runs-on: 'ubuntu-latest'
+      working-directory: '.'
+      project-path: './src/MyProject.sln'
       actions-ref: 'main'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
