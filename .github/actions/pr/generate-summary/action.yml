@@ -70,21 +70,68 @@ runs:
       id: coverage
       if: ${{ inputs.include-coverage == 'true' }}
       shell: bash
+      env:
+        TEST_RESULTS_DIRECTORY: ${{ inputs.test-results-directory }}
       run: |
         set -euo pipefail
         
-        # Parse coverage from Cobertura XML
+        # Parse and merge coverage from all Cobertura XML reports.
         COVERAGE="N/A"
         if [ -d "${{ inputs.test-results-directory }}" ]; then
-          COV_FILE=$(find "${{ inputs.test-results-directory }}" -type f -name "coverage.cobertura.xml" | head -n 1)
-          if [ -n "$COV_FILE" ] && [ -f "$COV_FILE" ]; then
-            # Extract line-rate (should be between 0 and 1)
-            LINE_RATE=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -n1 | grep -o '[0-9.]*' || echo "")
-            if [ -n "$LINE_RATE" ] && [ "$LINE_RATE" != "0" ]; then
-              # Validate it's a valid decimal and convert to percentage
-              COVERAGE=$(awk "BEGIN {rate=$LINE_RATE; if (rate >= 0 && rate <= 1) printf \"%.1f\", rate * 100; else print \"N/A\"}")
-            fi
-          fi
+          COVERAGE=$(python3 <<'PY'
+        import os, xml.etree.ElementTree as ET
+        from pathlib import Path
+        root_dir = Path(os.environ.get('TEST_RESULTS_DIRECTORY') or 'TestResults')
+        workdir = Path.cwd().resolve()
+
+        def is_test_or_canary(filename):
+            normalized = filename.replace('\\', '/')
+            return '.Tests' in normalized or '.Canary' in normalized
+
+        def canonical_source_key(filename):
+            path = Path(filename)
+            candidates = [path]
+            if not path.is_absolute():
+                candidates.append((workdir / path).resolve())
+                candidates.append(Path(path.as_posix().lstrip('/')).resolve())
+            for candidate in candidates:
+                try:
+                    resolved = candidate.resolve()
+                except OSError:
+                    continue
+                if resolved.exists():
+                    try:
+                        return str(resolved.relative_to(workdir)).replace('\\', '/').lower()
+                    except ValueError:
+                        return str(resolved).replace('\\', '/').lower()
+            return path.as_posix().lstrip('/').lower()
+
+        line_hits = {}
+        for cov in root_dir.rglob('coverage.cobertura.xml'):
+            try:
+                root = ET.parse(cov).getroot()
+            except Exception:
+                continue
+            for cls in root.findall('.//class'):
+                filename = cls.attrib.get('filename') or ''
+                if not filename or is_test_or_canary(filename):
+                    continue
+                key = canonical_source_key(filename)
+                for line in cls.findall('.//line'):
+                    try:
+                        num = int(line.attrib.get('number', '0'))
+                        hits = int(line.attrib.get('hits', '0'))
+                    except ValueError:
+                        continue
+                    line_hits.setdefault(key, {})[num] = max(line_hits.setdefault(key, {}).get(num, 0), hits)
+        total = sum(len(lines) for lines in line_hits.values())
+        if not total:
+            print('N/A')
+        else:
+            covered = sum(1 for lines in line_hits.values() for hits in lines.values() if hits > 0)
+            print(f'{covered / total * 100:.1f}')
+        PY
+        )
         fi
         echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
     
