@@ -113,17 +113,32 @@ jobs:
           if not test_projects or not cov_files:
               print('No test projects or coverage report found; skipping baseline ratchet.')
               sys.exit(0)
-          rate = None
+          line_hits = {}
           for cov in cov_files:
               try:
                   root = ET.parse(cov).getroot()
-                  rate = float(root.attrib.get('line-rate', '0')) * 100
-                  break
               except Exception:
                   continue
-          if rate is None:
-              print('No readable coverage report found; skipping baseline ratchet.')
+              for cls in root.findall('.//class'):
+                  filename = cls.attrib.get('filename') or ''
+                  if not filename:
+                      continue
+                  if '.Tests' in filename or '.Canary' in filename:
+                      continue
+                  key = filename.replace('\\', '/').lower()
+                  for line in cls.findall('.//line'):
+                      try:
+                          num = int(line.attrib.get('number', '0'))
+                          hits = int(line.attrib.get('hits', '0'))
+                      except ValueError:
+                          continue
+                      line_hits.setdefault(key, {})[num] = max(line_hits.setdefault(key, {}).get(num, 0), hits)
+          total_valid = sum(len(lines) for lines in line_hits.values())
+          if not total_valid:
+              print('No readable coverage lines found; skipping baseline ratchet.')
               sys.exit(0)
+          total_covered = sum(1 for lines in line_hits.values() for hits in lines.values() if hits > 0)
+          rate = total_covered / total_valid * 100
           target = workdir / '.github' / 'coverage-baseline.json'
           target.parent.mkdir(parents=True, exist_ok=True)
           new_total = round(rate, 2)

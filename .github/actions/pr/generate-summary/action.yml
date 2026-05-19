@@ -73,18 +73,39 @@ runs:
       run: |
         set -euo pipefail
         
-        # Parse coverage from Cobertura XML
+        # Parse and merge coverage from all Cobertura XML reports.
         COVERAGE="N/A"
         if [ -d "${{ inputs.test-results-directory }}" ]; then
-          COV_FILE=$(find "${{ inputs.test-results-directory }}" -type f -name "coverage.cobertura.xml" | head -n 1)
-          if [ -n "$COV_FILE" ] && [ -f "$COV_FILE" ]; then
-            # Extract line-rate (should be between 0 and 1)
-            LINE_RATE=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -n1 | grep -o '[0-9.]*' || echo "")
-            if [ -n "$LINE_RATE" ] && [ "$LINE_RATE" != "0" ]; then
-              # Validate it's a valid decimal and convert to percentage
-              COVERAGE=$(awk "BEGIN {rate=$LINE_RATE; if (rate >= 0 && rate <= 1) printf \"%.1f\", rate * 100; else print \"N/A\"}")
-            fi
-          fi
+          COVERAGE=$(python3 <<'PY'
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        root_dir = Path('${{ inputs.test-results-directory }}')
+        line_hits = {}
+        for cov in root_dir.rglob('coverage.cobertura.xml'):
+            try:
+                root = ET.parse(cov).getroot()
+            except Exception:
+                continue
+            for cls in root.findall('.//class'):
+                filename = cls.attrib.get('filename') or ''
+                if not filename or '.Tests' in filename or '.Canary' in filename:
+                    continue
+                key = filename.replace('\\', '/').lower()
+                for line in cls.findall('.//line'):
+                    try:
+                        num = int(line.attrib.get('number', '0'))
+                        hits = int(line.attrib.get('hits', '0'))
+                    except ValueError:
+                        continue
+                    line_hits.setdefault(key, {})[num] = max(line_hits.setdefault(key, {}).get(num, 0), hits)
+        total = sum(len(lines) for lines in line_hits.values())
+        if not total:
+            print('N/A')
+        else:
+            covered = sum(1 for lines in line_hits.values() for hits in lines.values() if hits > 0)
+            print(f'{covered / total * 100:.1f}')
+        PY
+        )
         fi
         echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
     

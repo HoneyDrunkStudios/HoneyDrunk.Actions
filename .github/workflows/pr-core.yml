@@ -320,19 +320,14 @@ jobs:
           test_projects = [p for p in workdir.rglob('*.csproj') if p.name.endswith('.Tests.csproj') or p.name.endswith('.Canary.csproj')]
           coverage_files = list(Path('TestResults').rglob('coverage.cobertura.xml'))
           line_hits = {}
+          total_line_hits = {}
           covered_assemblies = set()
-          total_rate = None
 
           for cov in coverage_files:
               try:
                   root = ET.parse(cov).getroot()
               except ET.ParseError:
                   continue
-              if total_rate is None:
-                  try:
-                      total_rate = float(root.attrib.get('line-rate', '0')) * 100
-                  except ValueError:
-                      total_rate = 0.0
               for cls in root.findall('.//class'):
                   filename = cls.attrib.get('filename') or ''
                   if not filename:
@@ -353,6 +348,8 @@ jobs:
                           continue
                       for key in normalized:
                           line_hits.setdefault(key, {})[num] = max(line_hits.setdefault(key, {}).get(num, 0), hits)
+                      canonical = str(path).replace('\\', '/').lower()
+                      total_line_hits.setdefault(canonical, {})[num] = max(total_line_hits.setdefault(canonical, {}).get(num, 0), hits)
 
           if not test_projects and not covered_assemblies:
               verdict = 'skipped (no test projects)'
@@ -361,8 +358,9 @@ jobs:
               emit('summary_line', 'Coverage gate: skipped (no test projects)')
               sys.exit(0)
 
-          if total_rate is None:
-              total_rate = 0.0
+          total_valid = sum(len(lines) for lines in total_line_hits.values())
+          total_covered = sum(1 for lines in total_line_hits.values() for hits in lines.values() if hits > 0)
+          total_rate = (total_covered / total_valid * 100) if total_valid else 0.0
 
           patch_coverable = 0
           patch_covered = 0
