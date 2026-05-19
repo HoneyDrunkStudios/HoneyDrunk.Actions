@@ -18,6 +18,14 @@ inputs:
     description: 'Project or solution name'
     required: false
     default: ''
+  coverage-gate-verdict:
+    description: 'Pre-computed coverage-gate verdict line'
+    required: false
+    default: ''
+  outdated-packages-markdown:
+    description: 'Pre-rendered non-blocking outdated-NuGet package lines'
+    required: false
+    default: ''
 outputs:
   markdown:
     description: 'Markdown content of the generated PR summary'
@@ -83,6 +91,9 @@ runs:
     - name: Generate PR summary
       id: generate
       shell: bash
+      env:
+        COVERAGE_GATE_VERDICT: ${{ inputs.coverage-gate-verdict }}
+        OUTDATED_PACKAGES_MARKDOWN: ${{ inputs.outdated-packages-markdown }}
       run: |
         set -euo pipefail
         
@@ -132,6 +143,27 @@ runs:
               echo "### :bar_chart: Code Coverage: ${COVERAGE}%"
               echo ""
             fi
+          fi
+
+          if [ -n "$COVERAGE_GATE_VERDICT" ]; then
+            if [[ "$COVERAGE_GATE_VERDICT" == FAILED* ]]; then
+              GATE_ICON=":x:"
+            elif [[ "$COVERAGE_GATE_VERDICT" == skipped* ]]; then
+              GATE_ICON=":fast_forward:"
+            else
+              GATE_ICON=":white_check_mark:"
+            fi
+            echo "### Coverage Gate"
+            echo "$GATE_ICON Coverage gate: $COVERAGE_GATE_VERDICT"
+            echo ""
+          fi
+
+          if [ -n "$OUTDATED_PACKAGES_MARKDOWN" ]; then
+            echo "### :warning: Outdated Packages (non-blocking)"
+            echo "$OUTDATED_PACKAGES_MARKDOWN"
+            echo ""
+            echo "These do not block this PR. Tracked per-repo in the 📦 Outdated Dependencies issue."
+            echo ""
           fi
           
           echo "### :information_source: Details"

@@ -82,6 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `pr-core.yml`: blocking coverage gate for test-bearing repos with patch coverage threshold, no-regress baseline, absolute coverage floor, visible no-test skip, and default-branch baseline ratchet.
+- `pr/generate-summary`: Coverage Gate and non-blocking outdated package summary blocks.
+- `nightly-deps.yml`: maintains a single `📦 Outdated Dependencies` issue per repo, updated in place and auto-closed when dependencies are current.
+
 - Azure Container Registry login composite action (`azure/acr-login`)
   - Service principal and admin/token authentication modes
   - Input validation with clear error messages
@@ -140,6 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hive project metadata cache (`.github/config/hive-project-metadata.json`) for stable project, field, and option IDs.
 
 ### Changed
+- `docs/consumer-usage.md`: documented coverage-gate inputs, `.github/coverage-baseline.json`, default-branch push wiring, and dependency issue permissions.
+- `job-coverage-analysis.yml`: marked as superseded by the PR summary coverage gate while retaining the reusable entrypoint.
 - `hive-field-mirror.yml`: accept `app-id` and `app-private-key` for GitHub App auth; PAT auth remains available as a fallback.
 - `hive-field-mirror.yml`: load cached Hive project metadata before per-issue mirror runs, falling back to live GraphQL lookup when the cache is absent, invalid, or stale.
 

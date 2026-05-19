@@ -102,6 +102,18 @@ on:
         required: false
         type: boolean
         default: false
+
+      patch-coverage-threshold:
+        description: 'Minimum percent of added/changed executable lines that must be covered'
+        required: false
+        type: number
+        default: 75
+
+      absolute-coverage-floor:
+        description: 'Flat Grid-wide minimum total line coverage percent'
+        required: false
+        type: number
+        default: 70
       
       accessibility-url:
         description: 'URL to check for accessibility (required if enable-accessibility-check is true)'
@@ -238,16 +250,18 @@ jobs:
           scan-mode: 'minimal'
           wcag-level: 'AA'
   
-  # Job 7: PR Summary
+  # Job 7: PR Summary and Coverage Gate
   pr-summary:
-    name: PR Summary
+    name: PR Summary and Coverage Gate
     needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql]
-    if: ${{ always() && inputs.post-pr-summary }}
+    if: ${{ always() }}
     runs-on: ${{ inputs.runs-on }}
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v4
@@ -270,6 +284,218 @@ jobs:
           path: TestResults
         continue-on-error: true
       
+      - name: Coverage gate
+        id: coverage-gate
+        continue-on-error: true
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+          PATCH_COVERAGE_THRESHOLD: ${{ inputs.patch-coverage-threshold }}
+          ABSOLUTE_COVERAGE_FLOOR: ${{ inputs.absolute-coverage-floor }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 <<'PY'
+          import json, os, subprocess, sys, xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          workdir = Path(os.environ.get('WORKING_DIRECTORY') or '.').resolve()
+          threshold = float(os.environ.get('PATCH_COVERAGE_THRESHOLD') or 75)
+          floor = float(os.environ.get('ABSOLUTE_COVERAGE_FLOOR') or 70)
+          base_sha = os.environ.get('BASE_SHA') or ''
+          head_sha = os.environ.get('HEAD_SHA') or 'HEAD'
+          out = Path(os.environ['GITHUB_OUTPUT'])
+
+          def emit(key, value):
+              with out.open('a', encoding='utf-8') as f:
+                  if '\n' in str(value):
+                      f.write(f"{key}<<EOF\n{value}\nEOF\n")
+                  else:
+                      f.write(f"{key}={value}\n")
+
+          def pct(v):
+              return f"{v:.1f}".rstrip('0').rstrip('.')
+
+          test_projects = [p for p in workdir.rglob('*.csproj') if p.name.endswith('.Tests.csproj') or p.name.endswith('.Canary.csproj')]
+          coverage_files = list(Path('TestResults').rglob('coverage.cobertura.xml'))
+          line_hits = {}
+          covered_assemblies = set()
+          total_rate = None
+
+          for cov in coverage_files:
+              try:
+                  root = ET.parse(cov).getroot()
+              except ET.ParseError:
+                  continue
+              if total_rate is None:
+                  try:
+                      total_rate = float(root.attrib.get('line-rate', '0')) * 100
+                  except ValueError:
+                      total_rate = 0.0
+              for cls in root.findall('.//class'):
+                  filename = cls.attrib.get('filename') or ''
+                  if not filename:
+                      continue
+                  if '.Tests' not in filename and '.Canary' not in filename:
+                      covered_assemblies.add(filename)
+                  path = Path(filename)
+                  candidates = [path]
+                  if not path.is_absolute():
+                      candidates.append((workdir / path).resolve())
+                      candidates.append(Path(path.as_posix().lstrip('/')).resolve())
+                  normalized = {str(c).replace('\\', '/').lower() for c in candidates}
+                  for line in cls.findall('.//line'):
+                      try:
+                          num = int(line.attrib.get('number', '0'))
+                          hits = int(line.attrib.get('hits', '0'))
+                      except ValueError:
+                          continue
+                      for key in normalized:
+                          line_hits.setdefault(key, {})[num] = max(line_hits.setdefault(key, {}).get(num, 0), hits)
+
+          if not test_projects and not covered_assemblies:
+              verdict = 'skipped (no test projects)'
+              emit('verdict', verdict)
+              emit('gate_failed', 'false')
+              emit('summary_line', 'Coverage gate: skipped (no test projects)')
+              sys.exit(0)
+
+          if total_rate is None:
+              total_rate = 0.0
+
+          patch_coverable = 0
+          patch_covered = 0
+          diff_error = None
+          if base_sha:
+              subprocess.run(['git', 'fetch', '--no-tags', 'origin', base_sha, head_sha], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              diff = subprocess.run(['git', 'diff', '--unified=0', f'{base_sha}...{head_sha}'], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if diff.returncode != 0:
+                  diff_error = (diff.stderr or 'git diff failed').strip()
+              current_file = None
+              diff_lines = [] if diff_error is not None else diff.stdout.splitlines()
+              for raw in diff_lines:
+                  if raw.startswith('+++ b/'):
+                      current_file = raw[6:]
+                  elif raw.startswith('@@') and current_file:
+                      import re
+                      m = re.search(r'\+(\d+)(?:,(\d+))?', raw)
+                      if not m:
+                          continue
+                      start = int(m.group(1)); count = int(m.group(2) or '1')
+                      keys = []
+                      fp = Path(current_file)
+                      keys.append(str(fp).replace('\\','/').lower())
+                      keys.append(str((Path.cwd()/fp).resolve()).replace('\\','/').lower())
+                      keys.append(str((workdir/fp).resolve()).replace('\\','/').lower())
+                      hits = {}
+                      for k in keys:
+                          hits.update(line_hits.get(k, {}))
+                      for n in range(start, start + count):
+                          if n in hits:
+                              patch_coverable += 1
+                              if hits[n] > 0:
+                                  patch_covered += 1
+
+          if patch_coverable == 0:
+              patch_ok = True
+              patch_text = 'Patch coverage: n/a (no executable lines changed)'
+              patch_pct = None
+          else:
+              patch_pct = patch_covered / patch_coverable * 100
+              patch_ok = patch_pct >= threshold
+              patch_text = f'Patch coverage: {pct(patch_pct)}% ({patch_covered}/{patch_coverable} changed executable lines)'
+
+          baseline_path = workdir / '.github' / 'coverage-baseline.json'
+          baseline_text = 'Baseline: none (bootstrap — will be seeded on merge)'
+          baseline_ok = True
+          baseline_value = None
+          baseline_error = None
+          if baseline_path.exists():
+              try:
+                  baseline_value = float(json.loads(baseline_path.read_text(encoding='utf-8')).get('totalLineCoverage'))
+                  baseline_text = f'Baseline: {pct(baseline_value)}%'
+                  baseline_ok = total_rate >= baseline_value
+              except Exception as exc:
+                  baseline_error = str(exc)
+                  baseline_text = 'Baseline: unreadable/invalid'
+                  baseline_ok = False
+
+          floor_ok = total_rate >= floor
+          failures = []
+          if diff_error is not None:
+              failures.append(f'patch diff unavailable (D1): {diff_error}')
+          elif not patch_ok:
+              failures.append(f'patch {pct(patch_pct)}% < {pct(threshold)}% (D1)')
+          if baseline_error is not None:
+              failures.append(f'baseline file is invalid (D2): {baseline_error}')
+          elif not baseline_ok:
+              failures.append(f'total {pct(total_rate)}% < baseline {pct(baseline_value)}% (D2)')
+          if not floor_ok:
+              failures.append(f'total {pct(total_rate)}% < {pct(floor)}% floor (D3)')
+
+          if failures:
+              verdict = 'FAILED — ' + '; '.join(failures)
+              failed = 'true'
+          else:
+              baseline_part = f'baseline {pct(baseline_value)}%' if baseline_value is not None else 'baseline bootstrap'
+              patch_part = 'patch n/a' if patch_pct is None else f'patch {pct(patch_pct)}%'
+              verdict = f'passed — {patch_part}, total {pct(total_rate)}% ({baseline_part}, floor {pct(floor)}%)'
+              failed = 'false'
+
+          detail = f'{patch_text}; Total coverage: {pct(total_rate)}%; {baseline_text}; Floor: {pct(floor)}%'
+          emit('verdict', verdict)
+          emit('gate_failed', failed)
+          emit('summary_line', 'Coverage gate: ' + verdict)
+          emit('detail', detail)
+          if failed == 'true':
+              print('::error::Coverage gate failed: ' + verdict)
+              sys.exit(1)
+          print('Coverage gate: ' + verdict)
+          PY
+
+      - name: Setup .NET SDK for dependency report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Collect outdated NuGet packages for summary
+        id: outdated-report
+        continue-on-error: true
+        uses: ./.github/actions-repo/.github/actions/deps/report-dotnet
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+          exclude-prerelease: 'true'
+          output-directory: ./pr-dependency-report
+
+      - name: Render outdated NuGet summary
+        id: outdated-summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          python3 <<'PY'
+          import json, os
+          from pathlib import Path
+          report = Path(os.environ.get('WORKING_DIRECTORY') or '.') / 'pr-dependency-report' / 'dotnet-outdated.json'
+          lines = []
+          if report.exists():
+              try:
+                  data = json.loads(report.read_text(encoding='utf-8'))
+                  for pkg in sorted(data.get('outdated_packages', []), key=lambda p: p.get('name','').lower()):
+                      lines.append(f"- `{pkg.get('name')}`: {pkg.get('current')} → {pkg.get('latest')}")
+              except Exception as exc:
+                  print(f"::warning::Could not render outdated package summary: {exc}")
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write('markdown<<EOF\n')
+              f.write('\n'.join(lines))
+              f.write('\nEOF\n')
+          PY
+
       - name: Generate PR summary
         id: gen
         uses: ./.github/actions-repo/.github/actions/pr/generate-summary
@@ -277,6 +503,8 @@ jobs:
           test-results-directory: TestResults
           build-status: ${{ needs.build-and-test.result == 'success' && 'success' || 'failure' }}
           include-coverage: 'true'
+          coverage-gate-verdict: ${{ steps.coverage-gate.outputs.verdict }}
+          outdated-packages-markdown: ${{ steps.outdated-summary.outputs.markdown }}
       
       - name: Determine overall status
         id: status
@@ -302,8 +530,10 @@ jobs:
           DEPS_WARNING_MSG="${{ needs.dependency-scan.outputs.warning-messages }}"
           CODEQL_WARNING_MSG="${{ needs.codeql.outputs.warning-messages }}"
 
+          COVERAGE_GATE_FAILED="${{ steps.coverage-gate.outputs.gate_failed || 'false' }}"
+
           # Determine status - don't fail on skipped jobs
-          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" || "$DEPS_RESULT" == "failure" || "$CODEQL_RESULT" == "failure" ]]; then
+          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" || "$DEPS_RESULT" == "failure" || "$CODEQL_RESULT" == "failure" || "$COVERAGE_GATE_FAILED" == "true" ]]; then
             echo "icon=:x:" >> $GITHUB_OUTPUT
             echo "status=Failed" >> $GITHUB_OUTPUT
           elif [[ "$BUILD_WARNINGS" == "true" || "$ANALYSIS_WARNINGS" == "true" || "$SECRETS_WARNINGS" == "true" || "$DEPS_WARNINGS" == "true" || "$CODEQL_WARNINGS" == "true" ]]; then
@@ -363,6 +593,7 @@ jobs:
           CODEQL_WARNING: ${{ needs.codeql.outputs.warning-count }}
           CODEQL_NOTE: ${{ needs.codeql.outputs.note-count }}
           WARNINGS_BLOCK: ${{ steps.status.outputs.warnings }}
+          COVERAGE_GATE_DETAIL: ${{ steps.coverage-gate.outputs.detail }}
           BUILD_CONFIGURATION: ${{ inputs.configuration }}
           RUNS_ON: ${{ inputs.runs-on }}
           COMMIT_SHA: ${{ github.sha }}
@@ -413,6 +644,14 @@ jobs:
             fi
           fi
 
+          if [ -n "$COVERAGE_GATE_DETAIL" ]; then
+            {
+              echo ""
+              echo "### Coverage Gate Details"
+              echo "$COVERAGE_GATE_DETAIL"
+            } >> message.md
+          fi
+
           if [ -n "$WARNINGS_BLOCK" ]; then
             {
               echo ""
@@ -444,8 +683,116 @@ jobs:
           echo "${{ steps.message.outputs.text }}" >> $GITHUB_STEP_SUMMARY
       
       - name: Post PR comment
+        if: ${{ inputs.post-pr-summary }}
         continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/pr/post-comment
         with:
           github-token: ${{ secrets.github-token || github.token }}
           message: ${{ steps.message.outputs.text }}
+
+      - name: Fail when coverage gate fails
+        if: ${{ steps.coverage-gate.outputs.gate_failed == 'true' || steps.coverage-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo "::error::Coverage gate failed: ${{ steps.coverage-gate.outputs.verdict || 'gate step failed before producing a verdict' }}"
+          exit 1
+
+  coverage-baseline-ratchet:
+    name: Coverage Baseline Ratchet
+    needs: [build-and-test]
+    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.github-token || github.token }}
+          fetch-depth: 0
+
+      - name: Download coverage reports artifact (if exists)
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports-${{ inputs.runs-on }}
+          path: TestResults
+        continue-on-error: true
+
+      - name: Ratchet committed coverage baseline
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json, os, sys, xml.etree.ElementTree as ET
+          from datetime import datetime, timezone
+          from pathlib import Path
+          workdir = Path(os.environ.get('WORKING_DIRECTORY') or '.').resolve()
+          test_projects = [p for p in workdir.rglob('*.csproj') if p.name.endswith('.Tests.csproj') or p.name.endswith('.Canary.csproj')]
+          cov_files = list(Path('TestResults').rglob('coverage.cobertura.xml'))
+          if not test_projects or not cov_files:
+              print('No test projects or coverage report found; skipping baseline ratchet.')
+              sys.exit(0)
+          rate = None
+          for cov in cov_files:
+              try:
+                  root = ET.parse(cov).getroot()
+                  rate = float(root.attrib.get('line-rate', '0')) * 100
+                  break
+              except Exception:
+                  continue
+          if rate is None:
+              print('No readable coverage report found; skipping baseline ratchet.')
+              sys.exit(0)
+          target = workdir / '.github' / 'coverage-baseline.json'
+          target.parent.mkdir(parents=True, exist_ok=True)
+          new_total = round(rate, 2)
+          if target.exists():
+              try:
+                  current_total = round(float(json.loads(target.read_text(encoding='utf-8')).get('totalLineCoverage')), 2)
+                  if current_total == new_total:
+                      print(f'Coverage baseline unchanged at {new_total:.2f}%; skipping commit.')
+                      sys.exit(0)
+              except Exception:
+                  print('Existing coverage baseline is unreadable; replacing it with the current measurement.')
+          payload = {
+              'totalLineCoverage': new_total,
+              'commit': os.environ.get('GITHUB_SHA', ''),
+              'measuredAtUtc': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+          }
+          target.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          print(f'Wrote {target} at {rate:.2f}%')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${WORKING_DIRECTORY%/}/.github/coverage-baseline.json"
+          if git diff --cached --quiet; then
+            echo "Coverage baseline unchanged; nothing to commit."
+            exit 0
+          fi
+
+          PCT=$(python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ.get('WORKING_DIRECTORY') or '.') / '.github' / 'coverage-baseline.json'
+          print(json.loads(p.read_text()).get('totalLineCoverage'))
+          PY
+          )
+          git commit -m "chore: ratchet coverage baseline to ${PCT}% [skip ci]"
+
+          for attempt in 1 2 3; do
+            git fetch origin "$DEFAULT_BRANCH"
+            if git rebase "origin/$DEFAULT_BRANCH" && git push origin "HEAD:$DEFAULT_BRANCH"; then
+              echo "Coverage baseline pushed."
+              exit 0
+            fi
+            echo "::warning::Coverage baseline push race on attempt $attempt; retrying."
+            git rebase --abort || true
+            sleep $((attempt * 2))
+          done
+          echo "::warning::Coverage baseline push race persisted after 3 attempts; next default-branch run will self-heal."
+          exit 0
