@@ -70,6 +70,8 @@ runs:
       id: coverage
       if: ${{ inputs.include-coverage == 'true' }}
       shell: bash
+      env:
+        TEST_RESULTS_DIRECTORY: ${{ inputs.test-results-directory }}
       run: |
         set -euo pipefail
         
@@ -77,9 +79,33 @@ runs:
         COVERAGE="N/A"
         if [ -d "${{ inputs.test-results-directory }}" ]; then
           COVERAGE=$(python3 <<'PY'
-        import xml.etree.ElementTree as ET
+        import os, xml.etree.ElementTree as ET
         from pathlib import Path
-        root_dir = Path('${{ inputs.test-results-directory }}')
+        root_dir = Path(os.environ.get('TEST_RESULTS_DIRECTORY') or 'TestResults')
+        workdir = Path.cwd().resolve()
+
+        def is_test_or_canary(filename):
+            normalized = filename.replace('\\', '/')
+            return '.Tests' in normalized or '.Canary' in normalized
+
+        def canonical_source_key(filename):
+            path = Path(filename)
+            candidates = [path]
+            if not path.is_absolute():
+                candidates.append((workdir / path).resolve())
+                candidates.append(Path(path.as_posix().lstrip('/')).resolve())
+            for candidate in candidates:
+                try:
+                    resolved = candidate.resolve()
+                except OSError:
+                    continue
+                if resolved.exists():
+                    try:
+                        return str(resolved.relative_to(workdir)).replace('\\', '/').lower()
+                    except ValueError:
+                        return str(resolved).replace('\\', '/').lower()
+            return path.as_posix().lstrip('/').lower()
+
         line_hits = {}
         for cov in root_dir.rglob('coverage.cobertura.xml'):
             try:
@@ -88,9 +114,9 @@ runs:
                 continue
             for cls in root.findall('.//class'):
                 filename = cls.attrib.get('filename') or ''
-                if not filename or '.Tests' in filename or '.Canary' in filename:
+                if not filename or is_test_or_canary(filename):
                     continue
-                key = filename.replace('\\', '/').lower()
+                key = canonical_source_key(filename)
                 for line in cls.findall('.//line'):
                     try:
                         num = int(line.attrib.get('number', '0'))
