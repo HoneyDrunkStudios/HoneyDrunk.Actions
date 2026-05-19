@@ -4,6 +4,11 @@
 # Purpose:
 #   Analyze code coverage reports using ReportGenerator and enforce thresholds.
 #
+# Deprecated:
+#   Superseded by the pr-core.yml PR summary coverage gate. Retained only for
+#   external/manual workflow_call consumers until a follow-up removes the
+#   entrypoint.
+#
 # Single Responsibility:
 #   Coverage analysis only — expects Cobertura XML reports from test job
 # ==============================================================================

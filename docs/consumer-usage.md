@@ -31,10 +31,43 @@ name: PR Validation
 on:
   pull_request:
     branches: [main, develop]
+  push:
+    branches: [main, develop]
 
 jobs:
   pr-validation:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
+```
+
+### Coverage Gate and Baseline Ratchet
+
+`pr-core.yml` enforces coverage for repos that contain `.Tests` or `.Canary` projects. Repos without test projects skip the gate visibly with `Coverage gate: skipped (no test projects)`.
+
+The gate evaluates:
+- patch coverage for added/changed executable lines, default `patch-coverage-threshold: 75`
+- no-regress against `.github/coverage-baseline.json`
+- absolute total line coverage floor, default `absolute-coverage-floor: 70`
+
+The baseline file is maintained in each consumer repo as:
+
+```json
+{
+  "totalLineCoverage": 76.42,
+  "commit": "<sha>",
+  "measuredAtUtc": "<utc timestamp>"
+}
+```
+
+Treat `.github/coverage-baseline.json` as bot-maintained. A deliberate coverage regression should edit that file in the same PR so the change is reviewable.
+
+To let the baseline ratchet seed/update after merges, call `pr-core.yml` on `push` to the default branch as well as `pull_request`, and grant the reusable job `contents: write` so it can commit the bot-maintained baseline. A pull-request-only caller still enforces no-regress when `.github/coverage-baseline.json` already exists, but the baseline will not auto-ratchet after merges; if the file does not exist yet, PRs remain in bootstrap mode until it is seeded.
+
+Optional inputs:
+
+```yaml
+with:
+  patch-coverage-threshold: 75
+  absolute-coverage-floor: 70
 ```
 
 ### Full Example with Options
@@ -54,9 +87,10 @@ jobs:
     # security-events: write is scoped here because pr-core's CodeQL step
     # uploads SARIF to GitHub Code Scanning. checks: write and
     # pull-requests: write are scoped here too so additional jobs don't
-    # inherit them implicitly.
+    # inherit them implicitly. contents: write is needed only for the
+    # default-branch coverage baseline ratchet.
     permissions:
-      contents: read
+      contents: write
       checks: write
       pull-requests: write
       security-events: write
@@ -74,6 +108,8 @@ jobs:
       codeql-queries: 'security-and-quality'
       codeql-fail-on-severity: 'note'   # any finding blocks; set 'warning' or 'error' to loosen
       enable-accessibility-check: false
+      patch-coverage-threshold: 75
+      absolute-coverage-floor: 70
       post-pr-summary: true
       actions-ref: 'main'
     secrets:
@@ -786,7 +822,10 @@ jobs:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 ```
+
+The report-only dependency workflow also maintains one issue titled `📦 Outdated Dependencies` in the consumer repo. The body is replaced on every run with the current outdated package set, reopened when packages fall behind again, and closed automatically when everything is current. Do not hand-create or hand-edit that issue; grant `issues: write` so the workflow can maintain it.
 
 ### With Auto-PR Creation
 
@@ -816,6 +855,7 @@ jobs:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 ```
 
 ---
