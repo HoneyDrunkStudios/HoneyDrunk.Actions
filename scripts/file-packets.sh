@@ -469,7 +469,10 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   for l in "${all_labels[@]}"; do
     [[ -z "$l" ]] && continue
     if (( ${#l} > GITHUB_LABEL_MAX )); then
-      echo "::warning::Label '${l}' (${#l} chars) exceeds GitHub's ${GITHUB_LABEL_MAX}-char limit; truncating. Shorten the initiative slug for ${rel}."
+      # Plain echo, not ::warning:: — interpolating packet-derived values
+      # into a workflow command is an injection vector, same reason the
+      # skip-log lines above avoid workflow commands.
+      echo "warning: label '${l}' (${#l} chars) exceeds GitHub's ${GITHUB_LABEL_MAX}-char limit; truncating. Shorten the initiative slug for ${rel}."
       l="${l:0:GITHUB_LABEL_MAX}"
     fi
     ensure_label "$target_repo" "$l"
