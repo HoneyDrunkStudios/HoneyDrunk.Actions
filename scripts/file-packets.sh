@@ -348,6 +348,12 @@ repo_exists() {
 declare -A LABELS_LISTED=()
 declare -A LABELS_KNOWN=()
 
+# GitHub caps label names at 50 characters; a longer name fails label
+# creation with HTTP 422. Labels are clamped to this length before use
+# (see the packet loop) so an over-long initiative slug degrades to a
+# truncated label instead of aborting the whole run.
+GITHUB_LABEL_MAX=50
+
 ensure_label() {
   local repo="$1" name="$2"
   if [[ -z "${LABELS_LISTED[$repo]:-}" ]]; then
@@ -462,6 +468,13 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   label_args=()
   for l in "${all_labels[@]}"; do
     [[ -z "$l" ]] && continue
+    if (( ${#l} > GITHUB_LABEL_MAX )); then
+      # Plain echo, not ::warning:: — interpolating packet-derived values
+      # into a workflow command is an injection vector, same reason the
+      # skip-log lines above avoid workflow commands.
+      echo "warning: label '${l}' (${#l} chars) exceeds GitHub's ${GITHUB_LABEL_MAX}-char limit; truncating. Shorten the initiative slug for ${rel}."
+      l="${l:0:GITHUB_LABEL_MAX}"
+    fi
     ensure_label "$target_repo" "$l"
     label_args+=("--label" "$l")
   done
