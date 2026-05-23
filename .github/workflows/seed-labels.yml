@@ -1,0 +1,77 @@
+# ==============================================================================
+# Seed Labels
+# ==============================================================================
+# Purpose:
+#   Ensures every label declared in .github/config/labels.json exists on the
+#   calling repo with the configured color and description. Idempotent.
+#
+# Triggers:
+#   workflow_call from consumer repos, or workflow_dispatch in this repo.
+# ==============================================================================
+
+name: Seed Labels
+
+on:
+  workflow_call:
+    inputs:
+      labels-source-ref:
+        description: 'Git ref of HoneyDrunk.Actions to read labels.json from'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      github-token:
+        description: 'Token with issues:write on the target repo'
+        required: false
+  workflow_dispatch:
+    inputs:
+      labels-source-ref:
+        description: 'Git ref of HoneyDrunk.Actions to read labels.json from'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout HoneyDrunk.Actions labels source
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.labels-source-ref || 'main' }}
+          path: actions-repo
+          token: ${{ secrets.github-token || github.token }}
+
+      - name: Apply labels
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LABELS_FILE=actions-repo/.github/config/labels.json
+          python3 - <<'PY' > labels.tsv
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('actions-repo/.github/config/labels.json').read_text(encoding='utf-8'))
+          for label in data['labels']:
+              print(f"{label['name']}\t{label['color']}\t{label['description']}")
+          PY
+
+          COUNT=$(wc -l < labels.tsv | xargs)
+          echo "Applying $COUNT label(s) from $LABELS_FILE to $GITHUB_REPOSITORY"
+
+          while IFS=$'\t' read -r NAME COLOR DESCRIPTION; do
+            if gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION"; then
+              echo "Updated existing label: $NAME"
+            else
+              echo "Creating label: $NAME"
+              gh label create "$NAME" --color "$COLOR" --description "$DESCRIPTION"
+            fi
+          done < labels.tsv

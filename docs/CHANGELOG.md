@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `pr-core.yml`: ADR-0044 `authorship-check` and warnings-only `pr-size-check` jobs. Authorship now requires a parseable `Authorship:` PR-body line; non-`human` PRs get visible size discipline without blocking Phase 2 merges.
+- `.github/config/labels.json`, `seed-labels.yml`, and `seed-labels-fanout.yml`: labels-as-code and idempotent fan-out for `large-pr`, `audit-sample`, `out-of-band`, and `skip-review`.
+- `.github/pull_request_template.md`: local PR-body placeholders for ADR-0044 `Authorship:` and `Size justification:` fields.
+- `docs/consumer-usage.md`: documented ADR-0044 authorship declarations, size-discipline thresholds, missing-config behavior, PR template guidance, and label seeding.
 - `job-review-request.yml`: ADR-0044 advisory trigger rail for the OpenClaw/Codex Grid Review Runner. It applies draft/`skip-review`/`.honeydrunk-review.yaml enabled` gates, emits the versioned review-request payload with `owner/repo#pr@headSha` idempotency, signs webhook delivery with timestamped HMAC, and preserves artifact/comment fallback for OpenClaw replay without invoking any model API from GitHub Actions.
 - `docs/consumer-usage.md`: documented the Grid Review Request workflow, caller permissions/secrets, `.honeydrunk-review.yaml` opt-in config, skip behavior, and advisory fallback posture.
 - `pr-core.yml`: blocking coverage gate for test-bearing repos with patch coverage threshold, no-regress baseline, absolute coverage floor, visible no-test skip, and default-branch baseline ratchet.
