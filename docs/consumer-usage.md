@@ -6,6 +6,7 @@ This document provides sample workflows for consuming repos to adopt the HoneyDr
 
 - [PR Core Workflow](#pr-core-workflow)
 - [PR SDK Workflow](#pr-sdk-workflow)
+- [Grid Review Request Workflow](#grid-review-request-workflow)
 - [Release Workflow](#release-workflow)
 - [Deploy Container to Azure App Service](#deploy-container-to-azure-app-service)
 - [Deploy Azure Container App](#deploy-azure-container-app)
@@ -158,6 +159,65 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+---
+
+## Grid Review Request Workflow
+
+**Purpose:** Advisory ADR-0044 trigger rail for the OpenClaw/Codex Grid Review Runner. This workflow does **not** run Codex, Anthropic, OpenAI, or any model API in GitHub Actions. It emits a signed review-request payload for OpenClaw and preserves the same payload as a durable fallback artifact/comment when OpenClaw is unavailable.
+
+**When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Architecture` for the Phase 1 pilot.
+
+### Minimal Caller
+
+```yaml
+name: Grid Review Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  grid-review-request:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-review-request.yml@main
+    with:
+      openclaw-webhook-url: ${{ vars.OPENCLAW_GRID_REVIEW_WEBHOOK_URL }}
+    secrets:
+      openclaw-webhook-secret: ${{ secrets.OPENCLAW_GRID_REVIEW_WEBHOOK_SECRET }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### Consumer Config
+
+The repo must carry `.honeydrunk-review.yaml` and explicitly opt in:
+
+```yaml
+enabled: true
+runner: openclaw-codex
+review_risk_class: normal
+```
+
+Skip behavior:
+
+- draft PRs are skipped
+- PRs with the `skip-review` label are skipped
+- missing `.honeydrunk-review.yaml` is skipped
+- `enabled: false` is skipped
+
+### Payload and Fallback
+
+The workflow emits the ADR-0044 `grid-review-request` payload with idempotency key:
+
+```text
+owner/repo#pr@headSha
+```
+
+When webhook delivery is unavailable or not configured, the workflow uploads `review-request.json` as an artifact and can post a machine-readable PR comment for OpenClaw cron/poll replay. The workflow is advisory only and must not be made a required blocking check until the Grid explicitly changes ADR-0044's posture.
 
 ---
 

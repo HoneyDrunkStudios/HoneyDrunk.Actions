@@ -1,0 +1,376 @@
+# ==============================================================================
+# Grid Review Request Workflow
+# ==============================================================================
+# Purpose:
+#   Advisory trigger rail for ADR-0044 Grid-aware OpenClaw/Codex PR review.
+#
+# Responsibilities:
+#   - Decide whether a pull request should request Grid review
+#   - Emit the versioned review-request payload
+#   - Sign and POST the payload to the OpenClaw webhook when configured
+#   - Preserve the same payload as a durable fallback artifact/comment
+#
+# Non-goals:
+#   - Running Codex or any model API directly
+#   - Performing the Grid review inside GitHub Actions
+#   - Blocking branch protection when OpenClaw is unavailable
+# ===============================================================================
+
+name: Grid Review Request
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      review-config-path:
+        description: 'Path to the repo review config file'
+        required: false
+        type: string
+        default: '.honeydrunk-review.yaml'
+      openclaw-webhook-url:
+        description: 'OpenClaw Grid Review Runner webhook URL. Empty means artifact/comment fallback only.'
+        required: false
+        type: string
+        default: ''
+      upload-fallback-artifact:
+        description: 'Upload the review-request payload as a durable fallback artifact'
+        required: false
+        type: boolean
+        default: true
+      post-fallback-comment:
+        description: 'Post a machine-readable fallback comment when webhook delivery is unavailable'
+        required: false
+        type: boolean
+        default: true
+      artifact-name:
+        description: 'Fallback artifact name'
+        required: false
+        type: string
+        default: 'grid-review-request'
+    secrets:
+      openclaw-webhook-secret:
+        description: 'Shared secret used to sign the OpenClaw webhook payload'
+        required: false
+      github-token:
+        description: 'GitHub token for PR metadata and fallback comments'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  request-grid-review:
+    name: Request Grid Review
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Validate pull_request event
+        id: event
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=not-pull-request-event" >> "$GITHUB_OUTPUT"
+            echo "::notice::Grid review request skipped: this workflow must be called from a pull_request event."
+            exit 0
+          fi
+
+          if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=draft-pr" >> "$GITHUB_OUTPUT"
+            echo "::notice::Grid review request skipped: draft PR."
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        if: ${{ steps.event.outputs.skip != 'true' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Evaluate skip rules and config
+        if: ${{ steps.event.outputs.skip != 'true' }}
+        id: gate
+        shell: bash
+        env:
+          EVENT_PATH: ${{ github.event_path }}
+          REVIEW_CONFIG_PATH: ${{ inputs.review-config-path }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          event = json.loads(Path(os.environ['EVENT_PATH']).read_text(encoding='utf-8'))
+          labels = {label.get('name', '').lower() for label in event['pull_request'].get('labels', [])}
+          config_path = Path(os.environ['REVIEW_CONFIG_PATH'])
+
+          skip = False
+          reason = ''
+
+          if 'skip-review' in labels:
+              skip = True
+              reason = 'skip-review-label'
+          elif not config_path.exists():
+              skip = True
+              reason = 'missing-review-config'
+          else:
+              config = config_path.read_text(encoding='utf-8')
+              if not re.search(r'(?im)^\s*enabled\s*:\s*true\s*(?:#.*)?$', config):
+                  skip = True
+                  reason = 'review-config-disabled'
+              else:
+                  reason = 'enabled'
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f"skip={str(skip).lower()}\n")
+              output.write(f"reason={reason}\n")
+
+          if skip:
+              print(f"::notice::Grid review request skipped: {reason}.")
+          else:
+              print("::notice::Grid review request enabled.")
+          PY
+
+      - name: Build review request payload
+        if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' }}
+        id: payload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+          EVENT_PATH: ${{ github.event_path }}
+          REVIEW_CONFIG_PATH: ${{ inputs.review-config-path }}
+        run: |
+          set -euo pipefail
+
+          pr_number='${{ github.event.pull_request.number }}'
+          repo='${{ github.repository }}'
+
+          gh api "repos/${repo}/pulls/${pr_number}/files?per_page=100" --paginate --slurp > changed-files.json
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          event = json.loads(Path(os.environ['EVENT_PATH']).read_text(encoding='utf-8'))
+          pages = json.loads(Path('changed-files.json').read_text(encoding='utf-8'))
+          files = [item for page in pages for item in page]
+          pr = event['pull_request']
+          repo = event['repository']
+          body = pr.get('body') or ''
+          config_path = Path(os.environ['REVIEW_CONFIG_PATH'])
+          config_text = config_path.read_text(encoding='utf-8') if config_path.exists() else ''
+
+          authorship_match = re.search(r'(?im)^\s*Authorship\s*:\s*([^\r\n]+)', body)
+          authorship_class = authorship_match.group(1).strip() if authorship_match else 'unknown'
+          authorship_source = 'pr-body' if authorship_match else 'missing'
+
+          packet_url_match = re.search(r'https://github\.com/HoneyDrunkStudios/[^\s)]+/issues/\d+', body)
+          packet_path_match = re.search(r'generated/issue-packets/[^\s)`]+\.md', body)
+          adr_matches = sorted(set(re.findall(r'ADR-\d{4}', body + '\n' + config_text)))
+
+          owner, name = repo['full_name'].split('/', 1)
+          head_sha = pr['head']['sha']
+          idempotency_key = f"{repo['full_name']}#{pr['number']}@{head_sha}"
+
+          file_names = [item['filename'] for item in files]
+          additions = sum(int(item.get('additions') or 0) for item in files)
+          deletions = sum(int(item.get('deletions') or 0) for item in files)
+
+          runner_match = re.search(r'(?im)^\s*runner\s*:\s*([^\r\n#]+)', config_text)
+          risk_match = re.search(r'(?im)^\s*review_risk_class\s*:\s*([^\r\n#]+)', config_text)
+
+          payload = {
+              'schemaVersion': 1,
+              'event': 'grid-review-request',
+              'idempotencyKey': idempotency_key,
+              'repo': {
+                  'owner': owner,
+                  'name': name,
+                  'fullName': repo['full_name'],
+                  'cloneUrl': repo['clone_url'],
+              },
+              'pullRequest': {
+                  'number': pr['number'],
+                  'headSha': head_sha,
+                  'baseRef': pr['base']['ref'],
+                  'headRef': pr['head']['ref'],
+                  'isDraft': bool(pr.get('draft')),
+                  'author': pr['user']['login'],
+                  'url': pr['html_url'],
+              },
+              'authorship': {
+                  'class': authorship_class,
+                  'source': authorship_source,
+              },
+              'changeSummary': {
+                  'changedFiles': len(files),
+                  'additions': additions,
+                  'deletions': deletions,
+                  'files': file_names,
+              },
+              'context': {
+                  'packetUrl': packet_url_match.group(0) if packet_url_match else None,
+                  'packetPath': packet_path_match.group(0) if packet_path_match else None,
+                  'adrs': adr_matches,
+                  'node': None,
+              },
+              'config': {
+                  'enabled': True,
+                  'runner': runner_match.group(1).strip() if runner_match else 'openclaw-codex',
+                  'riskClass': risk_match.group(1).strip() if risk_match else 'normal',
+              },
+              'callback': {
+                  'mode': 'github-pr-comment',
+                  'prCommentsUrl': pr['comments_url'],
+                  'checksUrl': f"{repo['url']}/check-runs",
+              },
+          }
+
+          Path('review-request.json').write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f"idempotency-key={idempotency_key}\n")
+              output.write(f"head-sha={head_sha}\n")
+          PY
+
+      - name: Deliver signed webhook request
+        if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' && inputs.openclaw-webhook-url != '' }}
+        id: webhook
+        shell: bash
+        env:
+          OPENCLAW_WEBHOOK_URL: ${{ inputs.openclaw-webhook-url }}
+          OPENCLAW_WEBHOOK_SECRET: ${{ secrets.openclaw-webhook-secret }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$OPENCLAW_WEBHOOK_SECRET" ]; then
+            echo "delivered=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OpenClaw webhook URL is configured, but openclaw-webhook-secret is empty; fallback artifact/comment will be used."
+            exit 0
+          fi
+
+          timestamp="$(date +%s)"
+          export timestamp
+          signature="$(python - <<'PY'
+          import hashlib
+          import hmac
+          import os
+          from pathlib import Path
+
+          timestamp = os.environ['timestamp']
+          secret = os.environ['OPENCLAW_WEBHOOK_SECRET'].encode('utf-8')
+          body = Path('review-request.json').read_bytes()
+          signed = timestamp.encode('utf-8') + b'.' + body
+          print('sha256=' + hmac.new(secret, signed, hashlib.sha256).hexdigest())
+          PY
+          )"
+
+          delivery_id="${{ github.run_id }}-${{ github.run_attempt }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}"
+
+          http_code="$(curl --silent --show-error --output webhook-response.txt --write-out '%{http_code}' \
+            --request POST "$OPENCLAW_WEBHOOK_URL" \
+            --header 'Content-Type: application/json' \
+            --header 'X-HoneyDrunk-Event: grid-review-request' \
+            --header "X-HoneyDrunk-Delivery: ${delivery_id}" \
+            --header "X-HoneyDrunk-Timestamp: ${timestamp}" \
+            --header "X-HoneyDrunk-Signature-256: ${signature}" \
+            --data-binary @review-request.json || true)"
+
+          echo "http-code=${http_code}" >> "$GITHUB_OUTPUT"
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "delivered=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Grid review request delivered to OpenClaw (${http_code})."
+          else
+            echo "delivered=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OpenClaw webhook delivery failed or was unavailable (${http_code}); fallback artifact/comment will be used."
+          fi
+
+      - name: Record webhook not configured
+        if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' && inputs.openclaw-webhook-url == '' }}
+        id: webhook-not-configured
+        shell: bash
+        run: |
+          echo "delivered=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::OpenClaw webhook URL/secret not configured; writing durable fallback request only."
+
+      - name: Upload fallback review request artifact
+        if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' && inputs.upload-fallback-artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: review-request.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Post machine-readable fallback comment
+        if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' && inputs.post-fallback-comment && steps.webhook.outputs.delivered != 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        run: |
+          set -euo pipefail
+
+          cat > grid-review-comment.md <<EOF
+          <!-- honeydrunk-grid-review-request:v1
+          status: pending-openclaw-replay
+          idempotencyKey: ${{ steps.payload.outputs.idempotency-key }}
+          headSha: ${{ steps.payload.outputs.head-sha }}
+          artifact: ${{ inputs.artifact-name }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          -->
+          🔎 Grid review request queued for OpenClaw replay.
+
+          OpenClaw webhook delivery is unavailable or not configured, so this PR remains mergeable and the signed-review runner can replay the uploaded \`review-request.json\` artifact later.
+          EOF
+
+          gh issue comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file grid-review-comment.md
+
+      - name: Summarize skipped request
+        if: ${{ steps.event.outputs.skip == 'true' || steps.gate.outputs.skip == 'true' }}
+        shell: bash
+        run: |
+          reason="${{ steps.event.outputs.reason }}"
+          if [ -z "$reason" ]; then
+            reason="${{ steps.gate.outputs.reason }}"
+          fi
+
+          {
+            echo "## Grid Review Request"
+            echo
+            echo "- Status: skipped"
+            echo "- Reason: ${reason}"
+            echo "- Advisory only: true"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize queued request
+        if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' }}
+        shell: bash
+        run: |
+          delivered="${{ steps.webhook.outputs.delivered }}"
+          if [ -z "$delivered" ]; then
+            delivered="false"
+          fi
+
+          {
+            echo "## Grid Review Request"
+            echo
+            echo "- Status: queued"
+            echo "- Gate result: ${{ steps.gate.outputs.reason }}"
+            echo "- Idempotency key: ${{ steps.payload.outputs.idempotency-key }}"
+            echo "- Webhook delivered: ${delivered}"
+            echo "- Advisory only: true"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -85,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `job-review-request.yml`: ADR-0044 advisory trigger rail for the OpenClaw/Codex Grid Review Runner. It applies draft/`skip-review`/`.honeydrunk-review.yaml enabled` gates, emits the versioned review-request payload with `owner/repo#pr@headSha` idempotency, signs webhook delivery with timestamped HMAC, and preserves artifact/comment fallback for OpenClaw replay without invoking any model API from GitHub Actions.
+- `docs/consumer-usage.md`: documented the Grid Review Request workflow, caller permissions/secrets, `.honeydrunk-review.yaml` opt-in config, skip behavior, and advisory fallback posture.
 - `pr-core.yml`: blocking coverage gate for test-bearing repos with patch coverage threshold, no-regress baseline, absolute coverage floor, visible no-test skip, and default-branch baseline ratchet.
 - `pr/generate-summary`: Coverage Gate and non-blocking outdated package summary blocks.
 - `nightly-deps.yml`: maintains a single `📦 Outdated Dependencies` issue per repo, updated in place and auto-closed when dependencies are current.
