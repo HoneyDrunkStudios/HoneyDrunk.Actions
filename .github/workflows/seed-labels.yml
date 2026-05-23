@@ -2,7 +2,7 @@
 # Seed Labels
 # ==============================================================================
 # Purpose:
-#   Ensures every label declared in .github/config/labels.yml exists on the
+#   Ensures every label declared in .github/config/labels.json exists on the
 #   calling repo with the configured color and description. Idempotent.
 #
 # Triggers:
@@ -15,7 +15,7 @@ on:
   workflow_call:
     inputs:
       labels-source-ref:
-        description: 'Git ref of HoneyDrunk.Actions to read labels.yml from'
+        description: 'Git ref of HoneyDrunk.Actions to read labels.json from'
         required: false
         type: string
         default: 'main'
@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       labels-source-ref:
-        description: 'Git ref of HoneyDrunk.Actions to read labels.yml from'
+        description: 'Git ref of HoneyDrunk.Actions to read labels.json from'
         required: false
         type: string
         default: 'main'
@@ -54,12 +54,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          LABELS_FILE=actions-repo/.github/config/labels.yml
+          LABELS_FILE=actions-repo/.github/config/labels.json
           python3 - <<'PY' > labels.tsv
           import json
           from pathlib import Path
 
-          data = json.loads(Path('actions-repo/.github/config/labels.yml').read_text(encoding='utf-8'))
+          data = json.loads(Path('actions-repo/.github/config/labels.json').read_text(encoding='utf-8'))
           for label in data['labels']:
               print(f"{label['name']}\t{label['color']}\t{label['description']}")
           PY

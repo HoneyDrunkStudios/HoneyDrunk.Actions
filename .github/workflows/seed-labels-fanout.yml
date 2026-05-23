@@ -2,7 +2,7 @@
 # Seed Labels - Fan-out across the Grid
 # ==============================================================================
 # Purpose:
-#   Applies the labels declared in .github/config/labels.yml to every target
+#   Applies the labels declared in .github/config/labels.json to every target
 #   repo enumerated below. Triggered manually via workflow_dispatch.
 #   Idempotent; re-runs are safe.
 #
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       labels-source-ref:
-        description: 'Git ref of HoneyDrunk.Actions to read labels.yml from'
+        description: 'Git ref of HoneyDrunk.Actions to read labels.json from'
         required: false
         type: string
         default: 'main'
@@ -56,12 +56,12 @@ jobs:
             exit 1
           fi
 
-          LABELS_FILE=actions-repo/.github/config/labels.yml
+          LABELS_FILE=actions-repo/.github/config/labels.json
           python3 - <<'PY' > labels.tsv
           import json
           from pathlib import Path
 
-          data = json.loads(Path('actions-repo/.github/config/labels.yml').read_text(encoding='utf-8'))
+          data = json.loads(Path('actions-repo/.github/config/labels.json').read_text(encoding='utf-8'))
           for label in data['labels']:
               print(f"{label['name']}\t{label['color']}\t{label['description']}")
           PY

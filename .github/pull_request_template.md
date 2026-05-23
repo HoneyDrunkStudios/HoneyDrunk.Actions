@@ -9,5 +9,4 @@ Authorship: human
 ## Verification
 - 
 
-## Size justification
-N/A
+Size justification: N/A

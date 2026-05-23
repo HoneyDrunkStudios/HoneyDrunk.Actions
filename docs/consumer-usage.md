@@ -66,7 +66,7 @@ Authorship: human
 Size justification: N/A
 ```
 
-`large-pr`, `audit-sample`, `out-of-band`, and `skip-review` are defined in `.github/config/labels.yml` and can be seeded with `seed-labels.yml` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
+`large-pr`, `audit-sample`, `out-of-band`, and `skip-review` are defined in `.github/config/labels.json` and can be seeded with `seed-labels.json` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
 
 ### Coverage Gate and Baseline Ratchet
 

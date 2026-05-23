@@ -637,7 +637,7 @@ jobs:
 
 Update `.github/config/repo-to-node.yml` whenever a new repo/node is introduced.
 
-`.github/config/labels.yml` is the labels-as-code source of truth. Apply it to one repo with `seed-labels.yml` or fan it out across the Grid with `seed-labels-fanout.yml` after `LABELS_FANOUT_PAT` is provisioned. `.github/pull_request_template.md` carries the local authorship/size placeholders; Grid-wide rollout should mirror that template through the org `.github` defaults or repo fan-out.
+`.github/config/labels.json` is the labels-as-code source of truth. Apply it to one repo with `seed-labels.json` or fan it out across the Grid with `seed-labels-fanout.yml` after `LABELS_FANOUT_PAT` is provisioned. `.github/pull_request_template.md` carries the local authorship/size placeholders; Grid-wide rollout should mirror that template through the org `.github` defaults or repo fan-out.
 
 Format:
 
