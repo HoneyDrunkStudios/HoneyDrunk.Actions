@@ -1,0 +1,71 @@
+# ==============================================================================
+# Seed Labels
+# ==============================================================================
+# Purpose:
+#   Ensures every label declared in .github/config/labels.yml exists on the
+#   calling repo with the configured color and description. Idempotent.
+#
+# Triggers:
+#   workflow_call from consumer repos, or workflow_dispatch in this repo.
+# ==============================================================================
+
+name: Seed Labels
+
+on:
+  workflow_call:
+    inputs:
+      labels-source-ref:
+        description: 'Git ref of HoneyDrunk.Actions to read labels.yml from'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      github-token:
+        description: 'Token with issues:write on the target repo'
+        required: true
+  workflow_dispatch:
+    inputs:
+      labels-source-ref:
+        description: 'Git ref of HoneyDrunk.Actions to read labels.yml from'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  issues: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout HoneyDrunk.Actions labels source
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.labels-source-ref || 'main' }}
+          path: actions-repo
+
+      - name: Apply labels
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LABELS_FILE=actions-repo/.github/config/labels.yml
+          COUNT=$(yq '.labels | length' "$LABELS_FILE")
+          echo "Applying $COUNT label(s) from $LABELS_FILE to $GITHUB_REPOSITORY"
+
+          for i in $(seq 0 $((COUNT - 1))); do
+            NAME=$(yq ".labels[$i].name" "$LABELS_FILE")
+            COLOR=$(yq ".labels[$i].color" "$LABELS_FILE")
+            DESCRIPTION=$(yq ".labels[$i].description" "$LABELS_FILE")
+
+            if gh label list --json name --jq '.[].name' | grep -qx "$NAME"; then
+              echo "Updating existing label: $NAME"
+              gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION"
+            else
+              echo "Creating label: $NAME"
+              gh label create "$NAME" --color "$COLOR" --description "$DESCRIPTION"
+            fi
+          done

@@ -1,0 +1,87 @@
+# ==============================================================================
+# Seed Labels - Fan-out across the Grid
+# ==============================================================================
+# Purpose:
+#   Applies the labels declared in .github/config/labels.yml to every target
+#   repo enumerated below. Triggered manually via workflow_dispatch.
+#   Idempotent; re-runs are safe.
+#
+#   Cross-repo writes use LABELS_FANOUT_PAT. The default GITHUB_TOKEN is scoped
+#   to HoneyDrunk.Actions and cannot write labels across the Grid.
+# ==============================================================================
+
+name: Seed Labels - Fan-out
+
+on:
+  workflow_dispatch:
+    inputs:
+      labels-source-ref:
+        description: 'Git ref of HoneyDrunk.Actions to read labels.yml from'
+        required: false
+        type: string
+        default: 'main'
+      target-repos:
+        description: >-
+          Comma-separated repo names without owner prefix. Override to seed one
+          repo for testing.
+        required: false
+        type: string
+        default: >-
+          HoneyDrunk.Kernel,HoneyDrunk.Transport,HoneyDrunk.Vault,HoneyDrunk.Auth,HoneyDrunk.Web.Rest,HoneyDrunk.Data,HoneyDrunk.Notify,HoneyDrunk.Communications,HoneyDrunk.Pulse,HoneyDrunk.Actions,HoneyDrunk.Architecture,HoneyDrunk.Studios
+
+permissions:
+  contents: read
+
+jobs:
+  fanout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout HoneyDrunk.Actions labels source
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.labels-source-ref }}
+          path: actions-repo
+
+      - name: Apply labels to each target repo
+        env:
+          GH_TOKEN: ${{ secrets.LABELS_FANOUT_PAT }}
+          TARGETS: ${{ inputs.target-repos }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::LABELS_FANOUT_PAT is required for cross-repo label fan-out."
+            exit 1
+          fi
+
+          LABELS_FILE=actions-repo/.github/config/labels.yml
+          COUNT=$(yq '.labels | length' "$LABELS_FILE")
+          echo "Applying $COUNT label(s) to repos: $TARGETS"
+
+          IFS=',' read -ra REPOS <<< "$TARGETS"
+          for REPO in "${REPOS[@]}"; do
+            REPO_TRIMMED=$(echo "$REPO" | xargs)
+            if [ -z "$REPO_TRIMMED" ]; then
+              continue
+            fi
+            FULL_REPO="HoneyDrunkStudios/${REPO_TRIMMED}"
+            echo "--- ${FULL_REPO} ---"
+
+            for i in $(seq 0 $((COUNT - 1))); do
+              NAME=$(yq ".labels[$i].name" "$LABELS_FILE")
+              COLOR=$(yq ".labels[$i].color" "$LABELS_FILE")
+              DESCRIPTION=$(yq ".labels[$i].description" "$LABELS_FILE")
+
+              if gh label list --repo "$FULL_REPO" --json name --jq '.[].name' | grep -qx "$NAME"; then
+                echo "  [update] $NAME"
+                gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION" --repo "$FULL_REPO"
+              else
+                echo "  [create] $NAME"
+                gh label create "$NAME" --color "$COLOR" --description "$DESCRIPTION" --repo "$FULL_REPO"
+              fi
+            done
+          done
+
+          echo "Fan-out complete."

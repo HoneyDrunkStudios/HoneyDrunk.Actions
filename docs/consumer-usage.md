@@ -38,6 +38,36 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
 ```
 
+### ADR-0044 Authorship and PR-Size Discipline
+
+`pr-core.yml` requires every PR body to contain exactly one authorship declaration:
+
+```text
+Authorship: human
+```
+
+Allowed classes are `human`, `agent-codex`, `agent-copilot`, `agent-claude-code`, and `mixed`. The `authorship-check` job fails when the line is absent or unparseable; it does not silently assume `human`.
+
+For non-`human` PRs, `pr-size-check` counts non-test changed lines. It excludes common test paths and any configured `.honeydrunk-review.yaml` `skip_paths`; missing config or missing `skip_paths` is treated as an empty list, not an error.
+
+Phase 2 posture is warnings-only:
+
+- `<= 400` non-test changed lines: no action.
+- `> 400` and `<= 800`: applies `large-pr` and requests a `Size justification:` block if missing.
+- `> 800`: applies `large-pr` and comments requesting a split or `refine` pass.
+
+The size job does not fail PRs in Phase 2. ADR-0044 Phase 3 owns any harder posture.
+
+Consumer repos should add these PR-body placeholders before enabling the check broadly:
+
+```markdown
+Authorship: human
+
+Size justification: N/A
+```
+
+`large-pr`, `audit-sample`, and `skip-review` are defined in `.github/config/labels.yml` and can be seeded with `seed-labels.yml` / `seed-labels-fanout.yml`.
+
 ### Coverage Gate and Baseline Ratchet
 
 `pr-core.yml` enforces coverage for repos that contain `.Tests` or `.Canary` projects. Repos without test projects skip the gate visibly with `Coverage gate: skipped (no test projects)`.
