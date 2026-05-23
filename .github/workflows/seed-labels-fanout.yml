@@ -57,7 +57,16 @@ jobs:
           fi
 
           LABELS_FILE=actions-repo/.github/config/labels.yml
-          COUNT=$(yq '.labels | length' "$LABELS_FILE")
+          python3 - <<'PY' > labels.tsv
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('actions-repo/.github/config/labels.yml').read_text(encoding='utf-8'))
+          for label in data['labels']:
+              print(f"{label['name']}\t{label['color']}\t{label['description']}")
+          PY
+
+          COUNT=$(wc -l < labels.tsv | xargs)
           echo "Applying $COUNT label(s) to repos: $TARGETS"
 
           IFS=',' read -ra REPOS <<< "$TARGETS"
@@ -69,19 +78,14 @@ jobs:
             FULL_REPO="HoneyDrunkStudios/${REPO_TRIMMED}"
             echo "--- ${FULL_REPO} ---"
 
-            for i in $(seq 0 $((COUNT - 1))); do
-              NAME=$(yq ".labels[$i].name" "$LABELS_FILE")
-              COLOR=$(yq ".labels[$i].color" "$LABELS_FILE")
-              DESCRIPTION=$(yq ".labels[$i].description" "$LABELS_FILE")
-
-              if gh label list --repo "$FULL_REPO" --json name --jq '.[].name' | grep -qx "$NAME"; then
+            while IFS=$'\t' read -r NAME COLOR DESCRIPTION; do
+              if gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION" --repo "$FULL_REPO"; then
                 echo "  [update] $NAME"
-                gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION" --repo "$FULL_REPO"
               else
                 echo "  [create] $NAME"
                 gh label create "$NAME" --color "$COLOR" --description "$DESCRIPTION" --repo "$FULL_REPO"
               fi
-            done
+            done < labels.tsv
           done
 
           echo "Fan-out complete."

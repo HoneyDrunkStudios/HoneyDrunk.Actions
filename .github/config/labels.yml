@@ -1,30 +1,24 @@
-# Grid label set
-# Source of truth for labels applied to active HoneyDrunk repos.
-# Apply via seed-labels.yml or seed-labels-fanout.yml.
-#
-# Conventions:
-#   - kebab-case names
-#   - lowercase
-#   - hex colors without leading '#'
-
-labels:
-  - name: audit-sample
-    color: 5319e7
-    description: >-
-      PR selected for ADR-0044 post-merge audit sampling.
-
-  - name: large-pr
-    color: fbca04
-    description: >-
-      Non-human-authored PR exceeds ADR-0044 size guidance and needs review attention.
-
-  - name: out-of-band
-    color: ed7d31
-    description: >-
-      PR was not authored from a scope-agent packet; review agent runs without
-      packet-scope context (per ADR-0011 D9, invariant 32).
-
-  - name: skip-review
-    color: cfd3d7
-    description: >-
-      Manual ADR-0044 escape hatch; Grid Review Runner skips PRs carrying this label.
+{
+  "labels": [
+    {
+      "name": "audit-sample",
+      "color": "5319e7",
+      "description": "PR selected for ADR-0044 post-merge audit sampling."
+    },
+    {
+      "name": "large-pr",
+      "color": "fbca04",
+      "description": "Non-human-authored PR exceeds ADR-0044 size guidance and needs review attention."
+    },
+    {
+      "name": "out-of-band",
+      "color": "ed7d31",
+      "description": "PR was not authored from a scope-agent packet; review agent runs without packet-scope context (per ADR-0011 D9, invariant 32)."
+    },
+    {
+      "name": "skip-review",
+      "color": "cfd3d7",
+      "description": "Manual ADR-0044 escape hatch; Grid Review Runner skips PRs carrying this label."
+    }
+  ]
+}

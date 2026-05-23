@@ -349,7 +349,7 @@ jobs:
                       continue
                   if in_skip:
                       current_indent = len(raw) - len(raw.lstrip())
-                      if current_indent <= (indent or 0) and not stripped.startswith('-'):
+                      if current_indent <= (indent or 0):
                           break
                       if stripped.startswith('-'):
                           skips.append(stripped[1:].strip().strip('"\''))
@@ -431,6 +431,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh label create large-pr \
+            --repo "$GITHUB_REPOSITORY" \
+            --color fbca04 \
+            --description "Non-human-authored PR exceeds ADR-0044 size guidance and needs review attention." \
+            2>/dev/null || true
           gh issue edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label large-pr
 
       - name: Comment on large PR missing justification

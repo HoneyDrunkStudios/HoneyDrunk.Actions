@@ -22,7 +22,7 @@ on:
     secrets:
       github-token:
         description: 'Token with issues:write on the target repo'
-        required: true
+        required: false
   workflow_dispatch:
     inputs:
       labels-source-ref:
@@ -32,6 +32,7 @@ on:
         default: 'main'
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
@@ -53,19 +54,23 @@ jobs:
           set -euo pipefail
 
           LABELS_FILE=actions-repo/.github/config/labels.yml
-          COUNT=$(yq '.labels | length' "$LABELS_FILE")
+          python3 - <<'PY' > labels.tsv
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('actions-repo/.github/config/labels.yml').read_text(encoding='utf-8'))
+          for label in data['labels']:
+              print(f"{label['name']}\t{label['color']}\t{label['description']}")
+          PY
+
+          COUNT=$(wc -l < labels.tsv | xargs)
           echo "Applying $COUNT label(s) from $LABELS_FILE to $GITHUB_REPOSITORY"
 
-          for i in $(seq 0 $((COUNT - 1))); do
-            NAME=$(yq ".labels[$i].name" "$LABELS_FILE")
-            COLOR=$(yq ".labels[$i].color" "$LABELS_FILE")
-            DESCRIPTION=$(yq ".labels[$i].description" "$LABELS_FILE")
-
-            if gh label list --json name --jq '.[].name' | grep -qx "$NAME"; then
-              echo "Updating existing label: $NAME"
-              gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION"
+          while IFS=$'\t' read -r NAME COLOR DESCRIPTION; do
+            if gh label edit "$NAME" --color "$COLOR" --description "$DESCRIPTION"; then
+              echo "Updated existing label: $NAME"
             else
               echo "Creating label: $NAME"
               gh label create "$NAME" --color "$COLOR" --description "$DESCRIPTION"
             fi
-          done
+          done < labels.tsv

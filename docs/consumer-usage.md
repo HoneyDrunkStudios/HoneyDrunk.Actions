@@ -58,7 +58,7 @@ Phase 2 posture is warnings-only:
 
 The size job does not fail PRs in Phase 2. ADR-0044 Phase 3 owns any harder posture.
 
-Consumer repos should add these PR-body placeholders before enabling the check broadly:
+Consumer repos should add these PR-body placeholders before enabling the check broadly. The safest path is a `.github/pull_request_template.md` in each repo, or an organization-default template from the org `.github` repository:
 
 ```markdown
 Authorship: human
@@ -66,7 +66,7 @@ Authorship: human
 Size justification: N/A
 ```
 
-`large-pr`, `audit-sample`, and `skip-review` are defined in `.github/config/labels.yml` and can be seeded with `seed-labels.yml` / `seed-labels-fanout.yml`.
+`large-pr`, `audit-sample`, `out-of-band`, and `skip-review` are defined in `.github/config/labels.yml` and can be seeded with `seed-labels.yml` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
 
 ### Coverage Gate and Baseline Ratchet
 
