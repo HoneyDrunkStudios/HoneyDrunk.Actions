@@ -164,7 +164,7 @@ jobs:
 
 ## Grid Review Request Workflow
 
-**Purpose:** Advisory ADR-0044 trigger rail for the OpenClaw/Codex Grid Review Runner. This workflow does **not** run Codex, Anthropic, OpenAI, or any model API in GitHub Actions. It emits a signed review-request payload for OpenClaw and preserves the same payload as a durable fallback artifact/comment when OpenClaw is unavailable.
+**Purpose:** Advisory ADR-0044 trigger rail for the OpenClaw/Codex Grid Review Runner. This workflow does **not** run Codex, Anthropic, OpenAI, or any model API in GitHub Actions. It emits a signed review-request payload for OpenClaw, preserves the same payload as a durable fallback artifact, and can post a machine-readable replay pointer comment when OpenClaw is unavailable.
 
 **When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Architecture` for the Phase 1 pilot.
 
@@ -217,7 +217,7 @@ The workflow emits the ADR-0044 `grid-review-request` payload with idempotency k
 owner/repo#pr@headSha
 ```
 
-When webhook delivery is unavailable or not configured, the workflow uploads `review-request.json` as an artifact and can post a machine-readable PR comment for OpenClaw cron/poll replay. The workflow is advisory only and must not be made a required blocking check until the Grid explicitly changes ADR-0044's posture.
+When webhook delivery is unavailable or not configured, the workflow uploads `review-request.json` as an artifact and can post a machine-readable PR comment containing the run id, run attempt, artifact name, head SHA, and idempotency key for OpenClaw cron/poll replay. The workflow is advisory only and must not be made a required blocking check until the Grid explicitly changes ADR-0044's posture.
 
 ---
 

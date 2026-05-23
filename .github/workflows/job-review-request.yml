@@ -70,18 +70,21 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
 
     steps:
-      - name: Validate pull_request event
+      - name: Validate pull request context
         id: event
         shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ -z "$PR_NUMBER" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "reason=not-pull-request-event" >> "$GITHUB_OUTPUT"
-            echo "::notice::Grid review request skipped: this workflow must be called from a pull_request event."
+            echo "reason=missing-pull-request-context" >> "$GITHUB_OUTPUT"
+            echo "::notice::Grid review request skipped: the caller event did not include pull_request context."
             exit 0
           fi
 
-          if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+          if [ "$PR_DRAFT" = "true" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "reason=draft-pr" >> "$GITHUB_OUTPUT"
             echo "::notice::Grid review request skipped: draft PR."
@@ -104,7 +107,7 @@ jobs:
           EVENT_PATH: ${{ github.event_path }}
           REVIEW_CONFIG_PATH: ${{ inputs.review-config-path }}
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
           import re
@@ -157,7 +160,7 @@ jobs:
 
           gh api "repos/${repo}/pulls/${pr_number}/files?per_page=100" --paginate --slurp > changed-files.json
 
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
           import re
@@ -263,7 +266,7 @@ jobs:
 
           timestamp="$(date +%s)"
           export timestamp
-          signature="$(python - <<'PY'
+          signature="$(python3 - <<'PY'
           import hashlib
           import hmac
           import os
@@ -323,16 +326,22 @@ jobs:
         run: |
           set -euo pipefail
 
+          artifact_name="${{ inputs.artifact-name }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
           cat > grid-review-comment.md <<EOF
           <!-- honeydrunk-grid-review-request:v1
           status: pending-openclaw-replay
           idempotencyKey: ${{ steps.payload.outputs.idempotency-key }}
           headSha: ${{ steps.payload.outputs.head-sha }}
-          artifact: ${{ inputs.artifact-name }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          runId: ${{ github.run_id }}
+          runAttempt: ${{ github.run_attempt }}
+          artifact: ${artifact_name}
+          artifactFile: review-request.json
           -->
           🔎 Grid review request queued for OpenClaw replay.
 
-          OpenClaw webhook delivery is unavailable or not configured, so this PR remains mergeable and the signed-review runner can replay the uploaded \`review-request.json\` artifact later.
+          OpenClaw webhook delivery is unavailable or not configured, so this PR remains mergeable. Replay workers can fetch the uploaded \`review-request.json\` artifact from run ${{ github.run_id }} attempt ${{ github.run_attempt }}: ${run_url}
           EOF
 
           gh issue comment "${{ github.event.pull_request.number }}" \
