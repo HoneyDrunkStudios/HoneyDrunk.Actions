@@ -45,6 +45,7 @@ jobs:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ inputs.labels-source-ref || 'main' }}
           path: actions-repo
+          token: ${{ secrets.github-token || github.token }}
 
       - name: Apply labels
         env:
