@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pr-core.yml` and `pr-sdk.yml`: wired in the CodeQL job as optional (default on) with `enable-codeql`, `codeql-queries`, and `codeql-fail-on-severity` inputs. Findings + severity breakdown appear in the PR summary comment.
 
 ### Changed
+
 - `pr-core.yml`: removed default-branch baseline ratcheting from PR validation orchestration so consumer PR workflows no longer require `contents: write`.
 - `docs/consumer-usage.md`: updated coverage gate examples to split read-only PR validation from write-capable default-branch ratcheting.
 - `job-static-analysis.yml`: removed the vulnerability scan step (now owned by `job-dependency-scan.yml`) and dropped its `fail-on-severity` input. `pr-core.yml` and `pr-sdk.yml` no longer pass that input.
@@ -83,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compatible with GitHub Enterprise Server
 
 ## [Unreleased]
+
+### Internal
+
+- Enabled ADR-0044 OpenClaw/Codex Grid Review Runner request generation for Actions PRs.
 
 ### Added
 - `pr-core.yml`: ADR-0044 `authorship-check`, ADR-0011/ADR-0044 `pr-metadata-check`, and warnings-only `pr-size-check` jobs. Authorship now requires a parseable `Authorship:` PR-body line; agent/mixed PRs must declare packet metadata or an explicit out-of-band reason; non-`human` PRs get visible size discipline without blocking Phase 2 merges.
@@ -153,6 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hive project metadata cache (`.github/config/hive-project-metadata.json`) for stable project, field, and option IDs.
 
 ### Changed
+
 - `docs/consumer-usage.md`: documented coverage-gate inputs, `.github/coverage-baseline.json`, default-branch push wiring, and dependency issue permissions.
 - `job-coverage-analysis.yml`: marked as superseded by the PR summary coverage gate while retaining the reusable entrypoint.
 - `hive-field-mirror.yml`: accept `app-id` and `app-private-key` for GitHub App auth; PAT auth remains available as a fallback.
