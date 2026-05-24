@@ -1,0 +1,23 @@
+name: Grid Review Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  request-grid-review:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-review-request.yml@main
+    with:
+      openclaw-webhook-url: ${{ vars.OPENCLAW_GRID_REVIEW_WEBHOOK_URL || '' }}
+      review-config-path: .honeydrunk-review.yaml
+      upload-fallback-artifact: true
+      post-fallback-comment: false
+      artifact-name: grid-review-request
+    secrets:
+      openclaw-webhook-secret: ${{ secrets.OPENCLAW_GRID_REVIEW_WEBHOOK_SECRET }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
