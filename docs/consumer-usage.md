@@ -48,6 +48,13 @@ Authorship: human
 
 Allowed classes are `human`, `agent-codex`, `agent-copilot`, `agent-claude-code`, and `mixed`. The `authorship-check` job fails when the line is absent or unparseable; it does not silently assume `human`.
 
+For non-`human` PRs, `pr-metadata-check` enforces ADR-0011/ADR-0044 packet discipline before size review:
+
+- If `Packet:` or `Issue Packet:` is present, the PR is treated as packet-scoped and the job removes any stale `out-of-band` label.
+- If no packet is present, the PR must include an explicit `Out-of-band reason:`. The job then applies `out-of-band` automatically.
+- If an agent/mixed PR has neither packet metadata nor an out-of-band reason, the job fails instead of silently degrading review scope.
+- A PR cannot declare both packet metadata and an out-of-band reason.
+
 For non-`human` PRs, `pr-size-check` counts non-test changed lines. It excludes common test paths and any configured `.honeydrunk-review.yaml` `skip_paths`; missing config or missing `skip_paths` is treated as an empty list, not an error.
 
 Phase 2 posture is warnings-only:
@@ -62,7 +69,8 @@ Consumer repos should add these PR-body placeholders before enabling the check b
 
 ```markdown
 Authorship: human
-
+Packet: N/A (required for agent/mixed PRs unless Out-of-band reason is set)
+Out-of-band reason: N/A
 Size justification: N/A
 ```
 
@@ -123,6 +131,7 @@ jobs:
     permissions:
       contents: read
       checks: write
+      issues: write          # lets pr-metadata-check manage out-of-band / pr-size manage large-pr
       pull-requests: write
       security-events: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
@@ -180,6 +189,7 @@ jobs:
     permissions:
       contents: read
       checks: write
+      issues: write          # lets pr-metadata-check manage out-of-band / pr-size manage large-pr
       pull-requests: write
       security-events: write  # CodeQL SARIF upload
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
