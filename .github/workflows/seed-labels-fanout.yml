@@ -27,7 +27,7 @@ on:
         required: false
         type: string
         default: >-
-          HoneyDrunk.Kernel,HoneyDrunk.Transport,HoneyDrunk.Vault,HoneyDrunk.Auth,HoneyDrunk.Web.Rest,HoneyDrunk.Data,HoneyDrunk.Notify,HoneyDrunk.Communications,HoneyDrunk.Pulse,HoneyDrunk.Actions,HoneyDrunk.Architecture,HoneyDrunk.Studios
+          HoneyDrunk.Kernel,HoneyDrunk.Transport,HoneyDrunk.Vault,HoneyDrunk.Auth,HoneyDrunk.Web.Rest,HoneyDrunk.Data,HoneyDrunk.Notify,HoneyDrunk.Communications,HoneyDrunk.Pulse,HoneyDrunk.Actions,HoneyDrunk.Architecture,HoneyDrunkStudios
 
 permissions:
   contents: read
