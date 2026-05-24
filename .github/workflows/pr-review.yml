@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  issues: write
 
 jobs:
   request-grid-review:
@@ -20,3 +21,4 @@ jobs:
     secrets:
       openclaw-webhook-secret: ${{ secrets.OPENCLAW_GRID_REVIEW_WEBHOOK_SECRET }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
