@@ -13,7 +13,7 @@
     {
       "name": "out-of-band",
       "color": "ed7d31",
-      "description": "PR was not authored from a scope-agent packet; review agent runs without packet-scope context (per ADR-0011 D9, invariant 32)."
+      "description": "Out-of-band PR without packet scope context; review runs with reduced scope."
     },
     {
       "name": "skip-review",
