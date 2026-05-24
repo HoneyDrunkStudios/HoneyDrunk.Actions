@@ -141,7 +141,6 @@ on:
 permissions:
   contents: read
   checks: write
-  issues: write
   pull-requests: write
 
 jobs:
@@ -403,8 +402,8 @@ jobs:
   # Job 9: PR Size Check (ADR-0044 D7, warnings-only in Phase 2)
   pr-size-check:
     name: PR Size Check
-    needs: [authorship-check]
-    if: ${{ always() && needs.authorship-check.result == 'success' && needs.authorship-check.outputs.authorship != 'human' }}
+    needs: [authorship-check, pr-metadata-check]
+    if: ${{ always() && needs.authorship-check.result == 'success' && needs.pr-metadata-check.result == 'success' && needs.authorship-check.outputs.authorship != 'human' }}
     runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: read
@@ -598,6 +597,10 @@ jobs:
     needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-metadata-check, pr-size-check]
     if: ${{ always() }}
     runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     
     steps:
       - name: Checkout repository
