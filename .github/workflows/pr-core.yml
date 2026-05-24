@@ -293,11 +293,117 @@ jobs:
           print(f'Authorship: {authorship}')
           PY
 
-  # Job 8: PR Size Check (ADR-0044 D7, warnings-only in Phase 2)
+
+  # Job 8: PR Metadata Check (ADR-0011 / ADR-0044)
+  pr-metadata-check:
+    name: PR Metadata Check
+    needs: [authorship-check]
+    if: ${{ always() && needs.authorship-check.result == 'success' }}
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Validate packet metadata and out-of-band label
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          AUTHORSHIP: ${{ needs.authorship-check.outputs.authorship }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import os, re, subprocess, sys
+
+          body = os.environ.get('PR_BODY') or ''
+          authorship = os.environ.get('AUTHORSHIP') or ''
+          repo = os.environ['REPOSITORY']
+          pr_number = os.environ['PR_NUMBER']
+
+          def meaningful(value: str) -> bool:
+              value = (value or '').strip()
+              if not value:
+                  return False
+              normalized = re.sub(r'[*_`\s]+', ' ', value).strip().lower()
+              placeholders = {
+                  '-', 'n/a', 'na', 'none', 'todo', 'tbd', 'not applicable',
+                  'n/a (required for agent/mixed prs unless out-of-band reason is set)'
+              }
+              return normalized not in placeholders
+
+          def field_value(names):
+              pattern = re.compile(r'^\s*(?:' + '|'.join(re.escape(n) for n in names) + r')\s*:\s*(.*?)\s*$', re.IGNORECASE)
+              for line in body.splitlines():
+                  match = pattern.match(line)
+                  if match and meaningful(match.group(1)):
+                      return match.group(1).strip()
+              return ''
+
+          def section_value(title):
+              lines = body.splitlines()
+              in_section = False
+              found = []
+              for line in lines:
+                  if re.match(r'^\s*##+\s+', line):
+                      heading = re.sub(r'^\s*##+\s+', '', line).strip().lower()
+                      if in_section and heading != title.lower():
+                          break
+                      in_section = heading == title.lower()
+                      continue
+                  if in_section and meaningful(line.lstrip('- ').strip()):
+                      found.append(line.lstrip('- ').strip())
+              return '\n'.join(found).strip()
+
+          packet = field_value(['Packet', 'Issue Packet']) or section_value('Issue Packet') or section_value('Packet')
+          out_of_band_reason = field_value(['Out-of-band reason', 'Out of band reason']) or section_value('Out-of-band reason') or section_value('Out of band reason')
+          has_packet = bool(packet)
+          has_oob_reason = bool(out_of_band_reason)
+
+          if authorship in {'agent-codex', 'agent-copilot', 'agent-claude-code', 'mixed'}:
+              if has_packet and has_oob_reason:
+                  print('::error::Agent/mixed PR declares both Packet and Out-of-band reason. Use exactly one.')
+                  sys.exit(1)
+              if not has_packet and not has_oob_reason:
+                  print('::error::Agent/mixed PRs must include Packet metadata, or an explicit Out-of-band reason.')
+                  print('::error::Do not silently rely on the out-of-band label; make the degraded context visible in the PR body.')
+                  sys.exit(1)
+          elif has_oob_reason and has_packet:
+              print('::error::PR declares both Packet and Out-of-band reason. Use exactly one.')
+              sys.exit(1)
+
+          def gh(*args, check=True):
+              result = subprocess.run(['gh', *args], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if check and result.returncode != 0:
+                  print(result.stdout, end='')
+                  print(result.stderr, end='', file=sys.stderr)
+                  sys.exit(result.returncode)
+              return result
+
+          labels_stdout = gh('pr', 'view', pr_number, '--repo', repo, '--json', 'labels', '--jq', '.labels[].name').stdout
+          labels = {line.strip() for line in labels_stdout.splitlines() if line.strip()}
+          has_label = 'out-of-band' in labels
+
+          if has_oob_reason and not has_label:
+              gh('pr', 'edit', pr_number, '--repo', repo, '--add-label', 'out-of-band')
+              print('Added out-of-band label because the PR declares an Out-of-band reason.')
+          elif has_packet and has_label:
+              gh('pr', 'edit', pr_number, '--repo', repo, '--remove-label', 'out-of-band')
+              print('Removed out-of-band label because Packet metadata is present.')
+          elif has_oob_reason:
+              print('Out-of-band reason present and label already applied.')
+          elif has_packet:
+              print('Packet metadata present; out-of-band label not needed.')
+          else:
+              print('Human-authored PR without packet metadata; out-of-band label not required.')
+          PY
+
+  # Job 9: PR Size Check (ADR-0044 D7, warnings-only in Phase 2)
   pr-size-check:
     name: PR Size Check
-    needs: [authorship-check]
-    if: ${{ always() && needs.authorship-check.result == 'success' && needs.authorship-check.outputs.authorship != 'human' }}
+    needs: [authorship-check, pr-metadata-check]
+    if: ${{ always() && needs.authorship-check.result == 'success' && needs.pr-metadata-check.result == 'success' && needs.authorship-check.outputs.authorship != 'human' }}
     runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: read
@@ -485,12 +591,16 @@ jobs:
       # Phase 3 toggle point (ADR-0044 packet 14): change this warning-only job
       # to fail for size_band == 'oversize' when the Grid adopts the harder posture.
 
-  # Job 9: PR Summary and Coverage Gate
+  # Job 10: PR Summary and Coverage Gate
   pr-summary:
     name: PR Summary and Coverage Gate
-    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-size-check]
+    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-metadata-check, pr-size-check]
     if: ${{ always() }}
     runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     
     steps:
       - name: Checkout repository
@@ -851,6 +961,7 @@ jobs:
           CODEQL_NOTE: ${{ needs.codeql.outputs.note-count }}
           JOB_AUTHORSHIP_RESULT: ${{ needs.authorship-check.result }}
           AUTHORSHIP_CLASS: ${{ needs.authorship-check.outputs.authorship }}
+          JOB_PR_METADATA_RESULT: ${{ needs.pr-metadata-check.result }}
           JOB_PR_SIZE_RESULT: ${{ needs.pr-size-check.result }}
           WARNINGS_BLOCK: ${{ steps.status.outputs.warnings }}
           COVERAGE_GATE_DETAIL: ${{ steps.coverage-gate.outputs.detail }}
@@ -906,6 +1017,7 @@ jobs:
 
           {
             echo "- **Authorship Check:** $JOB_AUTHORSHIP_RESULT${AUTHORSHIP_CLASS:+ - $AUTHORSHIP_CLASS}"
+            echo "- **PR Metadata Check:** $JOB_PR_METADATA_RESULT"
             echo "- **PR Size Check:** $JOB_PR_SIZE_RESULT"
           } >> message.md
 
