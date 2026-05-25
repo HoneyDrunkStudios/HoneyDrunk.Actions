@@ -46,11 +46,10 @@ trap 'rm -rf "$workdir"' EXIT
 results="$workdir/results.jsonl"
 : > "$results"
 
-mapfile -t repos < <(jq -c '.nodes[] | {id,name,signal,tracked_workflows:(.tracked_workflows // [])}' "$CATALOG_PATH")
+mapfile -t repos < <(jq -c '.nodes[] | {id,name,tracked_workflows:(.tracked_workflows // [])}' "$CATALOG_PATH")
 for row in "${repos[@]}"; do
   name="$(jq -r '.name' <<<"$row")"
   name="${name//$'\r'/}"
-  signal="$(jq -r '.signal' <<<"$row")"
   count="$(jq '.tracked_workflows | length' <<<"$row")"
   if [ "$count" -eq 0 ]; then
     continue
@@ -66,8 +65,14 @@ for row in "${repos[@]}"; do
     body="$workdir/response.json"
     response="$workdir/response.raw"
     gh_status=0
-    gh api -i "$api" > "$response" 2>/dev/null || gh_status=$?
+    gh_error="$workdir/response.err"
+    gh api -i "$api" > "$response" 2>"$gh_error" || gh_status=$?
     status_code="$(awk 'BEGIN{code=0} /^HTTP\//{code=$2} END{print code}' "$response")"
+    if [ "$gh_status" -ne 0 ] && [ "$status_code" = "0" ]; then
+      echo "ERROR: gh api failed before returning headers for $api (exit $gh_status)." >&2
+      if [ -s "$gh_error" ]; then cat "$gh_error" >&2; fi
+      exit 1
+    fi
     awk 'BEGIN{body=0} /^\r?$/{body=1; next} body{print}' "$response" > "$body"
     classification="Missing"; url=""; created=""; conclusion=""
     if [ "$status_code" = "200" ]; then
@@ -167,7 +172,9 @@ report="$workdir/report.md"
 
 find_issue() {
   local repo="$1" title="$2"
-  gh issue list --repo "$repo" --state all --search "in:title \"$title\"" --json number,title,state --jq ".[] | select(.title == \"$title\") | .number" | head -n1
+  gh issue list --repo "$repo" --state all --search "in:title \"$title\"" --json number,title,state \
+    | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
+    | head -n1
 }
 
 main_issue="$(find_issue "$ACTIONS_REPO" "$GRID_HEALTH_TITLE")"
@@ -190,7 +197,9 @@ done
 
 jq -c 'select(.status=="Pass")' "$results" | while read -r row; do
   repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow failing"; repo="$ORG/$repo_name"
-  issue="$(gh issue list --repo "$repo" --state open --search "in:title \"$title\"" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n1)"
+  issue="$(gh issue list --repo "$repo" --state open --search "in:title \"$title\"" --json number,title \
+    | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
+    | head -n1)"
   if [ -n "$issue" ]; then gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null; fi
 done
 

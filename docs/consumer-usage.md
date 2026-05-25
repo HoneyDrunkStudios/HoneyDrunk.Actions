@@ -233,7 +233,7 @@ jobs:
 
 ### Permissions
 
-`pr-core.yml` callers need an explicit top-level or job-level permissions block that grants `contents: read`, `checks: write`, `pull-requests: write`, and `security-events: write`; examples that enable metadata/size label management also grant `issues: write`. Under `workflow_call`, the callee declaration is documentary, so missing or under-granted caller permissions fail at workflow-load time and later surface through grid-health as Stale. Extra scopes are allowed only when another job in the same workflow needs them; prefer least privilege.
+`pr-core.yml` callers need an explicit top-level or job-level permissions block that grants `contents: read`, `checks: write`, `pull-requests: write`, `security-events: write`, and `issues: write`. `issues: write` is part of the baseline because PR metadata/size checks maintain labels and comments. Under `workflow_call`, the callee declaration is documentary, so missing or under-granted caller permissions fail at workflow-load time and later surface through grid-health as Stale. Extra scopes are allowed only when another job in the same workflow needs them; prefer least privilege.
 
 
 ## Grid Review Request Workflow
