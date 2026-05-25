@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `job-sonarcloud.yml`: re-add the `/d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"` flag to the `dotnet-sonarscanner begin` invocation. The earlier removal expected per-repo `sonar-project.properties` to provide the path, but `.properties` files are then rejected by SonarScanner for .NET and were deleted in the consumer onboarding PRs. With no `.properties` file and no CLI flag, the scanner had no way to find the converted OpenCover report — coverage silently never imported, undermining ADR-0011 D11's quality-gate intent. Now the flag is the default in the reusable workflow; per-repo overrides remain available via MSBuild `<SonarQubeSetting>` items in `Directory.Build.props`.
+
 ### Added
 
 - `job-sonarcloud.yml`: new tier-2 reusable workflow that runs SonarQube Cloud (formerly SonarCloud) static analysis on a .NET repo via `dotnet-sonarscanner`. Reuses the coverage artifact from `job-build-and-test.yml` (no double `dotnet test`), converts Cobertura → OpenCover via ReportGenerator before the scanner reads coverage (Sonar's native C# format), and reports the SonarQube Cloud quality gate as a PR check. Job-level `if:` guard enforces `pull_request` + `push:main` only as defence in depth for ADR-0011 D11 cost discipline. Inputs include `working-directory` (supports inner-subdir Pattern A layouts), `sonar-organization`, `sonar-project-key`, and `coverage-artifact-name`. Per ADR-0011 packet 02.
