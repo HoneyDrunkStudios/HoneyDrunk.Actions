@@ -159,7 +159,7 @@ report="$workdir/report.md"
   echo
   echo "## Per-repo failure issues"
   echo
-  echo "Per-repo issues are opened for Fail/Missing and closed when the pair returns to Pass. Stale results remain central-only."
+  echo "Per-repo issues are opened for Fail/Missing. Existing per-repo issues are closed when the pair returns to Pass or becomes Stale; Stale results remain central-only."
   echo
   echo "## Catalog drift"
   echo
