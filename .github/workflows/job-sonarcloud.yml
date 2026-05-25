@@ -180,13 +180,13 @@ jobs:
           dotnet tool update dotnet-reportgenerator-globaltool --tool-path "${GITHUB_WORKSPACE}/.sonar/reportgenerator"
 
       - name: Download coverage artifact (if exists)
-        id: download-coverage
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.coverage-artifact-name }}
-          # Download into the caller's working-directory so the relative
-          # `**/coverage.*.xml` globs resolve against the same root the
-          # scanner runs from.
+          # Download into the caller's working-directory so the
+          # `**/coverage.cobertura.xml` lookup in the next step (and the
+          # `**/coverage.opencover.xml` glob passed to the scanner) both
+          # resolve against the same root the scanner runs from.
           path: ${{ inputs.working-directory }}/TestResults
         continue-on-error: true
 
