@@ -1,0 +1,49 @@
+name: Grid Health Report
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: grid-health-report
+  cancel-in-progress: false
+
+jobs:
+  grid-health:
+    name: Render Grid Health
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GRID_HEALTH_PAT }}
+      GRID_HEALTH_TITLE: "Grid Health"
+      ACTIONS_REPO: HoneyDrunkStudios/HoneyDrunk.Actions
+    steps:
+      - name: Checkout Actions
+        uses: actions/checkout@v4
+
+      - name: Checkout Architecture catalog
+        uses: actions/checkout@v4
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Architecture
+          path: architecture
+          token: ${{ secrets.GRID_HEALTH_PAT }}
+          sparse-checkout: catalogs/grid-health.json
+          sparse-checkout-cone-mode: false
+
+      - name: Validate GRID_HEALTH_PAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "ERROR: GRID_HEALTH_PAT secret is required. It must read HoneyDrunk.Architecture, read Actions workflow runs and org repo metadata, and write Issues on HoneyDrunk.Actions plus every repo with tracked_workflows." >&2
+            exit 1
+          fi
+          gh auth status >/dev/null
+
+      - name: Generate report and maintain issues
+        shell: bash
+        run: scripts/grid-health-aggregator.sh architecture/catalogs/grid-health.json

@@ -18,10 +18,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install actionlint
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$RUNNER_TEMP/actionlint"
+          mkdir -p "$INSTALL_DIR"
+          case "$(uname -m)" in
+            x86_64|amd64) ACTIONLINT_ARCH=amd64 ;;
+            aarch64|arm64) ACTIONLINT_ARCH=arm64 ;;
+            *) echo "::error::Unsupported runner architecture for actionlint: $(uname -m)"; exit 1 ;;
+          esac
+          ACTIONLINT_ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_${ACTIONLINT_ARCH}.tar.gz"
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ACTIONLINT_ARCHIVE}" \
+            -o "$RUNNER_TEMP/$ACTIONLINT_ARCHIVE"
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt" \
+            -o "$RUNNER_TEMP/actionlint_checksums.txt"
+          (cd "$RUNNER_TEMP" && grep "  ${ACTIONLINT_ARCHIVE}$" actionlint_checksums.txt | sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/$ACTIONLINT_ARCHIVE" -C "$INSTALL_DIR" actionlint
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+
       - name: Run actionlint
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color -shellcheck=
+        shell: bash
+        run: |
+          set -euo pipefail
+          actionlint -color -shellcheck=
 
       - name: Check banned CI secret patterns
         shell: bash
@@ -51,3 +76,9 @@ jobs:
           fi
 
           echo "No banned direct-secret patterns found."
+
+      - name: Smoke test Grid Health aggregator
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests/grid-health-aggregator-smoke.sh
