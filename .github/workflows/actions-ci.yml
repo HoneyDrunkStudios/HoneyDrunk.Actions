@@ -26,7 +26,12 @@ jobs:
           set -euo pipefail
           INSTALL_DIR="$RUNNER_TEMP/actionlint"
           mkdir -p "$INSTALL_DIR"
-          ACTIONLINT_ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          case "$(uname -m)" in
+            x86_64|amd64) ACTIONLINT_ARCH=amd64 ;;
+            aarch64|arm64) ACTIONLINT_ARCH=arm64 ;;
+            *) echo "::error::Unsupported runner architecture for actionlint: $(uname -m)"; exit 1 ;;
+          esac
+          ACTIONLINT_ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_${ACTIONLINT_ARCH}.tar.gz"
           curl -sSfL \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ACTIONLINT_ARCHIVE}" \
             -o "$RUNNER_TEMP/$ACTIONLINT_ARCHIVE"
@@ -71,3 +76,9 @@ jobs:
           fi
 
           echo "No banned direct-secret patterns found."
+
+      - name: Smoke test Grid Health aggregator
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests/grid-health-aggregator-smoke.sh

@@ -17,7 +17,7 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | Reusable workflow | Minimum caller `permissions:` |
 |---|---|
 | `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
-| `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write` |
+| `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
 | `release.yml` | `contents: read`, `packages: write`, `id-token: write`, `security-events: write` |
 | `job-deploy-container.yml` | `contents: read`, `id-token: write` |
@@ -325,6 +325,7 @@ jobs:
       checks: write
       pull-requests: write
       security-events: write  # CodeQL SARIF upload
+      issues: write           # PR summary comments
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -349,6 +350,7 @@ jobs:
       checks: write
       pull-requests: write
       security-events: write  # CodeQL SARIF upload
+      issues: write           # PR summary comments
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     with:
       dotnet-version: '10.0.x'
@@ -366,7 +368,7 @@ jobs:
 
 ### Permissions
 
-`pr-sdk.yml` callers need `contents: read`, `checks: write`, `pull-requests: write`, and `security-events: write`. These scopes cover PR annotations, summary comments, and CodeQL SARIF upload. The caller owns the effective token scope under `workflow_call`, so do not rely on the callee's `permissions:` block alone.
+`pr-sdk.yml` callers need `contents: read`, `checks: write`, `pull-requests: write`, `security-events: write`, and `issues: write`. These scopes cover PR annotations, PR summary comments, and CodeQL SARIF upload. The caller owns the effective token scope under `workflow_call`, so do not rely on the callee's `permissions:` block alone.
 
 
 ## Release Workflow

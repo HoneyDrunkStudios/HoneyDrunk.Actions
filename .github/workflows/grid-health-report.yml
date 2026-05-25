@@ -20,7 +20,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GRID_HEALTH_PAT }}
       GRID_HEALTH_TITLE: "Grid Health"
-      ARCHITECTURE_REPO: HoneyDrunkStudios/HoneyDrunk.Architecture
       ACTIONS_REPO: HoneyDrunkStudios/HoneyDrunk.Actions
     steps:
       - name: Checkout Actions

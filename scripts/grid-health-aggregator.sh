@@ -179,7 +179,7 @@ find_issue() {
 
 main_issue="$(find_issue "$ACTIONS_REPO" "$GRID_HEALTH_TITLE")"
 if [ -z "$main_issue" ]; then
-  main_issue_url="$(gh issue create --repo "$ACTIONS_REPO" --title "$GRID_HEALTH_TITLE" --body-file "$report" --label grid-health)"
+  main_issue_url="$(gh issue create --repo "$ACTIONS_REPO" --title "$GRID_HEALTH_TITLE" --body-file "$report")"
   main_issue="${main_issue_url##*/}"
 else
   gh issue reopen "$main_issue" --repo "$ACTIONS_REPO" >/dev/null 2>&1 || true
@@ -192,7 +192,7 @@ jq -c 'select(.status=="Fail" or .status=="Stale" or .status=="Missing")' "$resu
   printf 'Grid health classified `%s` in `%s` as **%s**.\n\nLatest run: %s\n\nUpdated: %s\n' "$workflow" "$repo_name" "$status" "${url:-none}" "$NOW_ISO" > "$body"
   repo="$ORG/$repo_name"
   issue="$(find_issue "$repo" "$title")"
-  if [ -z "$issue" ]; then gh issue create --repo "$repo" --title "$title" --body-file "$body" --label grid-health >/dev/null; else gh issue edit "$issue" --repo "$repo" --body-file "$body" >/dev/null; fi
+  if [ -z "$issue" ]; then gh issue create --repo "$repo" --title "$title" --body-file "$body" >/dev/null; else gh issue edit "$issue" --repo "$repo" --body-file "$body" >/dev/null; fi
 done
 
 jq -c 'select(.status=="Pass")' "$results" | while read -r row; do
