@@ -171,8 +171,8 @@ report="$workdir/report.md"
 } > "$report"
 
 find_issue() {
-  local repo="$1" title="$2"
-  gh issue list --repo "$repo" --state all --search "in:title \"$title\"" --json number,title,state \
+  local repo="$1" title="$2" state="${3:-all}"
+  gh issue list --repo "$repo" --state "$state" --limit 1000 --search "in:title \"$title\"" --json number,title,state \
     | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
     | head -n1
 }
@@ -192,14 +192,12 @@ jq -c 'select(.status=="Fail" or .status=="Stale" or .status=="Missing")' "$resu
   printf 'Grid health classified `%s` in `%s` as **%s**.\n\nLatest run: %s\n\nUpdated: %s\n' "$workflow" "$repo_name" "$status" "${url:-none}" "$NOW_ISO" > "$body"
   repo="$ORG/$repo_name"
   issue="$(find_issue "$repo" "$title")"
-  if [ -z "$issue" ]; then gh issue create --repo "$repo" --title "$title" --body-file "$body" >/dev/null; else gh issue edit "$issue" --repo "$repo" --body-file "$body" >/dev/null; fi
+  if [ -z "$issue" ]; then gh issue create --repo "$repo" --title "$title" --body-file "$body" >/dev/null; else gh issue reopen "$issue" --repo "$repo" >/dev/null 2>&1 || true; gh issue edit "$issue" --repo "$repo" --body-file "$body" >/dev/null; fi
 done
 
 jq -c 'select(.status=="Pass")' "$results" | while read -r row; do
   repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"; repo="$ORG/$repo_name"
-  issue="$(gh issue list --repo "$repo" --state open --search "in:title \"$title\"" --json number,title \
-    | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
-    | head -n1)"
+  issue="$(find_issue "$repo" "$title" open)"
   if [ -n "$issue" ]; then gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null; fi
 done
 
