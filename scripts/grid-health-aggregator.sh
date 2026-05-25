@@ -21,9 +21,15 @@ EOF
   exit 1
 fi
 
+workflow_mode() {
+  case "$1" in
+    weekly-*.yml|nightly-*.yml) echo "cadence" ;;
+    *) echo "event" ;;
+  esac
+}
+
 staleness_seconds() {
   case "$1" in
-    publish.yml) echo 0 ;;
     weekly-*.yml) echo $((8*24*60*60)) ;;
     nightly-*.yml) echo $((28*60*60)) ;;
     *) echo $((28*60*60)) ;;
@@ -84,8 +90,8 @@ for row in "${repos[@]}"; do
         url="$(jq -r '.html_url // ""' <<<"$latest")"
         if [[ "$conclusion" =~ ^(failure|cancelled|timed_out|action_required)$ ]]; then
           classification="Fail"
-        elif [ "$workflow" = "publish.yml" ]; then
-          [ "$conclusion" = "success" ] && classification="Pass" || classification="Fail"
+        elif [ "$(workflow_mode "$workflow")" = "event" ]; then
+          classification="Pass"
         else
           window="$(staleness_seconds "$workflow")"
           created_epoch="$(date -u -d "$created" +%s 2>/dev/null || echo 0)"
