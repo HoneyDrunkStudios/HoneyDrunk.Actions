@@ -155,7 +155,11 @@ jobs:
         id: cache-sonar-scanner
         uses: actions/cache@v4
         with:
-          path: ./.sonar/scanner
+          # Scanner cached at workspace root so the absolute
+          # $GITHUB_WORKSPACE/.sonar/scanner path resolves regardless of the
+          # caller's working-directory (which may be an inner subdir like
+          # 'HoneyDrunk.Kernel/' for Pattern A consumer repos).
+          path: ${{ github.workspace }}/.sonar/scanner
           key: ${{ runner.os }}-sonar-scanner
           restore-keys: ${{ runner.os }}-sonar-scanner
 
@@ -163,15 +167,54 @@ jobs:
         if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          mkdir -p ./.sonar/scanner
-          dotnet tool update dotnet-sonarscanner --tool-path ./.sonar/scanner
+          mkdir -p "${GITHUB_WORKSPACE}/.sonar/scanner"
+          dotnet tool update dotnet-sonarscanner --tool-path "${GITHUB_WORKSPACE}/.sonar/scanner"
+
+      - name: Install ReportGenerator (Cobertura → OpenCover conversion)
+        shell: bash
+        run: |
+          # job-build-and-test.yml emits Cobertura via `dotnet test --collect "XPlat Code Coverage"`.
+          # SonarQube Cloud for C# natively supports OpenCover (per the official .NET
+          # test coverage docs), not Cobertura. Convert before the scanner reads coverage.
+          mkdir -p "${GITHUB_WORKSPACE}/.sonar/reportgenerator"
+          dotnet tool update dotnet-reportgenerator-globaltool --tool-path "${GITHUB_WORKSPACE}/.sonar/reportgenerator"
 
       - name: Download coverage artifact (if exists)
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.coverage-artifact-name }}
-          path: TestResults
+          # Download into the caller's working-directory so the relative
+          # `**/coverage.*.xml` globs in sonar-project.properties resolve
+          # against the same root the scanner runs from.
+          path: ${{ inputs.working-directory }}/TestResults
         continue-on-error: true
+
+      - name: Convert Cobertura coverage to OpenCover
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Find any Cobertura xml files dropped by the download step. Skip
+          # silently if none exist — first-onboarding runs and no-coverage-collected
+          # runs should still produce a quality-gate verdict (coverage just won't
+          # be imported on that run).
+          mapfile -t COBERTURA_FILES < <(find ./TestResults -name "coverage.cobertura.xml" 2>/dev/null || true)
+          if [ "${#COBERTURA_FILES[@]}" -eq 0 ]; then
+            echo "::notice::No coverage.cobertura.xml found in TestResults/ — SonarQube Cloud will run without coverage data."
+            exit 0
+          fi
+          echo "Converting ${#COBERTURA_FILES[@]} Cobertura report(s) to OpenCover format..."
+          REPORTS=$(IFS=';'; echo "${COBERTURA_FILES[*]}")
+          "${GITHUB_WORKSPACE}/.sonar/reportgenerator/reportgenerator" \
+            -reports:"${REPORTS}" \
+            -targetdir:./TestResults/opencover \
+            -reporttypes:OpenCover
+          # Place the converted report at a stable path discoverable by the
+          # `**/coverage.opencover.xml` glob in per-repo sonar-project.properties.
+          if [ -f ./TestResults/opencover/OpenCover.xml ]; then
+            mv ./TestResults/opencover/OpenCover.xml ./TestResults/coverage.opencover.xml
+            echo "OpenCover report written to TestResults/coverage.opencover.xml"
+          fi
 
       - name: Begin SonarQube Cloud analysis
         working-directory: ${{ inputs.working-directory }}
@@ -180,12 +223,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.github-token || github.token }}
         shell: bash
         run: |
-          ./.sonar/scanner/dotnet-sonarscanner begin \
+          # Coverage report paths come from per-repo sonar-project.properties
+          # (sonar.cs.opencover.reportsPaths = **/coverage.opencover.xml) — not
+          # hard-coded here, so per-repo config can diverge cleanly if needed.
+          "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" begin \
             /k:"${{ inputs.sonar-project-key }}" \
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
-            /d:sonar.token="${SONAR_TOKEN}" \
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+            /d:sonar.token="${SONAR_TOKEN}"
 
       - name: Build
         working-directory: ${{ inputs.working-directory }}
@@ -204,4 +249,4 @@ jobs:
           SONAR_TOKEN: ${{ secrets.sonar-token }}
         shell: bash
         run: |
-          ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+          "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" end /d:sonar.token="${SONAR_TOKEN}"

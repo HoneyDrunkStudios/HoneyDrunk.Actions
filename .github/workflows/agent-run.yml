@@ -185,14 +185,19 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "${PACKET_PATH}" ]]; then
-            LINK="https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/${ARCH_REF}/${PACKET_PATH}"
+            # Resolve the Architecture checkout's actual commit SHA so the
+            # produced URL is a true permalink — won't move if the ref
+            # (e.g. 'main') advances after this run. Falls back to the
+            # input ref if SHA resolution fails for any reason.
+            ARCH_SHA=$(git rev-parse HEAD 2>/dev/null || echo "${ARCH_REF}")
+            LINK="https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/${ARCH_SHA}/${PACKET_PATH}"
             echo "link=${LINK}" >> "$GITHUB_OUTPUT"
             echo "has-packet=true" >> "$GITHUB_OUTPUT"
             # Verify the file exists in the checked-out Architecture tree.
             # Warn (do not fail) on missing — hotfix and out-of-band runs may
             # legitimately reference a packet that does not exist at this ref.
             if [[ ! -f "${PACKET_PATH}" ]]; then
-              echo "::warning::packet-path '${PACKET_PATH}' was supplied but the file does not exist at the resolved Architecture ref (${ARCH_REF}). The PR will still be opened, but the packet link will 404 until the packet lands at that ref."
+              echo "::warning::packet-path '${PACKET_PATH}' was supplied but the file does not exist at the resolved Architecture ref (ref=${ARCH_REF}, sha=${ARCH_SHA}). The PR will still be opened, but the packet link will 404 until the packet lands at that ref."
             fi
           else
             echo "has-packet=false" >> "$GITHUB_OUTPUT"
