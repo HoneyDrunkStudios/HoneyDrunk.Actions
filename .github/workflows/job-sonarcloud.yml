@@ -1,0 +1,207 @@
+# ==============================================================================
+# SonarQube Cloud Static Analysis Job (Tier 2)
+# ==============================================================================
+# Purpose:
+#   Run SonarQube Cloud (formerly SonarCloud — rebrand 2026) static analysis
+#   on a .NET repo using `dotnet-sonarscanner`. Reuses the coverage artifact
+#   from `job-build-and-test.yml`, publishes coverage to SonarQube Cloud,
+#   and reports the SonarQube Cloud quality gate as a PR check.
+#
+# Tier:
+#   Tier 2 of the ADR-0011 PR review pipeline. Required check on public repos
+#   per ADR-0011 D11.
+#
+# CALLER TRIGGER CONTRACT (load-bearing — read this if you are wiring a new caller):
+#   This workflow is `workflow_call`-only. It MUST only be invoked from a
+#   caller workflow whose `on:` block fires on `pull_request` events or `push`
+#   events to `main` — not on every feature-branch push, not on tags, not on
+#   schedule, not on workflow_dispatch from arbitrary refs.
+#
+#   The job below carries an `if:` guard that refuses to run when this
+#   constraint is violated, so a misconfigured caller will produce a no-op
+#   skipped job rather than burning a SonarQube Cloud run on every
+#   feature-branch push. Per ADR-0011 D11 cost discipline.
+#
+# Cost discipline:
+#   - pull_request and push:main only — enforced by both the caller's `on:`
+#     block AND the job-level `if:` guard below
+#   - Median PR run target: under 60 seconds
+#   - Coverage report reused from `job-build-and-test.yml` artifact (no second
+#     `dotnet test` run)
+#   - SonarQube Cloud OSS plan: free for unlimited public LOC; private LOC is
+#     paid per LOC and is intentionally out of scope (ADR-0011 D11 Gap 5)
+#
+# Secret:
+#   SONAR_TOKEN — provisioned as a GitHub org secret with `Selected repositories`
+#   scope. Provisioning lives in `infrastructure/walkthroughs/sonarcloud-organization-setup.md`
+#   in HoneyDrunk.Architecture. Free/OSS plan caps Personal Access Token
+#   expiration at 60 days — rotation discipline is tracked on the operator's
+#   calendar; the broader external-SaaS credential rotation policy is being
+#   formalized in a separate ADR (see `generated/adr-drafts/`).
+#
+# Single Responsibility:
+#   SonarQube Cloud analysis only. Does not run tests (reuses
+#   `job-build-and-test.yml`'s coverage artifact). Does not gate on Sonar Way
+#   quality-gate failure — failure surfaces via the PR check that SonarQube
+#   Cloud itself publishes; branch protection enforces it as a required check
+#   on a per-repo basis.
+#
+# Non-goals:
+#   Vulnerability scanning (see `job-dependency-scan.yml`), CodeQL SAST (see
+#   `job-codeql.yml`), secret scanning (see `job-secret-scan.yml`), analyzers
+#   and formatting (see `job-static-analysis.yml`).
+# ==============================================================================
+
+name: SonarQube Cloud (Job)
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      working-directory:
+        description: 'Working directory for build (inner project subdir, NOT git root)'
+        required: false
+        type: string
+        default: '.'
+
+      project-path:
+        description: 'Path to solution or project file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+
+      sonar-organization:
+        description: 'SonarQube Cloud organization key (e.g. honeydrunkstudios)'
+        required: true
+        type: string
+
+      sonar-project-key:
+        description: 'SonarQube Cloud project key (e.g. honeydrunkstudios_HoneyDrunk.Kernel)'
+        required: true
+        type: string
+
+      sonar-host-url:
+        description: 'SonarQube Cloud host URL'
+        required: false
+        type: string
+        default: 'https://sonarcloud.io'
+
+      coverage-artifact-name:
+        description: 'Name of the coverage artifact uploaded by job-build-and-test.yml'
+        required: false
+        type: string
+        default: 'coverage-reports-ubuntu-latest'
+
+    secrets:
+      sonar-token:
+        description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Architecture/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
+        required: true
+      github-token:
+        description: 'GitHub token for PR decoration (falls back to github.token if not supplied)'
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  sonarcloud:
+    name: SonarQube Cloud
+    runs-on: ${{ inputs.runs-on }}
+    # Trigger guard — defence in depth for ADR-0011 D11 cost discipline.
+    # Refuses to run when invoked from a misconfigured caller. The expected
+    # caller `on:` block is `pull_request` and `push: branches: [main]`.
+    # If a caller wires this workflow into a feature-branch push or a tag,
+    # this guard reports a skipped job rather than spending a SonarQube Cloud run.
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarQube Cloud requires full git history for blame attribution
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Set up Java (required by Sonar Scanner)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache SonarQube Cloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Cache SonarQube Cloud scanner
+        id: cache-sonar-scanner
+        uses: actions/cache@v4
+        with:
+          path: ./.sonar/scanner
+          key: ${{ runner.os }}-sonar-scanner
+          restore-keys: ${{ runner.os }}-sonar-scanner
+
+      - name: Install SonarQube Cloud scanner
+        if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p ./.sonar/scanner
+          dotnet tool update dotnet-sonarscanner --tool-path ./.sonar/scanner
+
+      - name: Download coverage artifact (if exists)
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.coverage-artifact-name }}
+          path: TestResults
+        continue-on-error: true
+
+      - name: Begin SonarQube Cloud analysis
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          SONAR_TOKEN: ${{ secrets.sonar-token }}
+          GITHUB_TOKEN: ${{ secrets.github-token || github.token }}
+        shell: bash
+        run: |
+          ./.sonar/scanner/dotnet-sonarscanner begin \
+            /k:"${{ inputs.sonar-project-key }}" \
+            /o:"${{ inputs.sonar-organization }}" \
+            /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
+            /d:sonar.token="${SONAR_TOKEN}" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+
+      - name: Build
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.project-path }}" ]; then
+            dotnet build "${{ inputs.project-path }}" --configuration Release
+          else
+            dotnet build --configuration Release
+          fi
+
+      - name: End SonarQube Cloud analysis
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          SONAR_TOKEN: ${{ secrets.sonar-token }}
+        shell: bash
+        run: |
+          ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="${SONAR_TOKEN}"

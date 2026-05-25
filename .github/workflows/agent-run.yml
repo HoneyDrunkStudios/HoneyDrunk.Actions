@@ -31,6 +31,24 @@
 #       secrets:
 #         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 #         github-token: ${{ secrets.GITHUB_TOKEN }}
+#
+# Usage example (named agent + packet — invariant 32 enforcement):
+#   jobs:
+#     execute:
+#       uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/agent-run.yml@main
+#       with:
+#         agent: execute
+#         packet-path: generated/issue-packets/active/adr-0011-code-review-pipeline/02-actions-job-sonarcloud-workflow.md
+#         checkout-target: HoneyDrunkStudios/HoneyDrunk.Actions
+#       secrets:
+#         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         github-token: ${{ secrets.AGENT_RUN_TOKEN }}
+#
+#   When `packet-path` is supplied, the workflow appends a structured "Packet:
+#   <permalink>" instruction to the agent's prompt envelope AND runs a post-hoc
+#   "Assert PR-body packet link" step that mechanically inserts the canonical
+#   `> Packet: <permalink>` line into any PR the agent opened. The workflow —
+#   not the LLM — is the mechanical guarantor of invariant 32.
 # ==============================================================================
 
 name: Agent Run
@@ -88,6 +106,19 @@ on:
         required: false
         type: string
         default: 'main'
+      packet-path:
+        description: >-
+          Optional path to the issue packet file (relative to HoneyDrunk.Architecture
+          root, e.g. generated/issue-packets/active/adr-0011-code-review-pipeline/02-actions-job-sonarcloud-workflow.md).
+          When set, the workflow (1) injects a "Packet: <permalink>" instruction
+          into the agent's prompt envelope and (2) runs a post-hoc assert step
+          that mechanically inserts the canonical "> Packet: <permalink>" line
+          into any PR the agent opened in the checkout-target repo. Together
+          these enforce invariant 32 in HoneyDrunk.Architecture regardless of
+          LLM behaviour.
+        required: false
+        type: string
+        default: ''
     secrets:
       anthropic-api-key:
         description: 'Anthropic API key. Required when provider=claude.'
@@ -146,27 +177,74 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve packet link
+        id: packet
+        env:
+          PACKET_PATH: ${{ inputs.packet-path }}
+          ARCH_REF: ${{ inputs.architecture-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PACKET_PATH}" ]]; then
+            LINK="https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/${ARCH_REF}/${PACKET_PATH}"
+            echo "link=${LINK}" >> "$GITHUB_OUTPUT"
+            echo "has-packet=true" >> "$GITHUB_OUTPUT"
+            # Verify the file exists in the checked-out Architecture tree.
+            # Warn (do not fail) on missing — hotfix and out-of-band runs may
+            # legitimately reference a packet that does not exist at this ref.
+            if [[ ! -f "${PACKET_PATH}" ]]; then
+              echo "::warning::packet-path '${PACKET_PATH}' was supplied but the file does not exist at the resolved Architecture ref (${ARCH_REF}). The PR will still be opened, but the packet link will 404 until the packet lands at that ref."
+            fi
+          else
+            echo "has-packet=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve prompt
         id: resolve
         env:
           AGENT: ${{ inputs.agent }}
           PROMPT: ${{ inputs.prompt }}
+          HAS_PACKET: ${{ steps.packet.outputs.has-packet }}
+          PACKET_LINK: ${{ steps.packet.outputs.link }}
+          PACKET_PATH: ${{ inputs.packet-path }}
         run: |
           set -euo pipefail
+
+          # Build the base envelope (agent-mode vs direct-prompt-mode).
           if [[ -n "${AGENT}" ]]; then
-            {
-              echo "prompt<<EOF_PROMPT"
-              echo "You are the **${AGENT}** agent. Read your full instructions from \`.claude/agents/${AGENT}.md\` first, then execute your full workflow as described there."
-              echo "EOF_PROMPT"
-            } >> "$GITHUB_OUTPUT"
+            BASE="You are the **${AGENT}** agent. Read your full instructions from \`.claude/agents/${AGENT}.md\` first, then execute your full workflow as described there."
           else
-            {
-              echo "prompt<<EOF_PROMPT"
-              printf '%s' "${PROMPT}"
-              echo ""
-              echo "EOF_PROMPT"
-            } >> "$GITHUB_OUTPUT"
+            BASE="${PROMPT}"
           fi
+
+          # When a packet is supplied, append a structured instruction that
+          # tells the agent to include the canonical packet-link line in any
+          # PR body it opens. This is best-effort soft enforcement — the
+          # post-hoc "Assert PR-body packet link" step is the mechanical
+          # guarantor of invariant 32 if the LLM ignores this instruction.
+          if [[ "${HAS_PACKET}" == "true" ]]; then
+            PACKET_INSTRUCTION="
+
+          ---
+
+          **Issue packet for this run:** \`${PACKET_PATH}\`
+          **Packet permalink:** ${PACKET_LINK}
+
+          When you open a pull request for this work, include the following line verbatim in the PR body (this satisfies invariant 32 in HoneyDrunk.Architecture and is what the review agent uses to resolve the packet as the primary scope anchor):
+
+          > Packet: ${PACKET_LINK}
+
+          If you cannot include the link for any reason, label the PR \`out-of-band\` and explain why in the PR body."
+            FULL_PROMPT="${BASE}${PACKET_INSTRUCTION}"
+          else
+            FULL_PROMPT="${BASE}"
+          fi
+
+          {
+            echo "prompt<<EOF_PROMPT"
+            printf '%s' "${FULL_PROMPT}"
+            echo ""
+            echo "EOF_PROMPT"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run agent — Claude
         if: ${{ inputs.provider == 'claude' || inputs.provider == '' }}
@@ -188,3 +266,57 @@ jobs:
           # TODO: wire openai/codex-action once stable
           echo "::error::Codex provider is not yet wired. Use provider: claude."
           exit 1
+
+      # Mechanical guarantor of invariant 32 (HoneyDrunk.Architecture).
+      # The prompt-side instruction in "Resolve prompt" is best-effort —
+      # this step is the workflow-side enforcement. It locates any PR the
+      # agent opened on the run's branch in the checkout-target repo and
+      # asserts the canonical "> Packet: <permalink>" line into the PR body
+      # via `gh pr edit`. Idempotent (no-op if the line is already present)
+      # and soft on edge cases (no PR, no checkout-target, detached HEAD,
+      # main-branch run → notice + exit 0).
+      - name: Assert PR-body packet link
+        if: ${{ inputs.packet-path != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+          PACKET_LINK: ${{ steps.packet.outputs.link }}
+          PACKET_PATH: ${{ inputs.packet-path }}
+          CHECKOUT_TARGET: ${{ inputs.checkout-target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CHECKOUT_TARGET}" ]]; then
+            echo "::notice::No checkout-target — agent ran in Architecture-only mode; PR-body assert skipped (no target repo to inspect)."
+            exit 0
+          fi
+
+          # The agent runs in target-repo/ (set by the "Checkout target repo" step).
+          cd target-repo
+
+          BRANCH=$(git branch --show-current || true)
+          if [[ -z "${BRANCH}" || "${BRANCH}" == "main" ]]; then
+            echo "::notice::Agent did not open a feature branch (current=${BRANCH:-detached}); no PR to assert."
+            exit 0
+          fi
+
+          # Find the PR opened from this branch in the target repo.
+          PR_NUMBER=$(gh pr list --repo "${CHECKOUT_TARGET}" --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "${PR_NUMBER}" ]]; then
+            echo "::notice::Agent did not open a PR on branch '${BRANCH}' in ${CHECKOUT_TARGET}; nothing to assert."
+            exit 0
+          fi
+
+          # Read current PR body. If the exact canonical line is already present, no-op.
+          BODY=$(gh pr view "${PR_NUMBER}" --repo "${CHECKOUT_TARGET}" --json body --jq '.body // ""')
+          EXPECTED_LINE="> Packet: ${PACKET_LINK}"
+
+          if printf '%s\n' "${BODY}" | grep -Fxq "${EXPECTED_LINE}"; then
+            echo "PR #${PR_NUMBER} already contains the canonical packet link line; no edit needed."
+            exit 0
+          fi
+
+          # Otherwise, prepend the canonical packet-link block, preserving the agent's body below an `---` separator.
+          NEW_BODY=$(printf '%s\n\n---\n\n%s\n' "${EXPECTED_LINE}" "${BODY}")
+          echo "Asserting canonical packet link on PR #${PR_NUMBER} in ${CHECKOUT_TARGET}."
+          gh pr edit "${PR_NUMBER}" --repo "${CHECKOUT_TARGET}" --body "${NEW_BODY}"
