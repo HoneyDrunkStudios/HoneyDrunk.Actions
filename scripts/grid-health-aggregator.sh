@@ -21,9 +21,16 @@ EOF
   exit 1
 fi
 
+workflow_mode() {
+  case "$1" in
+    weekly-*.yml|nightly-*.yml) echo "cadence" ;;
+    actions-ci.yml|azure-oidc-deploy.yml|deploy.yml|file-packets.yml|grid-health-report.yml|hive-field-mirror.yml|pr.yml|pr-core.yml|publish.yml|release.yml|release-*.yml|seed-labels.yml|seed-labels-fanout.yml) echo "event" ;;
+    *) echo "cadence" ;;
+  esac
+}
+
 staleness_seconds() {
   case "$1" in
-    publish.yml) echo 0 ;;
     weekly-*.yml) echo $((8*24*60*60)) ;;
     nightly-*.yml) echo $((28*60*60)) ;;
     *) echo $((28*60*60)) ;;
@@ -57,9 +64,6 @@ for row in "${repos[@]}"; do
   mapfile -t workflows < <(jq -r '.tracked_workflows[]' <<<"$row")
   for workflow in "${workflows[@]}"; do
     workflow="${workflow//$'\r'/}"
-    if [ "$workflow" = "pr-core.yml" ]; then
-      continue
-    fi
     repo="$ORG/$name"
     api="repos/$repo/actions/workflows/$workflow/runs?per_page=10"
     body="$workdir/response.json"
@@ -84,8 +88,8 @@ for row in "${repos[@]}"; do
         url="$(jq -r '.html_url // ""' <<<"$latest")"
         if [[ "$conclusion" =~ ^(failure|cancelled|timed_out|action_required)$ ]]; then
           classification="Fail"
-        elif [ "$workflow" = "publish.yml" ]; then
-          [ "$conclusion" = "success" ] && classification="Pass" || classification="Fail"
+        elif [ "$(workflow_mode "$workflow")" = "event" ]; then
+          classification="Pass"
         else
           window="$(staleness_seconds "$workflow")"
           created_epoch="$(date -u -d "$created" +%s 2>/dev/null || echo 0)"
@@ -117,7 +121,7 @@ for row in "${repos[@]}"; do
   done
 done
 
-workflows_json="$(jq -R -s 'split("\n")[:-1] | unique | sort' < <(jq -r '.workflow' "$results"))"
+workflows_json="$(jq -R -s 'split("\n")[:-1] | map(gsub("\\r"; "")) | unique | sort' < <(jq -r '.workflow' "$results" | tr -d '\r'))"
 fail_count="$(jq 'select(.status=="Fail") | 1' "$results" | wc -l | tr -d ' ')"
 stale_missing_count="$(jq 'select(.status=="Stale" or .status=="Missing") | 1' "$results" | wc -l | tr -d ' ')"
 if [ "$fail_count" -gt 0 ]; then header="🔴 $fail_count failures"; elif [ "$stale_missing_count" -gt 0 ]; then header="🟠 $stale_missing_count stale or missing"; else header="✅ all green"; fi
@@ -125,7 +129,7 @@ if [ "$fail_count" -gt 0 ]; then header="🔴 $fail_count failures"; elif [ "$st
 org_repos="$workdir/org-repos.txt"
 gh api "orgs/$ORG/repos?per_page=100" --paginate --jq '.[].name' | sort > "$org_repos"
 catalog_repos="$workdir/catalog-repos.txt"
-jq -r '.nodes[].name' "$CATALOG_PATH" | sort > "$catalog_repos"
+jq -r '.nodes[].name | gsub("\\r"; "")' "$CATALOG_PATH" | tr -d '\r' | sort > "$catalog_repos"
 drift="$(comm -23 "$org_repos" "$catalog_repos" || true)"
 if [ -n "$drift" ]; then header="$header · ⚠️ Catalog drift"; fi
 
@@ -138,14 +142,14 @@ report="$workdir/report.md"
   echo "Legend: ✅ Pass · 🔴 Fail · 🟠 Stale · ❓ Missing · blank = workflow not tracked for that repo."
   echo
   printf '| Repo |'
-  jq -r '.[]' <<<"$workflows_json" | while read -r w; do printf ' `%s` |' "$w"; done
+  jq -r '.[]' <<<"$workflows_json" | tr -d '\r' | while read -r w; do printf ' `%s` |' "$w"; done
   echo
   printf '|---|'
-  jq -r '.[]' <<<"$workflows_json" | while read -r _; do printf '%s' '---|'; done
+  jq -r '.[]' <<<"$workflows_json" | tr -d '\r' | while read -r _; do printf '%s' '---|'; done
   echo
-  jq -r '.nodes[] | select((.tracked_workflows // []) | length > 0) | .name' "$CATALOG_PATH" | while read -r repo; do
+  jq -r '.nodes[] | select((.tracked_workflows // []) | length > 0) | .name | gsub("\\r"; "")' "$CATALOG_PATH" | tr -d '\r' | while read -r repo; do
     printf '| `%s` |' "$repo"
-    jq -r '.[]' <<<"$workflows_json" | while read -r workflow; do
+    jq -r '.[]' <<<"$workflows_json" | tr -d '\r' | while read -r workflow; do
       cell="$(jq -r --arg repo "$repo" --arg workflow "$workflow" 'select(.repo==$repo and .workflow==$workflow) | @base64' "$results" | head -n1)"
       if [ -z "$cell" ]; then printf ' |'; else
         obj="$(printf '%s' "$cell" | base64 -d)"
@@ -157,9 +161,9 @@ report="$workdir/report.md"
     echo
   done
   echo
-  echo "## Per-repo failure issues"
+  echo "## Per-repo Fail/Missing issues"
   echo
-  echo "Per-repo issues are opened for Fail/Stale/Missing and closed when the pair returns to Pass."
+  echo "Per-repo issues are opened for Fail/Missing. Existing per-repo issues are closed when the pair returns to Pass or becomes Stale; Stale results remain central-only."
   echo
   echo "## Catalog drift"
   echo
@@ -186,7 +190,7 @@ else
   gh issue edit "$main_issue" --repo "$ACTIONS_REPO" --body-file "$report"
 fi
 
-jq -c 'select(.status=="Fail" or .status=="Stale" or .status=="Missing")' "$results" | while read -r row; do
+jq -c 'select(.status=="Fail" or .status=="Missing")' "$results" | while read -r row; do
   repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; status="$(jq -r '.status' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"
   body="$workdir/failure.md"
   printf 'Grid health classified `%s` in `%s` as **%s**.\n\nLatest run: %s\n\nUpdated: %s\n' "$workflow" "$repo_name" "$status" "${url:-none}" "$NOW_ISO" > "$body"
@@ -195,10 +199,16 @@ jq -c 'select(.status=="Fail" or .status=="Stale" or .status=="Missing")' "$resu
   if [ -z "$issue" ]; then gh issue create --repo "$repo" --title "$title" --body-file "$body" >/dev/null; else gh issue reopen "$issue" --repo "$repo" >/dev/null 2>&1 || true; gh issue edit "$issue" --repo "$repo" --body-file "$body" >/dev/null; fi
 done
 
-jq -c 'select(.status=="Pass")' "$results" | while read -r row; do
-  repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"; repo="$ORG/$repo_name"
+jq -c 'select(.status=="Pass" or .status=="Stale")' "$results" | while read -r row; do
+  repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; status="$(jq -r '.status' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"; repo="$ORG/$repo_name"
   issue="$(find_issue "$repo" "$title" open)"
-  if [ -n "$issue" ]; then gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null; fi
+  if [ -n "$issue" ]; then
+    if [ "$status" = "Pass" ]; then
+      gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null
+    else
+      gh issue close "$issue" --repo "$repo" --comment "Closing because Grid Health now keeps Stale results on the central dashboard only as of $NOW_ISO." >/dev/null
+    fi
+  fi
 done
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
