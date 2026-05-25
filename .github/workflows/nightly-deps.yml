@@ -264,7 +264,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.github-token || github.token }}
+          token: ${{ secrets['github-token'] || github.token }}
       
       - name: Download dependency reports
         uses: actions/download-artifact@v4
@@ -298,7 +298,7 @@ jobs:
           group-updates: ${{ inputs.group-updates }}
           labels: 'dependencies,automated'
         env:
-          GH_TOKEN: ${{ secrets.github-token || github.token }}
+          GH_TOKEN: ${{ secrets['github-token'] || github.token }}
   
   consolidate-report:
     name: Consolidate Dependency Report
@@ -335,7 +335,7 @@ jobs:
         shell: bash
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.github-token || github.token }}
+          GH_TOKEN: ${{ secrets['github-token'] || github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_TITLE: 📦 Outdated Dependencies
         run: |
