@@ -96,5 +96,7 @@ grep -q '❓ Missing' "$output"
 grep -q 'RepoDrift' "$output"
 grep -q 'issue create --repo HoneyDrunkStudios/HoneyDrunk.Actions' "$workdir/gh.log"
 grep -q 'issue create --repo HoneyDrunkStudios/RepoFail' "$workdir/gh.log"
+grep -q 'issue create --repo HoneyDrunkStudios/RepoEmpty' "$workdir/gh.log"
+grep -q 'issue create --repo HoneyDrunkStudios/RepoMissing' "$workdir/gh.log"
 
 echo "grid-health aggregator smoke passed"

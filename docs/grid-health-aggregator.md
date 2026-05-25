@@ -27,7 +27,7 @@ Open `HoneyDrunk.Actions` → Actions → `Grid Health Report` → **Run workflo
 
 ## Known-broken workflow policy
 
-There is no snooze mechanism today. If a workflow is known broken and intentionally deferred, close the per-repo issue with context; the next aggregator run will reopen it if the state is still red. That friction is intentional until the Grid decides a snooze contract.
+There is no snooze mechanism today. If a workflow is known broken, missing, or intentionally deferred, close the per-repo issue with context; the next aggregator run will reopen it if the state is still red or missing. That friction is intentional until the Grid decides a snooze contract.
 
 ## References
 
