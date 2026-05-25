@@ -159,7 +159,7 @@ report="$workdir/report.md"
   echo
   echo "## Per-repo failure issues"
   echo
-  echo "Per-repo issues are opened for Fail/Stale/Missing and closed when the pair returns to Pass."
+  echo "Per-repo issues are opened for Fail/Missing and closed when the pair returns to Pass. Stale results remain central-only."
   echo
   echo "## Catalog drift"
   echo
@@ -186,7 +186,7 @@ else
   gh issue edit "$main_issue" --repo "$ACTIONS_REPO" --body-file "$report"
 fi
 
-jq -c 'select(.status=="Fail" or .status=="Stale" or .status=="Missing")' "$results" | while read -r row; do
+jq -c 'select(.status=="Fail" or .status=="Missing")' "$results" | while read -r row; do
   repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; status="$(jq -r '.status' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"
   body="$workdir/failure.md"
   printf 'Grid health classified `%s` in `%s` as **%s**.\n\nLatest run: %s\n\nUpdated: %s\n' "$workflow" "$repo_name" "$status" "${url:-none}" "$NOW_ISO" > "$body"

@@ -96,7 +96,10 @@ grep -q '❓ Missing' "$output"
 grep -q 'RepoDrift' "$output"
 grep -q 'issue create --repo HoneyDrunkStudios/HoneyDrunk.Actions' "$workdir/gh.log"
 grep -q 'issue create --repo HoneyDrunkStudios/RepoFail' "$workdir/gh.log"
-grep -q 'issue create --repo HoneyDrunkStudios/RepoEmpty' "$workdir/gh.log"
+if grep -q 'issue create --repo HoneyDrunkStudios/RepoEmpty' "$workdir/gh.log"; then
+  echo "stale workflow unexpectedly created a per-repo issue" >&2
+  exit 1
+fi
 grep -q 'issue create --repo HoneyDrunkStudios/RepoMissing' "$workdir/gh.log"
 
 echo "grid-health aggregator smoke passed"
