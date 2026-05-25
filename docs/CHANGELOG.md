@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `job-sonarcloud.yml`: new tier-2 reusable workflow that runs SonarQube Cloud (formerly SonarCloud) static analysis on a .NET repo via `dotnet-sonarscanner`. Reuses the coverage artifact from `job-build-and-test.yml` (no double `dotnet test`), converts Cobertura → OpenCover via ReportGenerator before the scanner reads coverage (Sonar's native C# format), and reports the SonarQube Cloud quality gate as a PR check. Job-level `if:` guard enforces `pull_request` + `push:main` only as defence in depth for ADR-0011 D11 cost discipline. Inputs include `working-directory` (supports inner-subdir Pattern A layouts), `sonar-organization`, `sonar-project-key`, and `coverage-artifact-name`. Per ADR-0011 packet 02.
+
 ### Changed
+
 - `actions-ci.yml`: chose D4 Outcome B for `docker://` refs and migrated actionlint to direct install-and-invoke.
+- `agent-run.yml`: added optional `packet-path` input. When supplied, the workflow (1) injects a structured `> Packet: <permalink>` instruction into the agent's prompt envelope and (2) runs a post-hoc "Assert PR-body packet link" step that mechanically inserts the canonical line into any PR the agent opened in the `checkout-target` repo. The workflow — not the LLM — is the mechanical guarantor of invariant 32 in HoneyDrunk.Architecture. The permalink resolves to the Architecture checkout's actual commit SHA (via `git rev-parse HEAD`) so the link is immutable, not a moving branch ref. Idempotent (no edit if the canonical line is already present) and soft on edge cases (no PR / no checkout-target / detached HEAD / main-branch run → notice + exit 0). Existing callers unaffected — `packet-path` defaults to empty. Per ADR-0011 packet 03.
 - `docs/action-pins.md`: added the ADR-0012 D10 third-party action pin inventory.
 - `docs/d4-retrofit-audit.md`: recorded the D4 retrofit audit and `docker://` policy clarification.
 - `grid-health-report.yml`: added the ADR-0012 D6 Grid Health aggregator workflow, shell implementation, and operator guide.
