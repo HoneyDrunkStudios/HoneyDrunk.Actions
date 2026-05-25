@@ -12,6 +12,7 @@ cat > "$workdir/catalog.json" <<'JSON'
     { "id": "pass", "name": "RepoPass", "signal": "ok", "tracked_workflows": ["weekly-health.yml"] },
     { "id": "fail", "name": "RepoFail", "signal": "bad", "tracked_workflows": ["nightly-health.yml"] },
     { "id": "empty", "name": "RepoEmpty", "signal": "empty", "tracked_workflows": ["weekly-empty.yml"] },
+    { "id": "stale", "name": "RepoStale", "signal": "stale", "tracked_workflows": ["weekly-stale.yml"] },
     { "id": "missing", "name": "RepoMissing", "signal": "missing", "tracked_workflows": ["publish.yml"] }
   ]
 }
@@ -30,7 +31,7 @@ case "$cmd" in
     endpoint="${1:-}"
     case "$endpoint" in
       orgs/HoneyDrunkStudios/repos*)
-        printf '%s\n' RepoPass RepoFail RepoEmpty RepoMissing RepoDrift
+        printf '%s\n' RepoPass RepoFail RepoEmpty RepoStale RepoMissing RepoDrift
         ;;
       repos/HoneyDrunkStudios/RepoPass/actions/workflows/weekly-health.yml/runs*)
         printf 'HTTP/2 200\r\ncontent-type: application/json\r\n\r\n{"total_count":1,"workflow_runs":[{"conclusion":"success","created_at":"2999-01-01T00:00:00Z","html_url":"https://example.test/pass"}]}'
@@ -40,6 +41,9 @@ case "$cmd" in
         ;;
       repos/HoneyDrunkStudios/RepoEmpty/actions/workflows/weekly-empty.yml/runs*)
         printf 'HTTP/2 200\r\ncontent-type: application/json\r\n\r\n{"total_count":0,"workflow_runs":[]}'
+        ;;
+      repos/HoneyDrunkStudios/RepoStale/actions/workflows/weekly-stale.yml/runs*)
+        printf 'HTTP/2 200\r\ncontent-type: application/json\r\n\r\n{"total_count":1,"workflow_runs":[{"conclusion":"success","created_at":"2000-01-01T00:00:00Z","html_url":"https://example.test/stale"}]}'
         ;;
       repos/HoneyDrunkStudios/RepoMissing/actions/workflows/publish.yml/runs*)
         printf 'HTTP/2 404\r\ncontent-type: application/json\r\n\r\n{"message":"Not Found"}'
@@ -96,7 +100,8 @@ grep -q '❓ Missing' "$output"
 grep -q 'RepoDrift' "$output"
 grep -q 'issue create --repo HoneyDrunkStudios/HoneyDrunk.Actions' "$workdir/gh.log"
 grep -q 'issue create --repo HoneyDrunkStudios/RepoFail' "$workdir/gh.log"
-if grep -q 'issue create --repo HoneyDrunkStudios/RepoEmpty' "$workdir/gh.log"; then
+grep -q 'issue create --repo HoneyDrunkStudios/RepoEmpty' "$workdir/gh.log"
+if grep -q 'issue create --repo HoneyDrunkStudios/RepoStale' "$workdir/gh.log"; then
   echo "stale workflow unexpectedly created a per-repo issue" >&2
   exit 1
 fi
