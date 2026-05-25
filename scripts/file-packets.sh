@@ -353,6 +353,10 @@ declare -A LABELS_KNOWN=()
 # (see the packet loop) so an over-long initiative slug degrades to a
 # truncated label instead of aborting the whole run.
 GITHUB_LABEL_MAX=50
+# GitHub issue bodies are capped at 65,536 characters. Leave headroom for the
+# generated packet note and truncation footer so createIssue never fails after
+# partially filing earlier packets in the run.
+GITHUB_ISSUE_BODY_MAX=65000
 
 ensure_label() {
   local repo="$1" name="$2"
@@ -464,6 +468,30 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
     printf '> %s\n\n' "$note_line"
     printf '%s\n' "$body_content"
   } > "$body_file"
+
+  body_chars="$(wc -m < "$body_file" | tr -d '[:space:]')"
+  if (( body_chars > GITHUB_ISSUE_BODY_MAX )); then
+    truncated_file="$(mktemp)"
+    python3 - "$body_file" "$truncated_file" "$GITHUB_ISSUE_BODY_MAX" "$rel" <<'PY'
+import sys
+source, target, limit_raw, rel = sys.argv[1:5]
+limit = int(limit_raw)
+footer = (
+    "\n\n---\n\n"
+    "_This issue body was truncated by the packet filing workflow because GitHub issue bodies "
+    "are limited to 65,536 characters. Read the complete packet in the Architecture repo at "
+    f"`{rel}`._\n"
+)
+with open(source, encoding="utf-8") as f:
+    body = f.read()
+keep = max(0, limit - len(footer))
+with open(target, "w", encoding="utf-8") as f:
+    f.write(body[:keep])
+    f.write(footer)
+PY
+    mv "$truncated_file" "$body_file"
+    echo "warning: truncated issue body for $rel from ${body_chars} chars to <= ${GITHUB_ISSUE_BODY_MAX}; full packet remains in Architecture"
+  fi
 
   label_args=()
   for l in "${all_labels[@]}"; do
