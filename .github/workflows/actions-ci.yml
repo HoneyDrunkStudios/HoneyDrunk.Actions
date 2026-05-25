@@ -18,10 +18,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install actionlint
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$RUNNER_TEMP/actionlint"
+          mkdir -p "$INSTALL_DIR"
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) "$ACTIONLINT_VERSION" "$INSTALL_DIR"
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+
       - name: Run actionlint
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color -shellcheck=
+        shell: bash
+        run: |
+          set -euo pipefail
+          actionlint -color -shellcheck=
 
       - name: Check banned CI secret patterns
         shell: bash

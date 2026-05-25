@@ -314,12 +314,13 @@ jobs:
         run: mkdir -p "${{ inputs.working-directory }}/artifacts"
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          path: ${{ inputs.working-directory }}
-          format: spdx-json
-          output-file: ${{ inputs.working-directory }}/artifacts/sbom.spdx.json
-          upload-artifact: false
+        shell: bash
+        env:
+          SYFT_VERSION: v1.44.0
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/main/install.sh" | sh -s -- -b "$RUNNER_TEMP/syft" "$SYFT_VERSION"
+          "$RUNNER_TEMP/syft/syft" "dir:${{ inputs.working-directory }}"             --output "spdx-json=${{ inputs.working-directory }}/artifacts/sbom.spdx.json"
 
       - name: Run license compliance check
         shell: bash
@@ -603,13 +604,12 @@ jobs:
           echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
       
       - name: Scan container image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ${{ steps.container_tags.outputs.image_tag }}
-          format: 'sarif'
-          output: 'container-scan.sarif'
-          severity: 'HIGH,CRITICAL'
-          exit-code: '1'
+        shell: bash
+        env:
+          TRIVY_IMAGE: aquasec/trivy:0.69.3
+        run: |
+          set -euo pipefail
+          docker run --rm             -v "$PWD:/workspace"             -v /var/run/docker.sock:/var/run/docker.sock             -w /workspace             "$TRIVY_IMAGE"             image             --format sarif             --output container-scan.sarif             --severity HIGH,CRITICAL             --exit-code 1             "${{ steps.container_tags.outputs.image_tag }}"
 
       - name: Upload container scan to GitHub Security
         if: always()

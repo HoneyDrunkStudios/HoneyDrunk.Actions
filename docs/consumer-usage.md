@@ -2,8 +2,37 @@
 
 This document provides sample workflows for consuming repos to adopt the HoneyDrunk.Actions workflow families.
 
+> Authoritative per ADR-0012 D9 (Decision: caller-workflow scaffolding is documented here). The canonical baselines below are the source of truth for invariant 39 (caller-workflow `permissions:` superset rule).
+
+## Caller permissions — the load-bearing rule
+
+Every caller workflow that consumes a reusable workflow from `HoneyDrunk.Actions` must declare a top-level `permissions:` block. Under `workflow_call`, the callee's `permissions:` block is purely documentary — the effective job token permissions are determined by the **caller**. A caller that omits `permissions:` inherits the repository's default token scope (`contents: read`, all writes `none` in the default GitHub Actions configuration), and any reusable workflow that requests a `write` scope fails at workflow-load time with a validation error, before a single step runs.
+
+This rule is invariant 39 in `HoneyDrunk.Architecture/constitution/invariants.md` and is governed by ADR-0012 D5.
+
+**Validation failure is silent until the next scheduled run.** If you add a new caller without `permissions:`, your PR may merge cleanly (the workflow-load check runs at trigger time, not at merge time). The grid-health aggregator (`grid-health-report.yml`) classifies the workflow as **Stale** when its scheduled trigger fails to produce a run, surfacing the bug within ~24 hours. The review agent's Request Changes rule (per `.claude/agents/review.md`) is the earlier safety net.
+
+The canonical permissions baselines below are minimum sets. Granting more than required is legal but discouraged. Granting less is broken at workflow-load time.
+
+| Reusable workflow | Minimum caller `permissions:` |
+|---|---|
+| `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
+| `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write` |
+| `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
+| `release.yml` | `contents: read`, `packages: write`, `id-token: write`, `security-events: write` |
+| `job-deploy-container.yml` | `contents: read`, `id-token: write` |
+| `job-deploy-container-app.yml` | `contents: read`, `id-token: write` |
+| `job-deploy-function.yml` | `contents: read`, `id-token: write` |
+| `nightly-security.yml` | `contents: read`, `security-events: write`, `issues: write` |
+| `nightly-deps.yml` | `contents: write`, `pull-requests: write`, `issues: write` |
+| `nightly-accessibility.yml` | `contents: read`, `issues: write` |
+| `weekly-governance.yml` | `contents: read`, `issues: write` |
+
+For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from the callee workflow's declared top-level and job-level `permissions:` blocks in `.github/workflows/<callee>.yml`.
+
 ## Table of Contents
 
+- [Caller permissions — the load-bearing rule](#caller-permissions--the-load-bearing-rule)
 - [PR Core Workflow](#pr-core-workflow)
 - [PR SDK Workflow](#pr-sdk-workflow)
 - [Grid Review Request Workflow](#grid-review-request-workflow)
@@ -202,6 +231,11 @@ jobs:
 
 ---
 
+### Permissions
+
+`pr-core.yml` callers need an explicit top-level or job-level permissions block that grants `contents: read`, `checks: write`, `pull-requests: write`, and `security-events: write`; examples that enable metadata/size label management also grant `issues: write`. Under `workflow_call`, the callee declaration is documentary, so missing or under-granted caller permissions fail at workflow-load time and later surface through grid-health as Stale. Extra scopes are allowed only when another job in the same workflow needs them; prefer least privilege.
+
+
 ## Grid Review Request Workflow
 
 **Purpose:** Advisory ADR-0044 trigger rail for the OpenClaw/Codex Grid Review Runner. This workflow does **not** run Codex, Anthropic, OpenAI, or any model API in GitHub Actions. It emits a signed review-request payload for OpenClaw, preserves the same payload as a durable fallback artifact, and can post a machine-readable replay pointer comment when OpenClaw is unavailable.
@@ -260,6 +294,11 @@ owner/repo#pr@headSha
 When webhook delivery is unavailable or not configured, the workflow uploads `review-request.json` as an artifact and can post a machine-readable PR comment containing the run id, run attempt, artifact name, head SHA, and idempotency key for OpenClaw cron/poll replay. The workflow is advisory only and must not be made a required blocking check until the Grid explicitly changes ADR-0044's posture.
 
 ---
+
+### Permissions
+
+`job-review-request.yml` callers need `contents: read`, `pull-requests: read`, and `issues: write`. The issue write scope is used only for the optional fallback replay-pointer comment. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
+
 
 ## PR SDK Workflow
 
@@ -325,6 +364,11 @@ jobs:
 
 ---
 
+### Permissions
+
+`pr-sdk.yml` callers need `contents: read`, `checks: write`, `pull-requests: write`, and `security-events: write`. These scopes cover PR annotations, summary comments, and CodeQL SARIF upload. The caller owns the effective token scope under `workflow_call`, so do not rely on the callee's `permissions:` block alone.
+
+
 ## Release Workflow
 
 **Purpose:** Comprehensive release validation and artifact publication.
@@ -341,6 +385,12 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+
 jobs:
   release:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/release.yml@main
@@ -349,11 +399,6 @@ jobs:
       nuget-source: 'https://api.nuget.org/v3/index.json'
     secrets:
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
 ```
 
 ### Container Application Release
@@ -365,6 +410,12 @@ on:
   push:
     tags:
       - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
 
 jobs:
   release:
@@ -379,11 +430,6 @@ jobs:
     secrets:
       container-registry-username: ${{ github.actor }}
       container-registry-password: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
 ```
 
 ### Full Release with NuGet and Container
@@ -419,6 +465,7 @@ permissions:
   contents: read
   packages: write
   id-token: write
+  security-events: write
 ```
 
 ### Worker / Deployable App Release
@@ -433,6 +480,12 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+
 jobs:
   release:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/release.yml@main
@@ -442,11 +495,6 @@ jobs:
       publish-projects: 'MyWorker/MyWorker.csproj;MyApi/MyApi.csproj'
       publish-runtime: 'linux-x64'
       publish-self-contained: false
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
 ```
 
 ### Container with Custom Build Context
@@ -460,6 +508,12 @@ on:
   push:
     tags:
       - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
 
 jobs:
   release:
@@ -477,14 +531,14 @@ jobs:
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
     secrets:
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
 ```
 
 ---
+
+### Permissions
+
+`release.yml` callers need `contents: read`, `packages: write`, `id-token: write`, and `security-events: write`. `id-token: write` enables Azure OIDC/SBOM attestation paths, `packages: write` covers package/container publication, and `security-events: write` covers SARIF upload from release-time scans. Missing scopes fail at workflow-load or upload time; broader scopes should be justified by adjacent jobs.
+
 
 ## Azure Authentication
 
@@ -635,6 +689,11 @@ The `azure/keyvault-fetch` action can be used independently in any workflow:
 
 ---
 
+### Permissions
+
+`job-deploy-container.yml` callers need `contents: read` and `id-token: write`, derived from the callee workflow's declared permissions. `id-token: write` is mandatory for Azure OIDC. Missing it fails before Azure login can run; grant no package or issue scopes unless another job in the same caller needs them.
+
+
 ## Deploy Azure Container App
 
 **Purpose:** Deploy a containerized Node to Azure Container Apps using ADR-0015 revision traffic shifting.
@@ -765,6 +824,11 @@ Secret name mapping:
 
 ---
 
+### Permissions
+
+`job-deploy-container-app.yml` callers need `contents: read` and `id-token: write`, derived from the callee workflow's declared permissions. The caller controls the effective OIDC token grant under `workflow_call`; missing `id-token: write` breaks deployment before any Azure command runs.
+
+
 ## Deploy Azure Function App
 
 **Purpose:** Deploy a .NET Azure Function App after building with `release.yml` or a custom build job.
@@ -849,6 +913,11 @@ permissions:
 
 ---
 
+### Permissions
+
+`job-deploy-function.yml` callers need `contents: read` and `id-token: write`, derived from the callee workflow's declared permissions. If a build job in the same workflow uploads artifacts, keep any extra scopes scoped to that job when possible.
+
+
 ## Nightly Security Workflow
 
 **Purpose:** Deep, comprehensive security scanning on a schedule.
@@ -908,6 +977,11 @@ permissions:
 ```
 
 ---
+
+### Permissions
+
+`nightly-security.yml` callers need `contents: read`, `security-events: write`, and `issues: write`. `security-events: write` uploads SARIF; `issues: write` lets the workflow maintain tracking issues. Missing permissions cause scheduled runs to fail at workflow-load time, which grid-health later classifies as Stale.
+
 
 ## Nightly Dependencies Workflow
 
@@ -975,6 +1049,11 @@ permissions:
 ```
 
 ---
+
+### Permissions
+
+`nightly-deps.yml` callers need `contents: write`, `pull-requests: write`, and `issues: write`. Contents and pull-request writes are required when update PR creation is enabled; issues write maintains the dependency tracking issue. Report-only callers may not need every write path at runtime, but the canonical scaffold grants the reusable workflow's full supported surface so toggling `create-update-prs` does not require a permissions edit.
+
 
 ## Nightly Accessibility Workflow
 
@@ -1066,6 +1145,11 @@ permissions:
 
 ---
 
+### Permissions
+
+`nightly-accessibility.yml` callers need `contents: read` and `issues: write`, derived from the callee workflow's declared permissions. Issues write is required when `create-tracking-issue` is enabled. Missing caller permissions fail at workflow-load time; extra scopes are discouraged.
+
+
 ## Weekly Governance Workflow
 
 **Purpose:** Organization-wide governance checks for policy compliance.
@@ -1127,6 +1211,11 @@ permissions:
 
 ---
 
+### Permissions
+
+`weekly-governance.yml` callers need `contents: read` and `issues: write`, derived from the callee workflow's declared permissions. The org token may have broader repository access, but the workflow token should still be scoped to the minimum needed by the reusable workflow.
+
+
 ## Multi-Workflow Example
 
 Many repos will want to combine multiple workflows:
@@ -1145,6 +1234,15 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Nightly security
   workflow_dispatch:
+
+permissions:
+  contents: write
+  checks: write
+  pull-requests: write
+  packages: write
+  id-token: write
+  security-events: write
+  issues: write
 
 jobs:
   # PR validation
@@ -1177,6 +1275,7 @@ permissions:
   checks: write
   pull-requests: write
   packages: write
+  id-token: write
   security-events: write
   issues: write
 ```
@@ -1230,6 +1329,13 @@ on:
 Use matrix strategy for multi-platform testing:
 
 ```yaml
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  security-events: write
+  issues: write
+
 jobs:
   pr-validation-linux:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
