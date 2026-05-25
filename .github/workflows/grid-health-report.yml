@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GRID_HEALTH_PAT }}
-      GRID_HEALTH_TITLE: "🕸️ Grid Health"
+      GRID_HEALTH_TITLE: "Grid Health"
       ARCHITECTURE_REPO: HoneyDrunkStudios/HoneyDrunk.Architecture
       ACTIONS_REPO: HoneyDrunkStudios/HoneyDrunk.Actions
     steps:
@@ -31,6 +31,7 @@ jobs:
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Architecture
           path: architecture
+          token: ${{ secrets.GRID_HEALTH_PAT }}
           sparse-checkout: catalogs/grid-health.json
           sparse-checkout-cone-mode: false
 
@@ -39,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "ERROR: GRID_HEALTH_PAT secret is required. Scope it to Issues: Write on every repo with tracked_workflows plus HoneyDrunk.Actions." >&2
+            echo "ERROR: GRID_HEALTH_PAT secret is required. It must read HoneyDrunk.Architecture, read Actions workflow runs and org repo metadata, and write Issues on HoneyDrunk.Actions plus every repo with tracked_workflows." >&2
             exit 1
           fi
           gh auth status >/dev/null

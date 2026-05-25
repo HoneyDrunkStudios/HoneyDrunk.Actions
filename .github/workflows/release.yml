@@ -319,8 +319,16 @@ jobs:
           SYFT_VERSION: v1.44.0
         run: |
           set -euo pipefail
-          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/main/install.sh" | sh -s -- -b "$RUNNER_TEMP/syft" "$SYFT_VERSION"
-          "$RUNNER_TEMP/syft/syft" "dir:${{ inputs.working-directory }}"             --output "spdx-json=${{ inputs.working-directory }}/artifacts/sbom.spdx.json"
+          INSTALL_DIR="$RUNNER_TEMP/syft"
+          mkdir -p "$INSTALL_DIR"
+          SYFT_ARCHIVE="syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
+          curl -sSfL \
+            "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/${SYFT_ARCHIVE}" \
+            -o "$RUNNER_TEMP/$SYFT_ARCHIVE"
+          tar -xzf "$RUNNER_TEMP/$SYFT_ARCHIVE" -C "$INSTALL_DIR" syft
+          "$INSTALL_DIR/syft" \
+            "dir:${{ inputs.working-directory }}" \
+            --output "spdx-json=${{ inputs.working-directory }}/artifacts/sbom.spdx.json"
 
       - name: Run license compliance check
         shell: bash
@@ -609,7 +617,17 @@ jobs:
           TRIVY_IMAGE: aquasec/trivy:0.69.3
         run: |
           set -euo pipefail
-          docker run --rm             -v "$PWD:/workspace"             -v /var/run/docker.sock:/var/run/docker.sock             -w /workspace             "$TRIVY_IMAGE"             image             --format sarif             --output container-scan.sarif             --severity HIGH,CRITICAL             --exit-code 1             "${{ steps.container_tags.outputs.image_tag }}"
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -w /workspace \
+            "$TRIVY_IMAGE" \
+            image \
+            --format sarif \
+            --output container-scan.sarif \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            "${{ steps.container_tags.outputs.image_tag }}"
 
       - name: Upload container scan to GitHub Security
         if: always()

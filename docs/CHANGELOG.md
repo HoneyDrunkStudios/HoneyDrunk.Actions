@@ -5,6 +5,15 @@ All notable changes to the GitHub Actions template library will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `actions-ci.yml`: chose D4 Outcome B for `docker://` refs and migrated actionlint to direct install-and-invoke.
+- `docs/action-pins.md`: added the ADR-0012 D10 third-party action pin inventory.
+- `docs/d4-retrofit-audit.md`: recorded the D4 retrofit audit and `docker://` policy clarification.
+- `grid-health-report.yml`: added the ADR-0012 D6 Grid Health aggregator workflow, shell implementation, and operator guide.
+- `release.yml`: migrated Trivy and SBOM generation from marketplace wrappers to direct Trivy/Syft CLI invocation per ADR-0012 D4.
+
 ## [1.0.1] - 2026-04-18
 
 ### Added
@@ -16,12 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pr-core.yml` and `pr-sdk.yml`: wired in the CodeQL job as optional (default on) with `enable-codeql`, `codeql-queries`, and `codeql-fail-on-severity` inputs. Findings + severity breakdown appear in the PR summary comment.
 
 ### Changed
-- `grid-health-report.yml`: added the ADR-0012 D6 Grid Health aggregator workflow, shell implementation, and operator guide.
-- `docs/action-pins.md`: added the ADR-0012 D10 third-party action pin inventory.
-- `release.yml`: migrated Trivy and SBOM generation from marketplace wrappers to direct Trivy/Syft CLI invocation per ADR-0012 D4.
-- `actions-ci.yml`: chose D4 Outcome B for `docker://` refs and migrated actionlint to direct install-and-invoke.
-- `docs/d4-retrofit-audit.md`: recorded the D4 retrofit audit and `docker://` policy clarification.
-
 - `pr-core.yml`: removed default-branch baseline ratcheting from PR validation orchestration so consumer PR workflows no longer require `contents: write`.
 - `docs/consumer-usage.md`: updated coverage gate examples to split read-only PR validation from write-capable default-branch ratcheting.
 - `job-static-analysis.yml`: removed the vulnerability scan step (now owned by `job-dependency-scan.yml`) and dropped its `fail-on-severity` input. `pr-core.yml` and `pr-sdk.yml` no longer pass that input.

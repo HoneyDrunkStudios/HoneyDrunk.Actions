@@ -26,7 +26,10 @@ jobs:
           set -euo pipefail
           INSTALL_DIR="$RUNNER_TEMP/actionlint"
           mkdir -p "$INSTALL_DIR"
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) "$ACTIONLINT_VERSION" "$INSTALL_DIR"
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o "$RUNNER_TEMP/actionlint.tar.gz"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$INSTALL_DIR" actionlint
           echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Run actionlint

@@ -3,7 +3,7 @@ set -euo pipefail
 
 CATALOG_PATH="${1:?usage: grid-health-aggregator.sh <catalog-path>}"
 : "${GH_TOKEN:?GH_TOKEN must be set}"
-: "${GRID_HEALTH_TITLE:=🕸️ Grid Health}"
+: "${GRID_HEALTH_TITLE:=Grid Health}"
 : "${ACTIONS_REPO:=HoneyDrunkStudios/HoneyDrunk.Actions}"
 ORG="HoneyDrunkStudios"
 NOW_EPOCH="$(date -u +%s)"
@@ -40,7 +40,6 @@ status_emoji() {
   esac
 }
 
-json_escape() { jq -Rs .; }
 
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
@@ -50,6 +49,7 @@ results="$workdir/results.jsonl"
 mapfile -t repos < <(jq -c '.nodes[] | {id,name,signal,tracked_workflows:(.tracked_workflows // [])}' "$CATALOG_PATH")
 for row in "${repos[@]}"; do
   name="$(jq -r '.name' <<<"$row")"
+  name="${name//$'\r'/}"
   signal="$(jq -r '.signal' <<<"$row")"
   count="$(jq '.tracked_workflows | length' <<<"$row")"
   if [ "$count" -eq 0 ]; then
@@ -57,6 +57,7 @@ for row in "${repos[@]}"; do
   fi
   mapfile -t workflows < <(jq -r '.tracked_workflows[]' <<<"$row")
   for workflow in "${workflows[@]}"; do
+    workflow="${workflow//$'\r'/}"
     if [ "$workflow" = "pr-core.yml" ]; then
       continue
     fi
@@ -67,8 +68,7 @@ for row in "${repos[@]}"; do
     gh_status=0
     gh api -i "$api" > "$response" 2>/dev/null || gh_status=$?
     status_code="$(awk 'BEGIN{code=0} /^HTTP\//{code=$2} END{print code}' "$response")"
-    awk 'BEGIN{body=0} /^
-?$/{body=1; next} body{print}' "$response" > "$body"
+    awk 'BEGIN{body=0} /^\r?$/{body=1; next} body{print}' "$response" > "$body"
     classification="Missing"; url=""; created=""; conclusion=""
     if [ "$status_code" = "200" ]; then
       total="$(jq -r '.total_count // 0' "$body")"
@@ -136,7 +136,7 @@ report="$workdir/report.md"
   jq -r '.[]' <<<"$workflows_json" | while read -r w; do printf ' `%s` |' "$w"; done
   echo
   printf '|---|'
-  jq -r '.[]' <<<"$workflows_json" | while read -r _; do printf '---|'; done
+  jq -r '.[]' <<<"$workflows_json" | while read -r _; do printf '%s' '---|'; done
   echo
   jq -r '.nodes[] | select((.tracked_workflows // []) | length > 0) | .name' "$CATALOG_PATH" | while read -r repo; do
     printf '| `%s` |' "$repo"
@@ -172,7 +172,8 @@ find_issue() {
 
 main_issue="$(find_issue "$ACTIONS_REPO" "$GRID_HEALTH_TITLE")"
 if [ -z "$main_issue" ]; then
-  main_issue="$(gh issue create --repo "$ACTIONS_REPO" --title "$GRID_HEALTH_TITLE" --body-file "$report" --label grid-health --json number --jq '.number')"
+  main_issue_url="$(gh issue create --repo "$ACTIONS_REPO" --title "$GRID_HEALTH_TITLE" --body-file "$report" --label grid-health)"
+  main_issue="${main_issue_url##*/}"
 else
   gh issue reopen "$main_issue" --repo "$ACTIONS_REPO" >/dev/null 2>&1 || true
   gh issue edit "$main_issue" --repo "$ACTIONS_REPO" --body-file "$report"
@@ -193,4 +194,8 @@ jq -c 'select(.status=="Pass")' "$results" | while read -r row; do
   if [ -n "$issue" ]; then gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null; fi
 done
 
-cat "$report" >> "$GITHUB_STEP_SUMMARY"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  cat "$report" >> "$GITHUB_STEP_SUMMARY"
+else
+  cat "$report"
+fi
