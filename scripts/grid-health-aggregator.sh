@@ -67,7 +67,7 @@ for row in "${repos[@]}"; do
     gh_status=0
     gh_error="$workdir/response.err"
     gh api -i "$api" > "$response" 2>"$gh_error" || gh_status=$?
-    status_code="$(awk 'BEGIN{code=0} /^HTTP\//{code=$2} END{print code}' "$response")"
+    status_code="$(awk 'BEGIN{code=0} /^HTTP\//{code=$2} END{print code}' "$response" | tr -d '\r')"
     if [ "$gh_status" -ne 0 ] && [ "$status_code" = "0" ]; then
       echo "ERROR: gh api failed before returning headers for $api (exit $gh_status)." >&2
       if [ -s "$gh_error" ]; then cat "$gh_error" >&2; fi
