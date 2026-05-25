@@ -223,14 +223,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.github-token || github.token }}
         shell: bash
         run: |
-          # Coverage report paths come from per-repo sonar-project.properties
-          # (sonar.cs.opencover.reportsPaths = **/coverage.opencover.xml) — not
-          # hard-coded here, so per-repo config can diverge cleanly if needed.
+          # SonarScanner for .NET reads sonar.* configuration via `/d:` CLI flags or
+          # MSBuild `<SonarQubeSetting>` items — NOT via `sonar-project.properties`
+          # (a generic SonarScanner CLI convention the .NET scanner rejects).
+          # The coverage report path must be passed explicitly here so the scanner
+          # imports the OpenCover report produced by the conversion step above.
+          # Per-repo overrides are possible via MSBuild `<SonarQubeSetting>` items
+          # in Directory.Build.props if a repo needs to diverge from the default.
           "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" begin \
             /k:"${{ inputs.sonar-project-key }}" \
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
-            /d:sonar.token="${SONAR_TOKEN}"
+            /d:sonar.token="${SONAR_TOKEN}" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
 
       - name: Build
         working-directory: ${{ inputs.working-directory }}
