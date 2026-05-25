@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `job-sonarcloud.yml`: add a coverage-generation fallback for `push:main` runs. PR runs reuse the coverage artifact published by the caller's `pr-core` job (cost-disciplined per ADR-0011 D11). On `push:main` runs there's no `pr-core` (it's gated to `pull_request`), so no upstream test job runs and no artifact exists — leaving the SonarCloud Overview dashboard coverage metric stuck at 0% and giving the leak-period baseline no coverage to compare against. New conditional step now runs `dotnet test --collect "XPlat Code Coverage" --no-build` only when no Cobertura is found from the download step. PR runs are unchanged (the conditional is a no-op when the artifact is present). Steps reordered: begin → build → (conditional test) → convert → end, so coverage is generated after build but before the scanner reads it.
+
 - `job-sonarcloud.yml`: re-add the `/d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"` flag to the `dotnet-sonarscanner begin` invocation. The earlier removal expected per-repo `sonar-project.properties` to provide the path, but `.properties` files are then rejected by SonarScanner for .NET and were deleted in the consumer onboarding PRs. With no `.properties` file and no CLI flag, the scanner had no way to find the converted OpenCover report — coverage silently never imported, undermining ADR-0011 D11's quality-gate intent. Now the flag is the default in the reusable workflow; per-repo overrides remain available via MSBuild `<SonarQubeSetting>` items in `Directory.Build.props`.
 
 ### Added
