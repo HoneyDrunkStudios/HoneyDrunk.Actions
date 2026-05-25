@@ -183,38 +183,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.coverage-artifact-name }}
-          # Download into the caller's working-directory so the relative
-          # `**/coverage.*.xml` globs in sonar-project.properties resolve
-          # against the same root the scanner runs from.
+          # Download into the caller's working-directory so the
+          # `**/coverage.cobertura.xml` lookup in the next step (and the
+          # `**/coverage.opencover.xml` glob passed to the scanner) both
+          # resolve against the same root the scanner runs from.
           path: ${{ inputs.working-directory }}/TestResults
         continue-on-error: true
-
-      - name: Convert Cobertura coverage to OpenCover
-        working-directory: ${{ inputs.working-directory }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Find any Cobertura xml files dropped by the download step. Skip
-          # silently if none exist — first-onboarding runs and no-coverage-collected
-          # runs should still produce a quality-gate verdict (coverage just won't
-          # be imported on that run).
-          mapfile -t COBERTURA_FILES < <(find ./TestResults -name "coverage.cobertura.xml" 2>/dev/null || true)
-          if [ "${#COBERTURA_FILES[@]}" -eq 0 ]; then
-            echo "::notice::No coverage.cobertura.xml found in TestResults/ — SonarQube Cloud will run without coverage data."
-            exit 0
-          fi
-          echo "Converting ${#COBERTURA_FILES[@]} Cobertura report(s) to OpenCover format..."
-          REPORTS=$(IFS=';'; echo "${COBERTURA_FILES[*]}")
-          "${GITHUB_WORKSPACE}/.sonar/reportgenerator/reportgenerator" \
-            -reports:"${REPORTS}" \
-            -targetdir:./TestResults/opencover \
-            -reporttypes:OpenCover
-          # Place the converted report at a stable path discoverable by the
-          # `**/coverage.opencover.xml` glob in per-repo sonar-project.properties.
-          if [ -f ./TestResults/opencover/OpenCover.xml ]; then
-            mv ./TestResults/opencover/OpenCover.xml ./TestResults/coverage.opencover.xml
-            echo "OpenCover report written to TestResults/coverage.opencover.xml"
-          fi
 
       - name: Begin SonarQube Cloud analysis
         working-directory: ${{ inputs.working-directory }}
@@ -227,7 +201,7 @@ jobs:
           # MSBuild `<SonarQubeSetting>` items — NOT via `sonar-project.properties`
           # (a generic SonarScanner CLI convention the .NET scanner rejects).
           # The coverage report path must be passed explicitly here so the scanner
-          # imports the OpenCover report produced by the conversion step above.
+          # imports the OpenCover report produced by the conversion step below.
           # Per-repo overrides are possible via MSBuild `<SonarQubeSetting>` items
           # in Directory.Build.props if a repo needs to diverge from the default.
           "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" begin \
@@ -246,6 +220,60 @@ jobs:
             dotnet build "${{ inputs.project-path }}" --configuration Release
           else
             dotnet build --configuration Release
+          fi
+
+      - name: Generate coverage (push:main fallback when no artifact was downloaded)
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # PR runs reuse the coverage artifact produced by the caller's pr-core
+          # job (per ADR-0011 D11 cost discipline — no double `dotnet test`).
+          # On push:main runs there is no pr-core (it's gated to pull_request),
+          # so no upstream test job runs, so no artifact exists. Without coverage
+          # here, the SonarCloud Overview dashboard's coverage metric stays 0%
+          # forever and the leak-period baseline has no coverage to compare against.
+          #
+          # If the download step produced Cobertura files, skip — PR path already
+          # has what it needs. Otherwise, run `dotnet test` with coverage collection
+          # ourselves so the main-branch analysis has real data to report.
+          if find ./TestResults -name "coverage.cobertura.xml" 2>/dev/null | head -1 | grep -q .; then
+            echo "::notice::Coverage artifact found from caller (likely a PR run with pr-core); skipping local test execution."
+            exit 0
+          fi
+          echo "::notice::No coverage artifact found (likely a push:main run); running tests with coverage so SonarCloud receives baseline data."
+          TEST_ARGS=("--collect" "XPlat Code Coverage" "--results-directory" "./TestResults" "--configuration" "Release" "--no-build")
+          if [ -n "${{ inputs.project-path }}" ]; then
+            dotnet test "${{ inputs.project-path }}" "${TEST_ARGS[@]}"
+          else
+            dotnet test "${TEST_ARGS[@]}"
+          fi
+
+      - name: Convert Cobertura coverage to OpenCover
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Find any Cobertura xml files — either downloaded from the caller's
+          # pr-core artifact (PR runs) or freshly generated by the fallback test
+          # step above (push:main runs). Skip silently if neither path produced
+          # any — analysis still proceeds without coverage in that edge case.
+          mapfile -t COBERTURA_FILES < <(find ./TestResults -name "coverage.cobertura.xml" 2>/dev/null || true)
+          if [ "${#COBERTURA_FILES[@]}" -eq 0 ]; then
+            echo "::notice::No coverage.cobertura.xml found in TestResults/ — SonarQube Cloud will run without coverage data."
+            exit 0
+          fi
+          echo "Converting ${#COBERTURA_FILES[@]} Cobertura report(s) to OpenCover format..."
+          REPORTS=$(IFS=';'; echo "${COBERTURA_FILES[*]}")
+          "${GITHUB_WORKSPACE}/.sonar/reportgenerator/reportgenerator" \
+            -reports:"${REPORTS}" \
+            -targetdir:./TestResults/opencover \
+            -reporttypes:OpenCover
+          # Place the converted report at a stable path discoverable by the
+          # `**/coverage.opencover.xml` glob passed to the scanner.
+          if [ -f ./TestResults/opencover/OpenCover.xml ]; then
+            mv ./TestResults/opencover/OpenCover.xml ./TestResults/coverage.opencover.xml
+            echo "OpenCover report written to TestResults/coverage.opencover.xml"
           fi
 
       - name: End SonarQube Cloud analysis
