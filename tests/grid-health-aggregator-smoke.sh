@@ -58,7 +58,8 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list)
-        true
+        printf 'issue list %s\n' "$*" >> "$log"
+        printf '[]\n'
         ;;
       create)
         printf 'issue create %s\n' "$*" >> "$log"
