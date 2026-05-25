@@ -105,6 +105,7 @@ if grep -q 'issue create --repo HoneyDrunkStudios/RepoStale' "$workdir/gh.log"; 
   echo "stale workflow unexpectedly created a per-repo issue" >&2
   exit 1
 fi
+grep -q 'issue list --repo HoneyDrunkStudios/RepoStale' "$workdir/gh.log"
 grep -q 'issue create --repo HoneyDrunkStudios/RepoMissing' "$workdir/gh.log"
 
 echo "grid-health aggregator smoke passed"

@@ -195,10 +195,16 @@ jq -c 'select(.status=="Fail" or .status=="Missing")' "$results" | while read -r
   if [ -z "$issue" ]; then gh issue create --repo "$repo" --title "$title" --body-file "$body" >/dev/null; else gh issue reopen "$issue" --repo "$repo" >/dev/null 2>&1 || true; gh issue edit "$issue" --repo "$repo" --body-file "$body" >/dev/null; fi
 done
 
-jq -c 'select(.status=="Pass")' "$results" | while read -r row; do
-  repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"; repo="$ORG/$repo_name"
+jq -c 'select(.status=="Pass" or .status=="Stale")' "$results" | while read -r row; do
+  repo_name="$(jq -r '.repo' <<<"$row")"; workflow="$(jq -r '.workflow' <<<"$row")"; status="$(jq -r '.status' <<<"$row")"; url="$(jq -r '.url' <<<"$row")"; title="[grid-health] $workflow unhealthy"; repo="$ORG/$repo_name"
   issue="$(find_issue "$repo" "$title" open)"
-  if [ -n "$issue" ]; then gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null; fi
+  if [ -n "$issue" ]; then
+    if [ "$status" = "Pass" ]; then
+      gh issue close "$issue" --repo "$repo" --comment "Resolved by run $url at $NOW_ISO." >/dev/null
+    else
+      gh issue close "$issue" --repo "$repo" --comment "Closing because Grid Health now keeps Stale results on the central dashboard only as of $NOW_ISO." >/dev/null
+    fi
+  fi
 done
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
