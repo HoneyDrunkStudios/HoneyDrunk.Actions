@@ -63,7 +63,11 @@ case "$cmd" in
     case "$sub" in
       list)
         printf 'issue list %s\n' "$*" >> "$log"
-        printf '[]\n'
+        if [[ "$*" == *"--repo HoneyDrunkStudios/RepoStale"* ]]; then
+          printf '[{"number":77,"title":"[grid-health] weekly-stale.yml unhealthy","state":"OPEN"}]\n'
+        else
+          printf '[]\n'
+        fi
         ;;
       create)
         printf 'issue create %s\n' "$*" >> "$log"
@@ -107,6 +111,7 @@ grep -q '`RepoStale`' "$output"
 grep -q 'weekly-stale.yml' "$output"
 grep -q '`RepoEvent`' "$output"
 grep -q 'pr.yml' "$output"
+grep -Fq '[✅ Pass](https://example.test/event)' "$output"
 grep -q 'RepoDrift' "$output"
 grep -q 'issue create --repo HoneyDrunkStudios/HoneyDrunk.Actions' "$workdir/gh.log"
 grep -q 'issue create --repo HoneyDrunkStudios/RepoFail' "$workdir/gh.log"
@@ -116,6 +121,8 @@ if grep -q 'issue create --repo HoneyDrunkStudios/RepoStale' "$workdir/gh.log"; 
   exit 1
 fi
 grep -q 'issue list --repo HoneyDrunkStudios/RepoStale' "$workdir/gh.log"
+grep -q 'issue close 77 --repo HoneyDrunkStudios/RepoStale' "$workdir/gh.log"
+grep -q 'Closing because Grid Health now keeps Stale results on the central dashboard only' "$workdir/gh.log"
 if grep -q 'issue create --repo HoneyDrunkStudios/RepoEvent' "$workdir/gh.log"; then
   echo "event-driven workflow unexpectedly created a per-repo issue" >&2
   exit 1
