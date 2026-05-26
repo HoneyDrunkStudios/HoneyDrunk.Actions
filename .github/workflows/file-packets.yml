@@ -123,7 +123,7 @@ jobs:
 
       - name: Checkout HoneyDrunk.Architecture
         id: checkout-architecture
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ inputs.architecture-repo }}
           ref: ${{ steps.refs.outputs.architecture }}
@@ -132,7 +132,7 @@ jobs:
           persist-credentials: true
 
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ steps.refs.outputs.actions }}

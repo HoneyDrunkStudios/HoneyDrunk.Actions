@@ -194,12 +194,12 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -255,7 +255,7 @@ jobs:
       
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-release
           path: ${{ inputs.working-directory }}/TestResults/**/*
@@ -263,7 +263,7 @@ jobs:
           if-no-files-found: ignore
       
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-reports-release
           path: ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
@@ -280,12 +280,12 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -390,7 +390,7 @@ jobs:
           fi
       
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sbom
           path: ${{ inputs.working-directory }}/artifacts/sbom.spdx.json
@@ -398,7 +398,7 @@ jobs:
       
       - name: Upload license report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: license-report
           path: ${{ inputs.working-directory }}/artifacts/license-report.json
@@ -413,12 +413,12 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -462,7 +462,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nuget-packages
           path: ${{ inputs.working-directory }}/artifacts/*.nupkg
@@ -476,12 +476,12 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -539,7 +539,7 @@ jobs:
           done
       
       - name: Upload published apps
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: published-apps
           path: ${{ inputs.working-directory }}/publish-output/
@@ -553,10 +553,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -641,13 +641,13 @@ jobs:
       - name: Upload container scan to GitHub Security
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: container-scan.sarif
 
       - name: Upload container scan artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: container-vulnerability-report
           path: container-scan.sarif
@@ -671,7 +671,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Validate smoke test inputs
         if: ${{ inputs.smoke-test-url == '' }}

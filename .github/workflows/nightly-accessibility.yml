@@ -133,10 +133,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -150,7 +150,7 @@ jobs:
       
       - name: Setup Node.js
         if: ${{ contains(inputs.build-type, 'npm') || contains(inputs.build-type, 'storybook') }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       
@@ -205,7 +205,7 @@ jobs:
           ${{ inputs.build-command }}
       
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: built-application
           path: |
@@ -228,16 +228,16 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: built-application
           path: ./app
       
       - name: Setup Node.js (for accessibility tools)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       
@@ -303,7 +303,7 @@ jobs:
           echo "Routes to scan: $ROUTES"
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -356,7 +356,7 @@ jobs:
           echo "Critical violations: $CRITICAL_COUNT"
       
       - name: Upload accessibility report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: accessibility-report
           path: ./accessibility-reports/**/*
@@ -370,16 +370,16 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Download accessibility report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: accessibility-report
           path: ./accessibility-reports
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -402,7 +402,7 @@ jobs:
     
     steps:
       - name: Download accessibility report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: accessibility-report
           path: ./accessibility-reports

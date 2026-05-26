@@ -59,12 +59,12 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo

@@ -84,13 +84,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.github-token || github.token }}
           fetch-depth: 0
 
       - name: Download coverage reports artifact (if exists)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: coverage-reports-${{ inputs.runs-on }}
           path: TestResults

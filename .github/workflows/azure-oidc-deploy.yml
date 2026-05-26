@@ -150,14 +150,14 @@ jobs:
 
       - name: Checkout HoneyDrunk.Actions
         if: ${{ inputs.check-sla }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ steps.resolve-ref.outputs.ref }}
           path: .actions
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.artifact-path }}

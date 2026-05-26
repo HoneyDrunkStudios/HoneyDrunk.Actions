@@ -127,7 +127,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Determine organization
         id: org
@@ -296,7 +296,7 @@ jobs:
           echo "Security policy check complete"
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -331,7 +331,7 @@ jobs:
           GH_TOKEN: ${{ secrets.github-token }}
       
       - name: Upload governance reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: governance-reports
           path: ./governance-reports/**/*
@@ -344,13 +344,13 @@ jobs:
     
     steps:
       - name: Download governance reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: governance-reports
           path: ./governance-reports
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -401,7 +401,7 @@ jobs:
           GH_TOKEN: ${{ secrets.github-token }}
       
       - name: Upload consolidated report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: consolidated-governance-report
           path: ./consolidated-governance-report.*

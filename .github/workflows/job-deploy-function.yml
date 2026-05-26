@@ -164,14 +164,14 @@ jobs:
 
     steps:
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ inputs.actions-ref }}
           path: .actions
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.package-path }}
