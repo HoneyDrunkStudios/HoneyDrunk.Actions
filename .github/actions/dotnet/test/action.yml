@@ -51,7 +51,29 @@ runs:
           ARGS="$ARGS --no-build"
         fi
         if [ "${{ inputs.collect-coverage }}" == "true" ]; then
-          ARGS="$ARGS --collect \"XPlat Code Coverage\""
+          # Emit both OpenCover (SonarQube Cloud native C# import format) and
+          # Cobertura (coverage-baseline-ratchet.yml + report-generator consumer)
+          # from a single test run. Coverlet's XPlat Code Coverage collector
+          # accepts a comma-separated <Format> list. Without a runsettings file
+          # the collector defaults to Cobertura only, which silently breaks
+          # Sonar coverage import (ReportGenerator's OpenCover output is a paid
+          # feature, so converting after the fact is not viable).
+          RUNSETTINGS="$RESULTS_DIR/coverlet.runsettings"
+          cat > "$RUNSETTINGS" <<'RSXML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <RunSettings>
+          <DataCollectionRunSettings>
+            <DataCollectors>
+              <DataCollector friendlyName="XPlat Code Coverage">
+                <Configuration>
+                  <Format>opencover,cobertura</Format>
+                </Configuration>
+              </DataCollector>
+            </DataCollectors>
+          </DataCollectionRunSettings>
+        </RunSettings>
+        RSXML
+          ARGS="$ARGS --collect \"XPlat Code Coverage\" --settings \"$RUNSETTINGS\""
         fi
         
         TARGET="${{ inputs.project-path }}"

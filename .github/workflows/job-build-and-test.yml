@@ -127,7 +127,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-reports-${{ inputs.runs-on }}
-          path: ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
+          # Glob both Cobertura (consumed by coverage-baseline-ratchet.yml and
+          # job-coverage-analysis.yml) and OpenCover (consumed by
+          # job-sonarcloud.yml for SonarQube Cloud's native C# coverage import).
+          # The dotnet/test composite emits both via a coverlet runsettings file.
+          path: |
+            ${{ inputs.working-directory }}/TestResults/**/coverage.cobertura.xml
+            ${{ inputs.working-directory }}/TestResults/**/coverage.opencover.xml
           retention-days: 30
       
       - name: Check for warnings
