@@ -399,7 +399,166 @@ jobs:
               print('Human-authored PR without packet metadata; out-of-band label not required.')
           PY
 
-  # Job 9: PR Size Check (ADR-0044 D7, warnings-only in Phase 2)
+  # Job 9: NuGet Package Version Consistency Check
+  #
+  # When a PR bumps the <Version> of any NuGet-publishing .csproj (i.e. a project
+  # with a <PackageId>), this check enforces:
+  #
+  #   1. ALL NuGet-publishing csproj files in the repo carry the same <Version>
+  #      (no drift between, e.g., HoneyDrunk.Kernel.csproj and
+  #      HoneyDrunk.Kernel.Abstractions.csproj).
+  #   2. Every NuGet-publishing csproj's per-package CHANGELOG.md (the one in
+  #      the same directory) has a `## [<new-version>]` heading — not just
+  #      content under `## [Unreleased]`.
+  #   3. The repo-level CHANGELOG.md (the one sitting next to a .slnx) also has
+  #      a `## [<new-version>]` heading.
+  #
+  # Rationale: HoneyDrunk's publish pipeline auto-generates GitHub Release notes
+  # by awk-extracting the `## [VERSION]` section from the repo-level CHANGELOG.
+  # If that heading doesn't exist, the `Create GitHub Release` job silently
+  # fails after NuGet publish has already succeeded — leaving consumers with a
+  # released package and no migration notes. Multi-project drift creates a
+  # similar split-brain. This gate refuses the PR up front instead of catching
+  # the problem at release time.
+  #
+  # No-op for repos with zero NuGet-publishing csproj files.
+  # No-op when the PR doesn't touch any <Version> element.
+  nuget-version-consistency-check:
+    name: NuGet Version Consistency Check
+    needs: [authorship-check]
+    if: ${{ always() && needs.authorship-check.result == 'success' }}
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check NuGet package version + CHANGELOG consistency
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import os, re, subprocess, sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          base_sha = os.environ.get('BASE_SHA') or ''
+          head_sha = os.environ.get('HEAD_SHA') or 'HEAD'
+          repo_root = Path('.').resolve()
+
+          def strip_ns(tag):
+              return tag.split('}', 1)[1] if tag.startswith('{') else tag
+
+          def find_text(element, child_name):
+              for child in element.iter():
+                  if strip_ns(child.tag) == child_name and child.text:
+                      return child.text.strip()
+              return None
+
+          # 1. Discover NuGet-publishing csproj files (have <PackageId>).
+          nuget_csprojs = []
+          for csproj in repo_root.rglob('*.csproj'):
+              parts = {p.lower() for p in csproj.parts}
+              if 'bin' in parts or 'obj' in parts or 'node_modules' in parts:
+                  continue
+              if csproj.name.endswith('.Tests.csproj') or csproj.name.endswith('.Canary.csproj'):
+                  continue
+              try:
+                  tree = ET.parse(csproj)
+              except ET.ParseError:
+                  continue
+              package_id = find_text(tree.getroot(), 'PackageId')
+              if not package_id:
+                  continue
+              version = find_text(tree.getroot(), 'Version')
+              if not version:
+                  print(f'::error::{csproj.relative_to(repo_root)} has <PackageId>{package_id}</PackageId> but no <Version>')
+                  sys.exit(1)
+              nuget_csprojs.append((csproj, package_id, version))
+
+          if not nuget_csprojs:
+              print('::notice::No NuGet-publishing csproj files found; skipping version consistency check')
+              sys.exit(0)
+
+          # 2. Assert all NuGet csprojs carry the same <Version>.
+          versions = {v for (_, _, v) in nuget_csprojs}
+          if len(versions) > 1:
+              print(f'::error::Version drift across NuGet-publishing csproj files: {sorted(versions)}')
+              for csproj, pid, ver in nuget_csprojs:
+                  print(f'::error::  {csproj.relative_to(repo_root)} ({pid}): {ver}')
+              print('::error::All NuGet packages in this repo must share the same <Version>.')
+              sys.exit(1)
+
+          current_version = next(iter(versions))
+          print(f'::notice::NuGet packages at common version: {current_version}')
+
+          # 3. Detect <Version> changes in this PR.
+          if not base_sha:
+              print('::notice::No base SHA (push event); skipping diff-based bump checks')
+              sys.exit(0)
+
+          subprocess.run(['git', 'fetch', '--no-tags', 'origin', base_sha, head_sha],
+                         check=False, capture_output=True)
+          diff = subprocess.run(['git', 'diff', '--unified=0', f'{base_sha}...{head_sha}'],
+                                text=True, capture_output=True).stdout
+
+          version_bumped = False
+          current_file = None
+          for raw in diff.splitlines():
+              if raw.startswith('+++ b/'):
+                  current_file = raw[6:]
+              elif current_file and current_file.endswith('.csproj') and re.match(r'^\+\s*<Version>', raw):
+                  version_bumped = True
+                  break
+
+          if not version_bumped:
+              print('::notice::No <Version> changes in csproj files; CHANGELOG checks not required')
+              sys.exit(0)
+
+          # 4. Version bumped — every CHANGELOG must have the version heading.
+          version_heading = re.compile(rf'^##\s*\[{re.escape(current_version)}\]', re.MULTILINE)
+          failures = []
+
+          for csproj, pid, ver in nuget_csprojs:
+              changelog = csproj.parent / 'CHANGELOG.md'
+              if not changelog.exists():
+                  failures.append(f'Per-package CHANGELOG missing: {changelog.relative_to(repo_root)} (package {pid})')
+                  continue
+              content = changelog.read_text(encoding='utf-8')
+              if not version_heading.search(content):
+                  failures.append(f'{changelog.relative_to(repo_root)} (package {pid}) is missing a `## [{current_version}]` heading — entries under `## [Unreleased]` do not satisfy this gate')
+
+          # Repo-level CHANGELOG: the one sitting next to a .slnx (the publish
+          # pipeline's release-notes generator reads only this one when it exists).
+          slnx_files = [
+              s for s in repo_root.rglob('*.slnx')
+              if '.vs' not in s.parts and 'bin' not in s.parts and 'obj' not in s.parts
+          ]
+          for slnx in slnx_files:
+              repo_changelog = slnx.parent / 'CHANGELOG.md'
+              if not repo_changelog.exists():
+                  continue
+              content = repo_changelog.read_text(encoding='utf-8')
+              if not version_heading.search(content):
+                  failures.append(f'{repo_changelog.relative_to(repo_root)} (next to {slnx.name}) is missing a `## [{current_version}]` heading — the release-notes generator awk-greps for this exact heading at tag-push time')
+
+          if failures:
+              print(f'::error::Version bump to {current_version} is incomplete:')
+              for f in failures:
+                  print(f'::error::  - {f}')
+              print(f'::error::Required: when bumping <Version> in any NuGet-publishing csproj, every per-package CHANGELOG and the repo-level CHANGELOG (next to .slnx) must carry a `## [{current_version}] - YYYY-MM-DD` heading. Move released content out of `## [Unreleased]` (Keep-a-Changelog freeze-at-release pattern).')
+              sys.exit(1)
+
+          print(f'::notice::Version bump to {current_version} consistent across all NuGet packages and CHANGELOGs')
+          PY
+
+  # Job 10: PR Size Check (ADR-0044 D7, warnings-only in Phase 2)
   pr-size-check:
     name: PR Size Check
     needs: [authorship-check, pr-metadata-check]
@@ -594,7 +753,7 @@ jobs:
   # Job 10: PR Summary and Coverage Gate
   pr-summary:
     name: PR Summary and Coverage Gate
-    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-metadata-check, pr-size-check]
+    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-metadata-check, nuget-version-consistency-check, pr-size-check]
     if: ${{ always() }}
     runs-on: ${{ inputs.runs-on }}
     permissions:
@@ -1018,6 +1177,7 @@ jobs:
           JOB_AUTHORSHIP_RESULT: ${{ needs.authorship-check.result }}
           AUTHORSHIP_CLASS: ${{ needs.authorship-check.outputs.authorship }}
           JOB_PR_METADATA_RESULT: ${{ needs.pr-metadata-check.result }}
+          JOB_NUGET_VERSION_RESULT: ${{ needs.nuget-version-consistency-check.result }}
           JOB_PR_SIZE_RESULT: ${{ needs.pr-size-check.result }}
           WARNINGS_BLOCK: ${{ steps.status.outputs.warnings }}
           COVERAGE_GATE_DETAIL: ${{ steps.coverage-gate.outputs.detail }}
@@ -1074,6 +1234,7 @@ jobs:
           {
             echo "- **Authorship Check:** $JOB_AUTHORSHIP_RESULT${AUTHORSHIP_CLASS:+ - $AUTHORSHIP_CLASS}"
             echo "- **PR Metadata Check:** $JOB_PR_METADATA_RESULT"
+            echo "- **NuGet Version Consistency:** $JOB_NUGET_VERSION_RESULT"
             echo "- **PR Size Check:** $JOB_PR_SIZE_RESULT"
           } >> message.md
 
