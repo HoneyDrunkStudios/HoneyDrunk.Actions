@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Architecture
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Architecture
           ref: ${{ inputs.architecture-ref }}
@@ -150,7 +150,7 @@ jobs:
 
       - name: Checkout target repo
         if: ${{ inputs.checkout-target != '' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ inputs.checkout-target }}
           token: ${{ secrets.github-token }}

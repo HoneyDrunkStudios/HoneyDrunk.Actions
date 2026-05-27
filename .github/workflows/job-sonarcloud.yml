@@ -129,12 +129,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # SonarQube Cloud requires full git history for blame attribution
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
@@ -145,7 +145,7 @@ jobs:
           java-version: '17'
 
       - name: Cache SonarQube Cloud packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
@@ -153,7 +153,7 @@ jobs:
 
       - name: Cache SonarQube Cloud scanner
         id: cache-sonar-scanner
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Scanner cached at workspace root so the absolute
           # $GITHUB_WORKSPACE/.sonar/scanner path resolves regardless of the
@@ -171,7 +171,7 @@ jobs:
           dotnet tool update dotnet-sonarscanner --tool-path "${GITHUB_WORKSPACE}/.sonar/scanner"
 
       - name: Download coverage artifact (if exists)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.coverage-artifact-name }}
           # Download into the caller's working-directory so the

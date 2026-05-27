@@ -112,10 +112,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -136,7 +136,7 @@ jobs:
           fi
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ inputs.languages }}
           queries: ${{ inputs.queries }}
@@ -167,7 +167,7 @@ jobs:
           dotnet build "$PROJECT" --no-incremental
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: ${{ inputs.category }}
           output: ${{ inputs.working-directory }}/codeql-results
@@ -179,7 +179,7 @@ jobs:
           sarif-dir: ${{ inputs.working-directory }}/codeql-results
 
       - name: Upload filtered SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ inputs.working-directory }}/codeql-results
           category: ${{ inputs.category }}
@@ -280,7 +280,7 @@ jobs:
 
       - name: Upload SARIF artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sast-report
           path: ${{ inputs.working-directory }}/codeql-results/**/*.sarif

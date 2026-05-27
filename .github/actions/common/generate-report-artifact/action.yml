@@ -38,7 +38,7 @@ runs:
         echo "Artifact name: $NAME"
     
     - name: Upload report artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ steps.artifact-name.outputs.artifact_name }}
         path: ${{ inputs.report-directory }}/**/*

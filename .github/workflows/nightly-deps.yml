@@ -122,10 +122,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -184,7 +184,7 @@ jobs:
           output-directory: ./dependency-reports
       
       - name: Upload .NET dependency report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dotnet-dependency-report
           path: |
@@ -199,10 +199,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -222,7 +222,7 @@ jobs:
       
       - name: Setup Node.js
         if: steps.check-npm.outputs.has_npm == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       
@@ -243,7 +243,7 @@ jobs:
       
       - name: Upload npm dependency report
         if: steps.check-npm.outputs.has_npm == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: npm-dependency-report
           path: |
@@ -262,17 +262,17 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets['github-token'] || github.token }}
       
       - name: Download dependency reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ./all-dependency-reports
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -286,7 +286,7 @@ jobs:
       
       - name: Setup Node.js
         if: ${{ inputs.check-npm-deps }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       
@@ -311,15 +311,15 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Download all dependency reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ./all-dependency-reports
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -436,7 +436,7 @@ jobs:
           echo "Download artifacts for detailed dependency reports." >> $GITHUB_STEP_SUMMARY
       
       - name: Upload consolidated report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: consolidated-dependency-report
           path: ./consolidated-dependency-report.*

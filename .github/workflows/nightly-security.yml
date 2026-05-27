@@ -111,10 +111,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -188,7 +188,7 @@ jobs:
           EOF
       
       - name: Upload vulnerability report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vulnerability-report
           path: ${{ inputs.working-directory }}/security-reports/**/*
@@ -201,10 +201,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -225,7 +225,7 @@ jobs:
           fi
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: csharp
           queries: security-and-quality
@@ -247,7 +247,7 @@ jobs:
           dotnet build "$PROJECT" --no-incremental
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: nightly-sast
           output: ${{ inputs.working-directory }}/security-reports
@@ -259,7 +259,7 @@ jobs:
           sarif-dir: ${{ inputs.working-directory }}/security-reports
 
       - name: Upload filtered SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ inputs.working-directory }}/security-reports
           category: nightly-sast
@@ -267,7 +267,7 @@ jobs:
 
       - name: Upload SAST report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sast-report
           path: ${{ inputs.working-directory }}/security-reports/**/*.sarif
@@ -280,12 +280,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Checkout HoneyDrunk.Actions (shared gitleaks config)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -365,7 +365,7 @@ jobs:
       - name: Upload secrets SARIF to GitHub Security
         if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ./security-reports/secrets-scan.sarif
           category: nightly-secrets
@@ -394,7 +394,7 @@ jobs:
 
       - name: Upload secret scan report
         if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: secret-scan-report
           path: ./security-reports/secrets-scan.sarif
@@ -407,7 +407,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Detect IaC files
         id: detect
@@ -480,14 +480,14 @@ jobs:
       - name: Upload IaC SARIF to GitHub Security
         if: steps.detect.outputs.has_iac == 'true'
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ./security-reports/iac-trivy.sarif
           category: nightly-iac
       
       - name: Upload IaC scan report
         if: steps.detect.outputs.has_iac == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: iac-security-report
           path: ./security-reports/iac-trivy.sarif
@@ -501,10 +501,10 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Download all security reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ./all-security-reports
       
@@ -679,7 +679,7 @@ jobs:
           fi
       
       - name: Upload consolidated report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: consolidated-security-report
           path: ./consolidated-security-report.*

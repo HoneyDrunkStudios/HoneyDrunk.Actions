@@ -8,13 +8,13 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 
 | Action | Current pin | Deprecation deadline | Status | Successor | Notes |
 |---|---|---|---|---|---|
-| actions/cache | v4 | 2026-09-16 | Deprecated-with-deadline | actions/cache@v5 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
-| actions/checkout | v4 | 2026-09-16 | Deprecated-with-deadline | actions/checkout@v5 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
+| actions/cache | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| actions/checkout | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | actions/create-github-app-token | v1 | unknown | Current | none | none |
-| actions/download-artifact | v4 | 2026-09-16 | Deprecated-with-deadline | actions/download-artifact@v5 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
-| actions/setup-dotnet | v4 | 2026-09-16 | Deprecated-with-deadline | actions/setup-dotnet@v5 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
-| actions/setup-node | v4 | 2026-09-16 | Deprecated-with-deadline | actions/setup-node@v5 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
-| actions/upload-artifact | v4 | 2026-09-16 | Deprecated-with-deadline | actions/upload-artifact@v5 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
+| actions/download-artifact | v7 | none | Current | none | Bumped to default Node 24 successor for ADR-0012 packet 09. |
+| actions/setup-dotnet | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| actions/setup-node | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| actions/upload-artifact | v6 | none | Current | none | Bumped to default Node 24 successor for ADR-0012 packet 09. |
 | anthropics/claude-code-action | v1 | unknown | Current | none | none |
 | azure/functions-action | v1 | unknown | Current | none | none |
 | azure/functions-action | v2 | unknown | Current | none | none |
@@ -23,9 +23,9 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | docker/login-action | v3 | unknown | Current | none | none |
 | docker/setup-buildx-action | v3 | unknown | Current | none | none |
 | EnricoMi/publish-unit-test-result-action | v2 | unknown | Current | none | none |
-| github/codeql-action/analyze | v3 | 2026-09-16 | Deprecated-with-deadline | github/codeql-action/analyze@v4 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
-| github/codeql-action/init | v3 | 2026-09-16 | Deprecated-with-deadline | github/codeql-action/init@v4 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
-| github/codeql-action/upload-sarif | v3 | 2026-09-16 | Deprecated-with-deadline | github/codeql-action/upload-sarif@v4 | Pinned action runs on Node 20; replace before GitHub removes Node 20 action runtime. |
+| github/codeql-action/analyze | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| github/codeql-action/init | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| github/codeql-action/upload-sarif | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | peter-evans/create-or-update-comment | v4 | unknown | Current | none | none |
 | peter-evans/create-pull-request | v6 | unknown | Current | none | none |
 | peter-evans/find-comment | v3 | unknown | Current | none | none |

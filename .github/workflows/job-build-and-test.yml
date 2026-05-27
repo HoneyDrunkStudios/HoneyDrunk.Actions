@@ -62,10 +62,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
@@ -116,7 +116,7 @@ jobs:
         id: upload-tests
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ inputs.runs-on }}
           path: ${{ inputs.working-directory }}/TestResults/**/*
@@ -124,7 +124,7 @@ jobs:
       
       - name: Upload coverage reports
         if: ${{ inputs.collect-coverage }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-reports-${{ inputs.runs-on }}
           # Glob both Cobertura (consumed by coverage-baseline-ratchet.yml and

@@ -186,7 +186,7 @@ jobs:
     steps:
       - name: Checkout caller repository
         if: ${{ inputs.build-context != '' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve actions checkout ref
         id: resolve-ref
@@ -201,7 +201,7 @@ jobs:
           fi
 
       - name: Checkout HoneyDrunk.Actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ steps.resolve-ref.outputs.ref }}

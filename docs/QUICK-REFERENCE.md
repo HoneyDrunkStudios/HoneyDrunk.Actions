@@ -149,7 +149,7 @@ jobs:
 ### Pattern 4: Actions Only (Maximum Control)
 ```yaml
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v5
   - uses: ./.github/actions/dotnet/setup
   - uses: ./.github/actions/nuget/setup-cache
   - uses: ./.github/actions/dotnet/restore

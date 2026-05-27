@@ -95,7 +95,7 @@ jobs:
 
       - name: Checkout repository
         if: ${{ steps.event.outputs.skip != 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
@@ -311,7 +311,7 @@ jobs:
 
       - name: Upload fallback review request artifact
         if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' && inputs.upload-fallback-artifact }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.artifact-name }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           path: review-request.json
