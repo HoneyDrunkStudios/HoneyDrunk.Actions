@@ -395,6 +395,13 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   [[ -f "$packet" ]] || continue
   rel="${packet#"$REPO_ROOT/"}"
 
+  case "$(basename "$packet")" in
+    dispatch-plan.md|handoff-*.md|README.md)
+      echo "skip  $rel -> coordination doc (not a packet)"
+      continue
+      ;;
+  esac
+
   if manifest_has "$rel"; then
     existing="$(manifest_get "$rel")"
     echo "skip  $rel -> already filed at $existing"

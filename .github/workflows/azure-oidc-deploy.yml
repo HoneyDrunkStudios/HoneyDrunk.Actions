@@ -163,7 +163,7 @@ jobs:
           path: ${{ inputs.artifact-path }}
 
       - name: Azure Login
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ inputs.client-id }}
           tenant-id: ${{ inputs.tenant-id }}
