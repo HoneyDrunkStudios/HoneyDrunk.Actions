@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `actions/dotnet/test`: repaired the coverage-runsettings heredoc emitted by the composite action and added the supported `no-restore` input that `job-dotnet-publish-artifact.yml` already passes. The heredoc terminator now reaches Bash at column 1, so test jobs no longer exit before `dotnet test` can produce results and coverage.
+
 - `actions/dotnet/test` and `job-sonarcloud.yml`: preserve consumer-owned coverlet runsettings when adding native OpenCover output. The previous native-OpenCover fix wrote a format-only `coverlet.runsettings` and passed it via `--settings`, which unintentionally replaced repo filters such as `<Include>`, `<ExcludeByFile>`, and `<IncludeTestAssembly>`. In Pulse, that pulled generated `obj` sources into the denominator and dropped reported line coverage from 71.0% to 27.9% without a real test regression. The generated CI runsettings now starts from `coverage-runsettings` or `coverlet.runsettings` in the working directory when present, then merges in `<Format>opencover,cobertura</Format>`.
 
 - `pr-core.yml` coverage gate: enforce total baseline/floor coverage even when patch coverage is `n/a` because no executable lines changed. Patch coverage remains skipped in that case, but the repo-level total gate now keeps catching instrumentation or baseline regressions in infra-only PRs.
@@ -25,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `release.yml`: added centralized GitHub Release creation with generated HoneyDrunk release notes. Consumers now pass release metadata (`release-product-name`, `release-product-description`, `release-nuget-packages`, `release-docs-url`) into the reusable release workflow instead of carrying repo-local checkout/generate-notes/`softprops/action-gh-release` jobs.
+
+- `job-solution-preflight.yml`: new reusable scaffold preflight job for repos whose solution or project path may not exist yet. Consumer repos can gate PR/nightly/release callers without duplicating local `actions/checkout` + file-exists shell snippets.
+
+- `job-dotnet-publish-artifact.yml`: new reusable build/test/publish artifact job for deployable .NET projects, especially Azure Function Apps that hand an artifact to `job-deploy-function.yml`.
+
 - `pr-core.yml`: new `NuGet Version Consistency Check` job that runs alongside the other PR Core checks (`authorship-check` / `pr-metadata-check` / `pr-size-check`). When a PR bumps the `<Version>` of any NuGet-publishing `.csproj` (i.e. a project with a `<PackageId>`), the gate enforces three invariants: (1) every NuGet-publishing csproj in the repo shares the same `<Version>` — no drift between, e.g., a runtime package and its abstractions; (2) every NuGet-publishing csproj's per-package `CHANGELOG.md` carries a `## [<new-version>]` heading — content under `## [Unreleased]` does not satisfy the gate; (3) the repo-level `CHANGELOG.md` sitting next to a `.slnx` also has a `## [<new-version>]` heading. No-op for repos with zero NuGet-publishing csprojs and no-op when the PR doesn't touch any `<Version>` element, so safe to default on across the Grid. Motivated by Kernel v0.8.0's silent `Create GitHub Release` failure (release-notes generator awk-greps for `## [VERSION]` and exited 1 when the section was still labeled `## [Unreleased]`); this gate refuses such PRs up front instead of catching the problem at tag-push time, after NuGet has already published. Wired into the PR summary comment alongside the other check results.
 
 - `pr-core.yml` coverage gate: display branch and method coverage alongside line coverage in the gate verdict and PR summary. Coverlet's Cobertura output carries all three metrics; previously the gate only surfaced line coverage. Branch coverage parses the `condition-coverage="X% (covered/total)"` attribute from `<line branch="true">` elements; method coverage counts `<method>` elements whose `<line>` children have any hits. Both metrics dedupe across multiple coverage files via the same canonical source-file key used for line coverage (so a source file exercised by two test projects doesn't double-count). The gate continues to ratchet line coverage only (per ADR-0011 D2) — branch and method are informational. Display format: `Total coverage: 70.9% line / 51.3% branch / 82.4% method`. Follow-up work to ratchet branch and method per consumer opt-in is scoped in HoneyDrunkStudios/HoneyDrunk.Architecture#445.
@@ -33,12 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `docs/consumer-usage.md`: documented the standard caller split. Consumer workflows own triggers, version/environment resolution, and repo-specific metadata only; reusable workflow mechanics stay in `HoneyDrunk.Actions`.
+
 - `actions-ci.yml`: chose D4 Outcome B for `docker://` refs and migrated actionlint to direct install-and-invoke.
 - `agent-run.yml`: added optional `packet-path` input. When supplied, the workflow (1) injects a structured `> Packet: <permalink>` instruction into the agent's prompt envelope and (2) runs a post-hoc "Assert PR-body packet link" step that mechanically inserts the canonical line into any PR the agent opened in the `checkout-target` repo. The workflow — not the LLM — is the mechanical guarantor of invariant 32 in HoneyDrunk.Architecture. The permalink resolves to the Architecture checkout's actual commit SHA (via `git rev-parse HEAD`) so the link is immutable, not a moving branch ref. Idempotent (no edit if the canonical line is already present) and soft on edge cases (no PR / no checkout-target / detached HEAD / main-branch run → notice + exit 0). Existing callers unaffected — `packet-path` defaults to empty. Per ADR-0011 packet 03.
 - `docs/action-pins.md`: added the ADR-0012 D10 third-party action pin inventory.
 - `docs/d4-retrofit-audit.md`: recorded the D4 retrofit audit and `docker://` policy clarification.
 - `grid-health-report.yml`: added the ADR-0012 D6 Grid Health aggregator workflow, shell implementation, and operator guide.
 - `release.yml`: migrated Trivy and SBOM generation from marketplace wrappers to direct Trivy/Syft CLI invocation per ADR-0012 D4.
+
+### Removed
+
+- Removed the unused `release/extract-changelog` composite action. `release/generate-notes` owns changelog discovery/extraction and was the only supported release-notes path.
 
 ## [1.0.1] - 2026-04-18
 

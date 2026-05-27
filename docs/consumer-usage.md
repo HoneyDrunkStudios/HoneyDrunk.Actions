@@ -19,7 +19,9 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
-| `release.yml` | `contents: read`, `packages: write`, `id-token: write`, `security-events: write` |
+| `release.yml` | `contents: write`, `packages: write`, `id-token: write`, `security-events: write` |
+| `job-solution-preflight.yml` | `contents: read` |
+| `job-dotnet-publish-artifact.yml` | `contents: read` |
 | `job-deploy-container.yml` | `contents: read`, `id-token: write` |
 | `job-deploy-container-app.yml` | `contents: read`, `id-token: write` |
 | `job-deploy-function.yml` | `contents: read`, `id-token: write` |
@@ -388,7 +390,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
   security-events: write
@@ -399,6 +401,10 @@ jobs:
     with:
       enable-nuget-publish: true
       nuget-source: 'https://api.nuget.org/v3/index.json'
+      create-github-release: true
+      release-product-name: 'MyProject'
+      release-nuget-packages: |
+        MyProject
     secrets:
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}
 ```
@@ -414,7 +420,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
   security-events: write
@@ -464,7 +470,7 @@ jobs:
       container-registry-password: ${{ secrets.GITHUB_TOKEN }}
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
   security-events: write
@@ -483,7 +489,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
   security-events: write
@@ -539,7 +545,7 @@ jobs:
 
 ### Permissions
 
-`release.yml` callers need `contents: read`, `packages: write`, `id-token: write`, and `security-events: write`. `id-token: write` enables Azure OIDC/SBOM attestation paths, `packages: write` covers package/container publication, and `security-events: write` covers SARIF upload from release-time scans. Missing scopes fail at workflow-load or upload time; broader scopes should be justified by adjacent jobs.
+`release.yml` callers need `contents: write`, `packages: write`, `id-token: write`, and `security-events: write`. `contents: write` is part of the standard baseline because the reusable release workflow owns GitHub Release creation when `create-github-release: true`; callers that do not create GitHub Releases still use the same baseline so release scaffolds stay uniform. `id-token: write` enables Azure OIDC/SBOM attestation paths, `packages: write` covers package/container publication, and `security-events: write` covers SARIF upload from release-time scans. Missing scopes fail at workflow-load or upload time; broader scopes should be justified by adjacent jobs.
 
 
 ## Azure Authentication
@@ -833,9 +839,9 @@ Secret name mapping:
 
 ## Deploy Azure Function App
 
-**Purpose:** Deploy a .NET Azure Function App after building with `release.yml` or a custom build job.
+**Purpose:** Deploy a .NET Azure Function App after building with the reusable `.NET publish artifact` job.
 
-**When to Use:** Repos with Azure Function Apps (queue-triggered, HTTP-triggered, timer-triggered, etc.). Chains after a build job that publishes the function app as an artifact.
+**When to Use:** Repos with Azure Function Apps (queue-triggered, HTTP-triggered, timer-triggered, etc.). Chain `job-dotnet-publish-artifact.yml` into `job-deploy-function.yml` so consumer repos do not reimplement checkout, setup, restore, build, test, publish, or artifact upload.
 
 ### Minimal Example
 
@@ -849,17 +855,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '10.0.x'
-      - run: dotnet publish MyProject.Functions/MyProject.Functions.csproj -c Release -o ./publish
-      - uses: actions/upload-artifact@v6
-        with:
-          name: function-app
-          path: ./publish
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-dotnet-publish-artifact.yml@main
+    with:
+      project-path: 'MyProject.slnx'
+      publish-project: 'MyProject.Functions/MyProject.Functions.csproj'
+      artifact-name: 'function-app'
+      publish-output: './publish'
 
   deploy:
     needs: build
@@ -917,7 +918,7 @@ permissions:
 
 ### Permissions
 
-`job-deploy-function.yml` callers need `contents: read` and `id-token: write`, derived from the callee workflow's declared permissions. If a build job in the same workflow uploads artifacts, keep any extra scopes scoped to that job when possible.
+`job-dotnet-publish-artifact.yml` callers need `contents: read`. `job-deploy-function.yml` callers need `contents: read` and `id-token: write`, derived from the callee workflow's declared permissions. Keep function build and function deploy as reusable-workflow jobs; consumer repos should not carry local checkout/setup-dotnet/upload-artifact steps.
 
 
 ## Nightly Security Workflow

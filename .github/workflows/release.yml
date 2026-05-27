@@ -161,6 +161,66 @@ on:
         required: false
         type: string
         default: ''
+
+      create-github-release:
+        description: 'Create a GitHub Release with generated HoneyDrunk release notes'
+        required: false
+        type: boolean
+        default: false
+
+      github-release-tag:
+        description: 'Tag name for the GitHub Release. Defaults to the pushed tag or v{package-version}.'
+        required: false
+        type: string
+        default: ''
+
+      github-release-name:
+        description: 'Release title. Defaults to "{product-name} {tag}".'
+        required: false
+        type: string
+        default: ''
+
+      release-product-name:
+        description: 'Product name used in generated release notes'
+        required: false
+        type: string
+        default: ''
+
+      release-product-description:
+        description: 'One-line product description used in generated release notes'
+        required: false
+        type: string
+        default: ''
+
+      release-nuget-packages:
+        description: 'Newline-separated NuGet package names for generated release notes'
+        required: false
+        type: string
+        default: ''
+
+      release-docs-url:
+        description: 'Documentation URL for generated release notes'
+        required: false
+        type: string
+        default: ''
+
+      release-changelog-paths:
+        description: 'Optional newline-separated changelog paths for generated release notes'
+        required: false
+        type: string
+        default: ''
+
+      github-release-draft:
+        description: 'Create the GitHub Release as a draft'
+        required: false
+        type: boolean
+        default: false
+
+      github-release-prerelease:
+        description: 'Mark the GitHub Release as a prerelease'
+        required: false
+        type: boolean
+        default: false
       
       actions-ref:
         description: 'Git ref of HoneyDrunk.Actions to use'
@@ -712,10 +772,90 @@ jobs:
 
           echo "::error::Smoke test failed — $SMOKE_URL did not return 2xx/3xx within ${TIMEOUT}s"
           exit 1
+
+  github-release:
+    name: Create GitHub Release
+    if: ${{ always() && inputs.create-github-release && !failure() && !cancelled() }}
+    needs: [build-and-test, security-compliance, publish-nuget, publish-app, build-and-scan-container]
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v5
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
+      - name: Resolve GitHub Release metadata
+        id: release-metadata
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.github-release-tag }}
+          INPUT_NAME: ${{ inputs.github-release-name }}
+          PRODUCT_NAME: ${{ inputs.release-product-name }}
+          VERSION: ${{ needs.build-and-test.outputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$PRODUCT_NAME" ]; then
+            PRODUCT_NAME="$REPOSITORY_NAME"
+          fi
+
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            TAG="$REF_NAME"
+          else
+            TAG="v$VERSION"
+          fi
+
+          if [ -n "$INPUT_NAME" ]; then
+            NAME="$INPUT_NAME"
+          else
+            NAME="$PRODUCT_NAME $TAG"
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "name=$NAME"
+            echo "product-name=$PRODUCT_NAME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate Release Notes
+        id: notes
+        uses: ./.github/actions-repo/.github/actions/release/generate-notes
+        with:
+          version: ${{ needs.build-and-test.outputs.version }}
+          product-name: ${{ steps.release-metadata.outputs.product-name }}
+          product-description: ${{ inputs.release-product-description }}
+          changelog-paths: ${{ inputs.release-changelog-paths }}
+          nuget-packages: ${{ inputs.release-nuget-packages }}
+          docs-url: ${{ inputs.release-docs-url }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release-metadata.outputs.tag }}
+          name: ${{ steps.release-metadata.outputs.name }}
+          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: ${{ steps.notes.outputs.has-changelog == 'false' }}
+          draft: ${{ inputs.github-release-draft }}
+          prerelease: ${{ inputs.github-release-prerelease }}
   
   release-summary:
     name: Release Summary
-    needs: [build-and-test, security-compliance, publish-nuget, publish-app, build-and-scan-container]
+    needs: [build-and-test, security-compliance, publish-nuget, publish-app, build-and-scan-container, github-release]
     if: always()
     runs-on: ${{ inputs.runs-on }}
     
@@ -741,4 +881,7 @@ jobs:
           fi
           if [ "${{ inputs.enable-container-build }}" == "true" ]; then
             echo "- Container Build: ${{ needs.build-and-scan-container.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.create-github-release }}" == "true" ]; then
+            echo "- GitHub Release: ${{ needs.github-release.result }}" >> $GITHUB_STEP_SUMMARY
           fi

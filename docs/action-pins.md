@@ -29,6 +29,7 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | peter-evans/create-or-update-comment | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | peter-evans/create-pull-request | v8 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | peter-evans/find-comment | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
+| softprops/action-gh-release | v3 | none | Current | none | Centralized GitHub Release creation lives in `release.yml` instead of consumer repo-local release jobs. |
 
 ## Update protocol
 

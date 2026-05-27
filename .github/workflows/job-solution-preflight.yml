@@ -1,0 +1,66 @@
+# ==============================================================================
+# Solution Scaffold Preflight
+# ==============================================================================
+# Purpose:
+#   Reusable preflight for repos whose solution scaffold may not exist yet.
+#   Keeps scaffold-detection logic out of consumer repos.
+# ==============================================================================
+
+name: Solution Scaffold Preflight
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      project-path:
+        description: 'Solution or project path expected by the caller workflow'
+        required: true
+        type: string
+
+      missing-message:
+        description: 'Summary message to emit when the project path is missing'
+        required: false
+        type: string
+        default: 'Project scaffold is missing; skipping dependent workflow jobs.'
+
+    outputs:
+      project-exists:
+        description: 'true when project-path exists in the checked-out repository'
+        value: ${{ jobs.preflight.outputs.project-exists }}
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Workflow preflight
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      project-exists: ${{ steps.detect.outputs.project-exists }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Detect project scaffold
+        id: detect
+        shell: bash
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
+          MISSING_MESSAGE: ${{ inputs.missing-message }}
+        run: |
+          set -euo pipefail
+          NORMALIZED="${PROJECT_PATH#./}"
+
+          if [ -e "$NORMALIZED" ]; then
+            echo 'project-exists=true' >> "$GITHUB_OUTPUT"
+            echo "Found project scaffold: $PROJECT_PATH" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'project-exists=false' >> "$GITHUB_OUTPUT"
+            echo "$MISSING_MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+          fi
