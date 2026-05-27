@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `job-sonarcloud.yml`: exclude consumer `.github/workflows/**` wrapper YAML from SonarQube Cloud source analysis by default. The wrapper workflows intentionally call first-party reusable workflows from `HoneyDrunk.Actions@main` so repos receive centralized workflow fixes; SonarCloud reports those new wrapper calls as Security Hotspots even though the executable workflow logic is governed in this repo. Consumers can override the new `sonar-exclusions` input when they intentionally want Sonar to scan workflow YAML.
+
 - `actions/dotnet/test`: repaired the coverage-runsettings heredoc emitted by the composite action and added the supported `no-restore` input that `job-dotnet-publish-artifact.yml` already passes. The heredoc terminator now reaches Bash at column 1, so test jobs no longer exit before `dotnet test` can produce results and coverage.
 
 - `actions/dotnet/test` and `job-sonarcloud.yml`: preserve consumer-owned coverlet runsettings when adding native OpenCover output. The previous native-OpenCover fix wrote a format-only `coverlet.runsettings` and passed it via `--settings`, which unintentionally replaced repo filters such as `<Include>`, `<ExcludeByFile>`, and `<IncludeTestAssembly>`. In Pulse, that pulled generated `obj` sources into the denominator and dropped reported line coverage from 71.0% to 27.9% without a real test regression. The generated CI runsettings now starts from `coverage-runsettings` or `coverlet.runsettings` in the working directory when present, then merges in `<Format>opencover,cobertura</Format>`.

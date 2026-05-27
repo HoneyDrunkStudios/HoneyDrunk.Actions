@@ -109,6 +109,12 @@ on:
         type: string
         default: ''
 
+      sonar-exclusions:
+        description: 'Comma-separated SonarQube Cloud source exclusions. Defaults exclude consumer workflow wrapper YAML; workflow security is reviewed in HoneyDrunk.Actions.'
+        required: false
+        type: string
+        default: '.github/workflows/**'
+
     secrets:
       sonar-token:
         description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Architecture/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
@@ -205,6 +211,7 @@ jobs:
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
             /d:sonar.token="${SONAR_TOKEN}" \
+            /d:sonar.exclusions="${{ inputs.sonar-exclusions }}" \
             /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
 
       - name: Build
