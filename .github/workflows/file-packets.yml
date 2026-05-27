@@ -115,7 +115,7 @@ jobs:
       - name: Mint GitHub App installation token
         id: app-token
         if: steps.auth-mode.outputs.use-app == 'true'
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3.2.0
         with:
           app-id: ${{ secrets.app-id }}
           private-key: ${{ secrets.app-private-key }}

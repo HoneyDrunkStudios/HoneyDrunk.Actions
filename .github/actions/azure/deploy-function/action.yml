@@ -43,7 +43,7 @@ runs:
   steps:
     - name: Deploy function app to slot
       id: deploy
-      uses: azure/functions-action@v2
+      uses: azure/functions-action@v1
       with:
         app-name: ${{ inputs.app-name }}
         slot-name: ${{ inputs.slot-name == 'production' && '' || inputs.slot-name }}
