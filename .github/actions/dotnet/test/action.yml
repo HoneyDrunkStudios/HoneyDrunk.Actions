@@ -26,6 +26,10 @@ inputs:
     description: 'Path to a solution or project to test (optional)'
     required: false
     default: ''
+  coverage-runsettings:
+    description: 'Optional runsettings file to use as the base for coverage collection. When omitted, coverlet.runsettings in the working directory is used if present.'
+    required: false
+    default: ''
 outputs:
   tests-found:
     description: 'Whether test projects were found and executed'
@@ -37,6 +41,8 @@ runs:
       id: run-tests
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        COVERAGE_RUNSETTINGS: ${{ inputs.coverage-runsettings }}
       run: |
         set -euo pipefail
         
@@ -53,26 +59,77 @@ runs:
         if [ "${{ inputs.collect-coverage }}" == "true" ]; then
           # Emit both OpenCover (SonarQube Cloud native C# import format) and
           # Cobertura (coverage-baseline-ratchet.yml + report-generator consumer)
-          # from a single test run. Coverlet's XPlat Code Coverage collector
-          # accepts a comma-separated <Format> list. Without a runsettings file
-          # the collector defaults to Cobertura only, which silently breaks
-          # Sonar coverage import (ReportGenerator's OpenCover output is a paid
-          # feature, so converting after the fact is not viable).
+          # from a single test run while preserving repo-owned coverage scope
+          # filters such as Include, ExcludeByFile, and IncludeTestAssembly.
           RUNSETTINGS="$RESULTS_DIR/coverlet.runsettings"
-          cat > "$RUNSETTINGS" <<'RSXML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <RunSettings>
-          <DataCollectionRunSettings>
-            <DataCollectors>
-              <DataCollector friendlyName="XPlat Code Coverage">
-                <Configuration>
-                  <Format>opencover,cobertura</Format>
-                </Configuration>
-              </DataCollector>
-            </DataCollectors>
-          </DataCollectionRunSettings>
-        </RunSettings>
-        RSXML
+          BASE_RUNSETTINGS="${COVERAGE_RUNSETTINGS:-}"
+          if [ -z "$BASE_RUNSETTINGS" ] && [ -f "coverlet.runsettings" ]; then
+            BASE_RUNSETTINGS="$(pwd)/coverlet.runsettings"
+          fi
+          if [ -n "$BASE_RUNSETTINGS" ] && [ ! -f "$BASE_RUNSETTINGS" ]; then
+            echo "::error::coverage-runsettings was provided but does not exist: $BASE_RUNSETTINGS"
+            exit 1
+          fi
+          export RUNSETTINGS BASE_RUNSETTINGS
+          python3 <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          target = Path(os.environ["RUNSETTINGS"])
+          base = os.environ.get("BASE_RUNSETTINGS") or ""
+
+          def child(parent, name):
+              for item in list(parent):
+                  if item.tag.split("}", 1)[-1] == name:
+                      return item
+              return None
+
+          if base:
+              tree = ET.parse(base)
+              root = tree.getroot()
+              print(f"Using coverage runsettings base: {base}")
+          else:
+              root = ET.Element("RunSettings")
+              tree = ET.ElementTree(root)
+              print("No coverage runsettings base found; generating default coverlet settings.")
+
+          dc_settings = child(root, "DataCollectionRunSettings")
+          if dc_settings is None:
+              dc_settings = ET.SubElement(root, "DataCollectionRunSettings")
+          collectors = child(dc_settings, "DataCollectors")
+          if collectors is None:
+              collectors = ET.SubElement(dc_settings, "DataCollectors")
+          collector = None
+          for item in list(collectors):
+              if item.tag.split("}", 1)[-1] == "DataCollector" and item.attrib.get("friendlyName") == "XPlat Code Coverage":
+                  collector = item
+                  break
+          if collector is None:
+              collector = ET.SubElement(collectors, "DataCollector", {"friendlyName": "XPlat Code Coverage"})
+          config = child(collector, "Configuration")
+          if config is None:
+              config = ET.SubElement(collector, "Configuration")
+          fmt = child(config, "Format")
+          if fmt is None:
+              fmt = ET.SubElement(config, "Format")
+              existing = []
+          else:
+              existing = [part.strip() for part in (fmt.text or "").split(",") if part.strip()]
+
+          merged = []
+          seen = set()
+          for part in existing + ["opencover", "cobertura"]:
+              key = part.lower()
+              if key not in seen:
+                  seen.add(key)
+                  merged.append(part)
+          fmt.text = ",".join(merged)
+
+          ET.indent(tree, space="  ")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          tree.write(target, encoding="utf-8", xml_declaration=True)
+          PY
           ARGS="$ARGS --collect \"XPlat Code Coverage\" --settings \"$RUNSETTINGS\""
         fi
         

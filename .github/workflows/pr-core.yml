@@ -1018,19 +1018,17 @@ jobs:
                   baseline_ok = False
 
           floor_ok = round(total_rate, 1) >= round(floor, 1)
-          total_gate_applies = patch_coverable > 0
           failures = []
           if diff_error is not None:
               failures.append(f'patch diff unavailable (D1): {diff_error}')
           elif not patch_ok:
               failures.append(f'patch {pct(patch_pct)}% < {pct(threshold)}% (D1)')
-          if total_gate_applies:
-              if baseline_error is not None:
-                  failures.append(f'baseline file is invalid (D2): {baseline_error}')
-              elif not baseline_ok:
-                  failures.append(f'total {pct(total_rate)}% < baseline {pct(baseline_value)}% (D2)')
-              if not floor_ok:
-                  failures.append(f'total {pct(total_rate)}% < {pct(floor)}% floor (D3)')
+          if baseline_error is not None:
+              failures.append(f'baseline file is invalid (D2): {baseline_error}')
+          elif not baseline_ok:
+              failures.append(f'total {pct(total_rate)}% < baseline {pct(baseline_value)}% (D2)')
+          if not floor_ok:
+              failures.append(f'total {pct(total_rate)}% < {pct(floor)}% floor (D3)')
 
           # Multi-metric display string (line is gated; branch + method are
           # informational so reviewers can see the full picture without leaving
@@ -1048,12 +1046,10 @@ jobs:
               baseline_part = f'baseline {pct(baseline_value)}% line' if baseline_value is not None else 'baseline bootstrap'
               patch_part = 'patch n/a' if patch_pct is None else f'patch {pct(patch_pct)}%'
               total_part = f'{baseline_part}, floor {pct(floor)}%'
-              if not total_gate_applies:
-                  total_part = f'total gate skipped: no executable lines changed; {total_part}'
               verdict = f'passed — {patch_part}, total {total_display} ({total_part})'
               failed = 'false'
 
-          total_gate_text = 'Total gate: skipped (no executable lines changed)' if not total_gate_applies else 'Total gate: enforced'
+          total_gate_text = 'Total gate: enforced'
           detail = f'{patch_text}; Total coverage: {total_display}; {baseline_text}; Floor: {pct(floor)}%; {total_gate_text}'
           emit('verdict', verdict)
           emit('gate_failed', failed)
