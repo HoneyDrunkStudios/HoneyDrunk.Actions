@@ -1,0 +1,165 @@
+# ==============================================================================
+# Build and Publish .NET Artifact
+# ==============================================================================
+# Purpose:
+#   Reusable build/test/publish job for deployable .NET artifacts such as Azure
+#   Function Apps. Consumer repos should call this instead of reimplementing
+#   checkout, setup-dotnet, restore, build, test, publish, and artifact upload.
+# ==============================================================================
+
+name: Build and Publish .NET Artifact
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use'
+        required: false
+        type: string
+        default: '10.0.x'
+
+      configuration:
+        description: 'Build configuration'
+        required: false
+        type: string
+        default: 'Release'
+
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      working-directory:
+        description: 'Working directory for restore/build/test/publish'
+        required: false
+        type: string
+        default: '.'
+
+      project-path:
+        description: 'Solution or project path to restore/build/test'
+        required: true
+        type: string
+
+      publish-project:
+        description: 'Project path to publish'
+        required: true
+        type: string
+
+      publish-output:
+        description: 'Publish output path'
+        required: false
+        type: string
+        default: './publish'
+
+      artifact-name:
+        description: 'Uploaded artifact name'
+        required: false
+        type: string
+        default: 'dotnet-publish'
+
+      no-build:
+        description: 'Pass --no-build to dotnet publish'
+        required: false
+        type: boolean
+        default: true
+
+      actions-ref:
+        description: 'Git ref of HoneyDrunk.Actions to use'
+        required: false
+        type: string
+        default: 'main'
+
+    outputs:
+      artifact-name:
+        description: 'Uploaded artifact name'
+        value: ${{ jobs.publish.outputs.artifact-name }}
+      publish-output:
+        description: 'Publish output path'
+        value: ${{ jobs.publish.outputs.publish-output }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and Publish Artifact
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      artifact-name: ${{ steps.publish-outputs.outputs.artifact-name }}
+      publish-output: ${{ steps.publish-outputs.outputs.publish-output }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v5
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
+      - name: Setup .NET SDK
+        uses: ./.github/actions-repo/.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Restore dependencies
+        uses: ./.github/actions-repo/.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+
+      - name: Build project
+        uses: ./.github/actions-repo/.github/actions/dotnet/build
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+
+      - name: Run tests
+        uses: ./.github/actions-repo/.github/actions/dotnet/test
+        with:
+          configuration: ${{ inputs.configuration }}
+          no-build: 'true'
+          no-restore: 'true'
+          collect-coverage: 'false'
+          working-directory: ${{ inputs.working-directory }}
+          project-path: ${{ inputs.project-path }}
+
+      - name: Publish artifact
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PUBLISH_PROJECT: ${{ inputs.publish-project }}
+          PUBLISH_OUTPUT: ${{ inputs.publish-output }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          NO_BUILD: ${{ inputs.no-build }}
+        run: |
+          set -euo pipefail
+
+          ARGS=("$PUBLISH_PROJECT" --configuration "$CONFIGURATION" --output "$PUBLISH_OUTPUT")
+          if [ "$NO_BUILD" = "true" ]; then
+            ARGS+=(--no-build)
+          fi
+
+          dotnet publish "${ARGS[@]}"
+
+      - name: Upload published artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/${{ inputs.publish-output }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Emit publish outputs
+        id: publish-outputs
+        shell: bash
+        run: |
+          {
+            echo "artifact-name=${{ inputs.artifact-name }}"
+            echo "publish-output=${{ inputs.publish-output }}"
+          } >> "$GITHUB_OUTPUT"
