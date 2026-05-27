@@ -11,7 +11,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Debug build environment
         uses: ./.github/actions/diagnostics/debug-build-identity
@@ -39,7 +39,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Setup .NET
         uses: ./.github/actions/dotnet/setup
@@ -63,7 +63,7 @@ jobs:
           output-directory: './publish'
       
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: published-app
           path: ./publish
