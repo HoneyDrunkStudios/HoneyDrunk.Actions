@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `job-sonarcloud-quality-gate.yml` and `pr-core.yml`: added an opt-in ADR-0011 D11 SonarQube Cloud quality gate that polls PR new-code metrics (`new_violations`, `new_bugs`, `new_vulnerabilities`, `new_code_smells`, and `new_security_hotspots`) and compares them against configurable thresholds. The default posture is no behavior change (`enable-sonar-quality-gate: false`) and soft launch when enabled (`sonar-quality-gate-mode: warn`); repos can flip to `enforce` after observing real PRs. Breaches surface in the check annotations and PR summary so SonarQube Cloud's free-tier default gate no longer silently passes PRs that introduce new issues or hotspots.
+
 - `release.yml`: added centralized GitHub Release creation with generated HoneyDrunk release notes. Consumers now pass release metadata (`release-product-name`, `release-product-description`, `release-nuget-packages`, `release-docs-url`) into the reusable release workflow instead of carrying repo-local checkout/generate-notes/`softprops/action-gh-release` jobs.
 
 - `job-solution-preflight.yml`: new reusable scaffold preflight job for repos whose solution or project path may not exist yet. Consumer repos can gate PR/nightly/release callers without duplicating local `actions/checkout` + file-exists shell snippets.

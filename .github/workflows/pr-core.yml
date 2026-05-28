@@ -97,6 +97,60 @@ on:
         type: string
         default: 'note'
 
+      enable-sonar-quality-gate:
+        description: 'Poll SonarQube Cloud PR new-code metrics and apply ADR-0011 D11 thresholds'
+        required: false
+        type: boolean
+        default: false
+
+      sonar-quality-gate-mode:
+        description: 'Mode for the SonarQube Cloud quality gate: warn or enforce'
+        required: false
+        type: string
+        default: 'warn'
+
+      sonar-organization:
+        description: 'SonarQube Cloud organization key (required when enable-sonar-quality-gate is true)'
+        required: false
+        type: string
+        default: ''
+
+      sonar-project-key:
+        description: 'SonarQube Cloud project key (required when enable-sonar-quality-gate is true)'
+        required: false
+        type: string
+        default: ''
+
+      sonar-max-new-violations:
+        description: 'Maximum new_violations allowed by the SonarQube Cloud quality gate'
+        required: false
+        type: number
+        default: 0
+
+      sonar-max-new-bugs:
+        description: 'Maximum new_bugs allowed by the SonarQube Cloud quality gate'
+        required: false
+        type: number
+        default: 0
+
+      sonar-max-new-vulnerabilities:
+        description: 'Maximum new_vulnerabilities allowed by the SonarQube Cloud quality gate'
+        required: false
+        type: number
+        default: 0
+
+      sonar-max-new-code-smells:
+        description: 'Maximum new_code_smells allowed by the SonarQube Cloud quality gate'
+        required: false
+        type: number
+        default: 0
+
+      sonar-max-new-security-hotspots:
+        description: 'Maximum new_security_hotspots allowed by the SonarQube Cloud quality gate'
+        required: false
+        type: number
+        default: 0
+
       enable-accessibility-check:
         description: 'Run minimal accessibility check (opt-in)'
         required: false
@@ -136,6 +190,9 @@ on:
     secrets:
       github-token:
         description: 'GitHub token for PR comments and API access'
+        required: false
+      sonar-token:
+        description: 'SONAR_TOKEN for SonarQube Cloud quality-gate polling; required when enable-sonar-quality-gate is true'
         required: false
 
 permissions:
@@ -770,10 +827,30 @@ jobs:
       # Phase 3 toggle point (ADR-0044 packet 14): change this warning-only job
       # to fail for size_band == 'oversize' when the Grid adopts the harder posture.
 
-  # Job 10: PR Summary and Coverage Gate
+  # Job 10: SonarQube Cloud Quality Gate (Optional, ADR-0011 D11)
+  sonar-quality-gate:
+    name: SonarQube Cloud Quality Gate
+    if: ${{ inputs.enable-sonar-quality-gate && github.event_name == 'pull_request' }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-sonarcloud-quality-gate.yml@main
+    with:
+      sonar-organization: ${{ inputs.sonar-organization }}
+      sonar-project-key: ${{ inputs.sonar-project-key }}
+      mode: ${{ inputs.sonar-quality-gate-mode }}
+      max-new-violations: ${{ inputs.sonar-max-new-violations }}
+      max-new-bugs: ${{ inputs.sonar-max-new-bugs }}
+      max-new-vulnerabilities: ${{ inputs.sonar-max-new-vulnerabilities }}
+      max-new-code-smells: ${{ inputs.sonar-max-new-code-smells }}
+      max-new-security-hotspots: ${{ inputs.sonar-max-new-security-hotspots }}
+      runs-on: ${{ inputs.runs-on }}
+    secrets:
+      sonar-token: ${{ secrets.sonar-token }}
+    permissions:
+      contents: read
+
+  # Job 11: PR Summary and Coverage Gate
   pr-summary:
     name: PR Summary and Coverage Gate
-    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-metadata-check, nuget-version-consistency-check, pr-size-check]
+    needs: [build-and-test, static-analysis, secret-scan, dependency-scan, codeql, authorship-check, pr-metadata-check, nuget-version-consistency-check, pr-size-check, sonar-quality-gate]
     if: ${{ always() }}
     runs-on: ${{ inputs.runs-on }}
     permissions:
@@ -1124,6 +1201,7 @@ jobs:
           DEPS_RESULT="${{ needs.dependency-scan.result }}"
           CODEQL_RESULT="${{ needs.codeql.result }}"
           NUGET_VERSION_RESULT="${{ needs.nuget-version-consistency-check.result }}"
+          SONAR_GATE_RESULT="${{ needs.sonar-quality-gate.result }}"
 
           # Collect warnings - use empty defaults for skipped jobs
           BUILD_WARNINGS="${{ needs.build-and-test.outputs.has-warnings }}"
@@ -1131,20 +1209,22 @@ jobs:
           SECRETS_WARNINGS="${{ needs.secret-scan.outputs.has-warnings || 'false' }}"
           DEPS_WARNINGS="${{ needs.dependency-scan.outputs.has-warnings || 'false' }}"
           CODEQL_WARNINGS="${{ needs.codeql.outputs.has-warnings || 'false' }}"
+          SONAR_GATE_WARNINGS="${{ needs.sonar-quality-gate.outputs.gate_failed || 'false' }}"
 
           BUILD_WARNING_MSG="${{ needs.build-and-test.outputs.warning-messages }}"
           ANALYSIS_WARNING_MSG="${{ needs.static-analysis.outputs.warning-messages }}"
           SECRETS_WARNING_MSG="${{ needs.secret-scan.outputs.warning-messages }}"
           DEPS_WARNING_MSG="${{ needs.dependency-scan.outputs.warning-messages }}"
           CODEQL_WARNING_MSG="${{ needs.codeql.outputs.warning-messages }}"
+          SONAR_GATE_WARNING_MSG="${{ needs.sonar-quality-gate.outputs.summary_line }}"
 
           COVERAGE_GATE_FAILED="${{ steps.coverage-gate.outputs.gate_failed || 'false' }}"
 
           # Determine status - don't fail on skipped jobs
-          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" || "$DEPS_RESULT" == "failure" || "$CODEQL_RESULT" == "failure" || "$NUGET_VERSION_RESULT" == "failure" || "$COVERAGE_GATE_FAILED" == "true" ]]; then
+          if [[ "$BUILD_RESULT" == "failure" || "$ANALYSIS_RESULT" == "failure" || "$SECRETS_RESULT" == "failure" || "$DEPS_RESULT" == "failure" || "$CODEQL_RESULT" == "failure" || "$NUGET_VERSION_RESULT" == "failure" || "$SONAR_GATE_RESULT" == "failure" || "$COVERAGE_GATE_FAILED" == "true" ]]; then
             echo "icon=:x:" >> $GITHUB_OUTPUT
             echo "status=Failed" >> $GITHUB_OUTPUT
-          elif [[ "$BUILD_WARNINGS" == "true" || "$ANALYSIS_WARNINGS" == "true" || "$SECRETS_WARNINGS" == "true" || "$DEPS_WARNINGS" == "true" || "$CODEQL_WARNINGS" == "true" ]]; then
+          elif [[ "$BUILD_WARNINGS" == "true" || "$ANALYSIS_WARNINGS" == "true" || "$SECRETS_WARNINGS" == "true" || "$DEPS_WARNINGS" == "true" || "$CODEQL_WARNINGS" == "true" || "$SONAR_GATE_WARNINGS" == "true" ]]; then
             echo "icon=:warning:" >> $GITHUB_OUTPUT
             echo "status=Passed with Warnings" >> $GITHUB_OUTPUT
           else
@@ -1173,6 +1253,10 @@ jobs:
           if [[ "$CODEQL_WARNINGS" == "true" && -n "$CODEQL_WARNING_MSG" ]]; then
             WARNINGS_SECTION="${WARNINGS_SECTION}
           - :warning: **CodeQL:** $CODEQL_WARNING_MSG"
+          fi
+          if [[ "$SONAR_GATE_WARNINGS" == "true" && -n "$SONAR_GATE_WARNING_MSG" ]]; then
+            WARNINGS_SECTION="${WARNINGS_SECTION}
+          - :warning: **SonarQube Cloud Quality Gate:** $SONAR_GATE_WARNING_MSG"
           fi
 
           # Save to output
@@ -1205,6 +1289,10 @@ jobs:
           JOB_PR_METADATA_RESULT: ${{ needs.pr-metadata-check.result }}
           JOB_NUGET_VERSION_RESULT: ${{ needs.nuget-version-consistency-check.result }}
           JOB_PR_SIZE_RESULT: ${{ needs.pr-size-check.result }}
+          JOB_SONAR_GATE_RESULT: ${{ needs.sonar-quality-gate.result }}
+          SONAR_GATE_VERDICT: ${{ needs.sonar-quality-gate.outputs.verdict }}
+          SONAR_GATE_BREACHED_COUNT: ${{ needs.sonar-quality-gate.outputs.breached_count }}
+          SONAR_GATE_BREACH_SUMMARY: ${{ needs.sonar-quality-gate.outputs.breach_summary }}
           WARNINGS_BLOCK: ${{ steps.status.outputs.warnings }}
           COVERAGE_GATE_DETAIL: ${{ steps.coverage-gate.outputs.detail }}
           BUILD_CONFIGURATION: ${{ inputs.configuration }}
@@ -1263,6 +1351,14 @@ jobs:
             echo "- **NuGet Version Consistency:** $JOB_NUGET_VERSION_RESULT"
             echo "- **PR Size Check:** $JOB_PR_SIZE_RESULT"
           } >> message.md
+
+          if [ "$JOB_SONAR_GATE_RESULT" != "skipped" ]; then
+            if [ -n "$SONAR_GATE_BREACH_SUMMARY" ]; then
+              echo "- **SonarQube Cloud Quality Gate:** $JOB_SONAR_GATE_RESULT - ${SONAR_GATE_VERDICT:-breaches found} (${SONAR_GATE_BREACHED_COUNT:-0} metric breach(es): $SONAR_GATE_BREACH_SUMMARY)" >> message.md
+            else
+              echo "- **SonarQube Cloud Quality Gate:** $JOB_SONAR_GATE_RESULT${SONAR_GATE_VERDICT:+ - $SONAR_GATE_VERDICT}" >> message.md
+            fi
+          fi
 
           if [ -n "$COVERAGE_GATE_DETAIL" ]; then
             {

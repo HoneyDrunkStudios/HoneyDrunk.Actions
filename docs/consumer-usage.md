@@ -29,6 +29,7 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `nightly-deps.yml` | `contents: write`, `pull-requests: write`, `issues: write` |
 | `nightly-accessibility.yml` | `contents: read`, `issues: write` |
 | `weekly-governance.yml` | `contents: read`, `issues: write` |
+| `job-sonarcloud-quality-gate.yml` | `contents: read` |
 
 For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from the callee workflow's declared top-level and job-level `permissions:` blocks in `.github/workflows/<callee>.yml`.
 
@@ -36,6 +37,7 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 
 - [Caller permissions — the load-bearing rule](#caller-permissions--the-load-bearing-rule)
 - [PR Core Workflow](#pr-core-workflow)
+- [SonarQube Cloud Quality Gate](#sonarqube-cloud-quality-gate)
 - [PR SDK Workflow](#pr-sdk-workflow)
 - [Grid Review Request Workflow](#grid-review-request-workflow)
 - [Release Workflow](#release-workflow)
@@ -138,6 +140,59 @@ with:
   absolute-coverage-floor: 70
 ```
 
+### SonarQube Cloud Quality Gate
+
+`pr-core.yml` can optionally poll SonarQube Cloud PR new-code metrics after `job-sonarcloud.yml` has uploaded analysis data. This exists because the free SonarQube Cloud "Sonar way" gate cannot be customized to fail on every new issue, so HoneyDrunk enforces ADR-0011 D11 thresholds in Actions while using SonarQube Cloud as the data source.
+
+Default posture is off and warn-only:
+
+- `enable-sonar-quality-gate: false` means existing consumers do not change behavior.
+- `sonar-quality-gate-mode: warn` reports breaches in the check and PR summary without failing the PR.
+- `sonar-quality-gate-mode: enforce` fails the PR when any configured threshold is exceeded.
+- Missing PR measures are reported as a warning and do not hard-fail, matching fork PRs or caller workflows that skipped Sonar analysis. SonarQube Cloud authorization and configuration errors fail because the gate could not evaluate the PR.
+
+Start with a per-repo opt-in like:
+
+```yaml
+with:
+  enable-sonar-quality-gate: true
+  sonar-quality-gate-mode: warn
+  sonar-organization: 'honeydrunkstudios'
+  sonar-project-key: 'honeydrunkstudios_HoneyDrunk.Vault'
+secrets:
+  github-token: ${{ secrets.GITHUB_TOKEN }}
+  sonar-token: ${{ secrets.SONAR_TOKEN }}
+```
+
+Sequencing matters. Current HoneyDrunk consumer workflows usually run the `sonarcloud` job after `pr-core`, so immediate blocking enforcement should call the standalone gate after `sonarcloud`:
+
+```yaml
+  sonar-quality-gate:
+    name: SonarQube Cloud Quality Gate
+    if: github.event_name == 'pull_request' && needs.sonarcloud.result == 'success'
+    needs: sonarcloud
+    permissions:
+      contents: read
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-sonarcloud-quality-gate.yml@main
+    with:
+      sonar-organization: 'honeydrunkstudios'
+      sonar-project-key: 'honeydrunkstudios_HoneyDrunk.Vault'
+      mode: enforce
+    secrets:
+      sonar-token: ${{ secrets.SONAR_TOKEN }}
+```
+
+Threshold inputs default to zero, meaning no new issues or hotspots are allowed:
+
+```yaml
+with:
+  sonar-max-new-violations: 0
+  sonar-max-new-bugs: 0
+  sonar-max-new-vulnerabilities: 0
+  sonar-max-new-code-smells: 0
+  sonar-max-new-security-hotspots: 0
+```
+
 ### Full Example with Options
 
 ```yaml
@@ -178,6 +233,7 @@ jobs:
       enable-codeql: true
       codeql-queries: 'security-and-quality'
       codeql-fail-on-severity: 'note'   # any finding blocks; set 'warning' or 'error' to loosen
+      enable-sonar-quality-gate: false
       enable-accessibility-check: false
       patch-coverage-threshold: 75
       absolute-coverage-floor: 70
@@ -185,6 +241,8 @@ jobs:
       actions-ref: 'main'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Required only when enable-sonar-quality-gate is true.
+      # sonar-token: ${{ secrets.SONAR_TOKEN }}
 
   coverage-baseline-ratchet:
     if: github.event_name == 'push'
