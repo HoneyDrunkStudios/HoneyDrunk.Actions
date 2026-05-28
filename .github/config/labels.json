@@ -19,6 +19,126 @@
       "name": "skip-review",
       "color": "cfd3d7",
       "description": "Manual ADR-0044 escape hatch; Grid Review Runner skips PRs carrying this label."
+    },
+    {
+      "name": "needs-agent-review",
+      "color": "1d76db",
+      "description": "PR is in the Grid Review Runner queue; the pull-based local worker will pick it up on its next tick."
+    },
+    {
+      "name": "agent-review-in-progress",
+      "color": "e3b341",
+      "description": "Local worker has claimed the PR and is running the Grid review."
+    },
+    {
+      "name": "agent-reviewed",
+      "color": "0e8a16",
+      "description": "Local worker posted a clean Grid review verdict."
+    },
+    {
+      "name": "changes-requested-by-agent",
+      "color": "b60205",
+      "description": "Local worker posted a Grid review verdict with blocking or request-changes findings."
+    },
+    {
+      "name": "meta",
+      "color": "6f42c1",
+      "description": "Architecture, governance, catalog, or process work."
+    },
+    {
+      "name": "docs",
+      "color": "0075ca",
+      "description": "Documentation-only or documentation-primary changes."
+    },
+    {
+      "name": "ci",
+      "color": "0052cc",
+      "description": "GitHub Actions, build, release, or workflow changes."
+    },
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Defect fix."
+    },
+    {
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": "Product or capability improvement."
+    },
+    {
+      "name": "dependencies",
+      "color": "0366d6",
+      "description": "Package, tool, SDK, or dependency update."
+    },
+    {
+      "name": "chore",
+      "color": "fef2c0",
+      "description": "Maintenance work that is not a feature, bug, or refactor."
+    },
+    {
+      "name": "security",
+      "color": "ee0701",
+      "description": "Security-sensitive code, configuration, or process changes."
+    },
+    {
+      "name": "breaking-change",
+      "color": "cc0000",
+      "description": "Public API, schema, workflow contract, or behavior change requiring consumer action."
+    },
+    {
+      "name": "refactor",
+      "color": "c5def5",
+      "description": "Behavior-preserving structural change."
+    },
+    {
+      "name": "test",
+      "color": "bfdadc",
+      "description": "Test-only or test-infrastructure change."
+    },
+    {
+      "name": "infra",
+      "color": "4c1d95",
+      "description": "GitHub Apps, Vault, Azure, local worker, Task Scheduler, or deployment plumbing."
+    },
+    {
+      "name": "automation",
+      "color": "2ea44f",
+      "description": "Agent, bot, scheduled-runner, or automated workflow behavior."
+    },
+    {
+      "name": "human-only",
+      "color": "f9d0c4",
+      "description": "Work requiring manual portal, account, or operator action."
+    },
+    {
+      "name": "blocked",
+      "color": "e11d21",
+      "description": "Work cannot proceed until an external or manual prerequisite clears."
+    },
+    {
+      "name": "superseded",
+      "color": "bfd4f2",
+      "description": "Issue, packet, or PR replaced by newer scoped work."
+    },
+    {
+      "name": "new-node",
+      "color": "c2e0c6",
+      "description": "New Grid Node or repository standup work."
+    },
+    {
+      "name": "catalog",
+      "color": "d4c5f9",
+      "description": "Architecture catalog or index changes."
+    },
+    {
+      "name": "contracts",
+      "color": "7057ff",
+      "description": "Public abstractions, API contracts, or compatibility surface."
+    },
+    {
+      "name": "scaffolding",
+      "color": "ffd33d",
+      "description": "Initial repository, Node, or project setup."
     }
   ]
 }
