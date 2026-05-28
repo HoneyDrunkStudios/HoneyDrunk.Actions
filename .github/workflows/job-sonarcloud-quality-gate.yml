@@ -1,0 +1,326 @@
+# ==============================================================================
+# SonarQube Cloud Quality Gate Job (Tier 2)
+# ==============================================================================
+# Purpose:
+#   Poll SonarQube Cloud PR new-code metrics and fail or warn when the PR
+#   introduces issues beyond the configured thresholds.
+#
+# Tier:
+#   Tier 2 of the ADR-0011 PR review pipeline. This workflow complements
+#   job-sonarcloud.yml by enforcing thresholds that the free SonarQube Cloud
+#   "Sonar way" gate cannot customize for HoneyDrunk's public-repo posture.
+#
+# Caller contract:
+#   This workflow is workflow_call-only and is intended for pull_request runs.
+#   It reads PR measures from SonarQube Cloud using the same SONAR_TOKEN used by
+#   job-sonarcloud.yml. If SonarQube Cloud has not produced PR measures yet, the
+#   workflow reports a warning and exits 0 so fork PRs, token rotation gaps, or
+#   skipped upstream analysis do not create false hard failures.
+#
+# Phase-flip toggle point:
+#   Default mode is warn for ADR-0011 packet 08 soft launch. Flip caller input
+#   mode to enforce per repo after observing real PRs; flip the default here
+#   only when the Grid adopts enforce mode broadly.
+# ==============================================================================
+
+name: SonarQube Cloud Quality Gate (Job)
+
+on:
+  workflow_call:
+    inputs:
+      sonar-organization:
+        description: 'SonarQube Cloud organization key (e.g. honeydrunkstudios)'
+        required: true
+        type: string
+
+      sonar-project-key:
+        description: 'SonarQube Cloud project key (e.g. honeydrunkstudios_HoneyDrunk.Kernel)'
+        required: true
+        type: string
+
+      sonar-host-url:
+        description: 'SonarQube Cloud host URL'
+        required: false
+        type: string
+        default: 'https://sonarcloud.io'
+
+      mode:
+        description: 'Gate mode: warn (warnings-only) or enforce (fail PR)'
+        required: false
+        type: string
+        default: 'warn'
+
+      max-new-violations:
+        description: 'Maximum new_violations allowed'
+        required: false
+        type: number
+        default: 0
+
+      max-new-bugs:
+        description: 'Maximum new_bugs allowed'
+        required: false
+        type: number
+        default: 0
+
+      max-new-vulnerabilities:
+        description: 'Maximum new_vulnerabilities allowed'
+        required: false
+        type: number
+        default: 0
+
+      max-new-code-smells:
+        description: 'Maximum new_code_smells allowed'
+        required: false
+        type: number
+        default: 0
+
+      max-new-security-hotspots:
+        description: 'Maximum new_security_hotspots allowed'
+        required: false
+        type: number
+        default: 0
+
+      runs-on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+    secrets:
+      sonar-token:
+        description: 'SONAR_TOKEN - same org secret used by job-sonarcloud.yml'
+        required: true
+
+    outputs:
+      verdict:
+        description: 'Quality-gate verdict for PR summaries'
+        value: ${{ jobs.sonar-quality-gate.outputs.verdict }}
+      gate_failed:
+        description: 'true when thresholds were breached'
+        value: ${{ jobs.sonar-quality-gate.outputs.gate_failed }}
+      breached_count:
+        description: 'Number of breached SonarQube Cloud metrics'
+        value: ${{ jobs.sonar-quality-gate.outputs.breached_count }}
+      breach_summary:
+        description: 'Human-readable breached metric summary'
+        value: ${{ jobs.sonar-quality-gate.outputs.breach_summary }}
+      summary_line:
+        description: 'One-line summary for PR comments'
+        value: ${{ jobs.sonar-quality-gate.outputs.summary_line }}
+
+permissions:
+  contents: read
+
+jobs:
+  sonar-quality-gate:
+    name: SonarQube Cloud Quality Gate
+    runs-on: ${{ inputs.runs-on }}
+    if: ${{ github.event_name == 'pull_request' }}
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}
+      gate_failed: ${{ steps.gate.outputs.gate_failed }}
+      breached_count: ${{ steps.gate.outputs.breached_count }}
+      breach_summary: ${{ steps.gate.outputs.breach_summary }}
+      summary_line: ${{ steps.gate.outputs.summary_line }}
+
+    steps:
+      - name: Fetch SonarQube Cloud measures and enforce thresholds
+        id: gate
+        env:
+          SONAR_TOKEN: ${{ secrets.sonar-token }}
+          SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+          SONAR_ORGANIZATION: ${{ inputs.sonar-organization }}
+          SONAR_PROJECT_KEY: ${{ inputs.sonar-project-key }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MODE: ${{ inputs.mode }}
+          MAX_NEW_VIOLATIONS: ${{ inputs.max-new-violations }}
+          MAX_NEW_BUGS: ${{ inputs.max-new-bugs }}
+          MAX_NEW_VULNERABILITIES: ${{ inputs.max-new-vulnerabilities }}
+          MAX_NEW_CODE_SMELLS: ${{ inputs.max-new-code-smells }}
+          MAX_NEW_SECURITY_HOTSPOTS: ${{ inputs.max-new-security-hotspots }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          out_path = os.environ["GITHUB_OUTPUT"]
+
+          def emit(key, value):
+              value = "" if value is None else str(value)
+              with open(out_path, "a", encoding="utf-8") as out:
+                  if "\n" in value:
+                      out.write(f"{key}<<EOF\n{value}\nEOF\n")
+                  else:
+                      out.write(f"{key}={value}\n")
+
+          def finish(verdict, gate_failed, breached_count, breach_summary, summary_line, exit_code):
+              emit("verdict", verdict)
+              emit("gate_failed", "true" if gate_failed else "false")
+              emit("breached_count", breached_count)
+              emit("breach_summary", breach_summary)
+              emit("summary_line", summary_line)
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("### SonarQube Cloud Quality Gate\n\n")
+                  summary.write(summary_line + "\n")
+                  if breach_summary:
+                      summary.write("\nBreaches: " + breach_summary + "\n")
+              sys.exit(exit_code)
+
+          host = (os.environ.get("SONAR_HOST_URL") or "").rstrip("/")
+          org = (os.environ.get("SONAR_ORGANIZATION") or "").strip()
+          project_key = (os.environ.get("SONAR_PROJECT_KEY") or "").strip()
+          pr_number = (os.environ.get("PR_NUMBER") or "").strip()
+          mode = (os.environ.get("MODE") or "warn").strip().lower()
+          token = os.environ.get("SONAR_TOKEN") or ""
+
+          if mode not in {"warn", "enforce"}:
+              print(f"::error::Unknown SonarQube Cloud quality-gate mode '{mode}'. Expected 'warn' or 'enforce'.")
+              finish("configuration failed", True, 0, "", "SonarQube Cloud Quality Gate: configuration failed", 1)
+
+          if not host or not org or not project_key or not pr_number:
+              print("::error::sonar-host-url, sonar-organization, sonar-project-key, and PR number are required.")
+              finish("configuration failed", True, 0, "", "SonarQube Cloud Quality Gate: configuration failed", 1)
+
+          def threshold(name):
+              raw = os.environ.get(name, "0")
+              try:
+                  value = int(float(raw))
+              except (TypeError, ValueError):
+                  print(f"::error::{name} must be numeric, got '{raw}'.")
+                  finish("configuration failed", True, 0, "", "SonarQube Cloud Quality Gate: configuration failed", 1)
+              if value < 0:
+                  print(f"::error::{name} must be >= 0, got {value}.")
+                  finish("configuration failed", True, 0, "", "SonarQube Cloud Quality Gate: configuration failed", 1)
+              return value
+
+          metrics = [
+              ("new_violations", threshold("MAX_NEW_VIOLATIONS")),
+              ("new_bugs", threshold("MAX_NEW_BUGS")),
+              ("new_vulnerabilities", threshold("MAX_NEW_VULNERABILITIES")),
+              ("new_code_smells", threshold("MAX_NEW_CODE_SMELLS")),
+              ("new_security_hotspots", threshold("MAX_NEW_SECURITY_HOTSPOTS")),
+          ]
+
+          query = urllib.parse.urlencode({
+              "organization": org,
+              "component": project_key,
+              "pullRequest": pr_number,
+              "metricKeys": ",".join(metric for metric, _ in metrics),
+          })
+          url = f"{host}/api/measures/component?{query}"
+          summary_url = (
+              f"{host}/summary/new_code?"
+              + urllib.parse.urlencode({"id": project_key, "pullRequest": pr_number, "organization": org})
+          )
+
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/json",
+          }
+
+          values = {}
+          last_error = ""
+          fatal_error = ""
+          for attempt in range(1, 7):
+              try:
+                  request = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(request, timeout=10) as response:
+                      payload = json.loads(response.read().decode("utf-8"))
+                  measures = (payload.get("component") or {}).get("measures") or []
+                  values = {
+                      measure.get("metric"): (measure.get("period") or {}).get("value")
+                      for measure in measures
+                      if measure.get("metric")
+                  }
+                  if values:
+                      break
+                  last_error = "no measures returned yet"
+                  print(f"::notice::SonarQube Cloud API attempt {attempt} returned no PR measures yet.")
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode("utf-8", errors="replace")
+                  last_error = f"HTTP {exc.code}: {body[:300]}"
+                  if exc.code in {400, 401, 403, 404}:
+                      fatal_error = last_error
+                      break
+                  print(f"::notice::SonarQube Cloud API attempt {attempt} failed: {last_error}")
+              except Exception as exc:
+                  last_error = str(exc)
+                  print(f"::notice::SonarQube Cloud API attempt {attempt} failed: {last_error}")
+
+              if attempt < 6:
+                  time.sleep(5)
+
+          if fatal_error:
+              message = (
+                  "SonarQube Cloud Quality Gate: failed - SonarQube Cloud "
+                  f"configuration or authorization error ({fatal_error}). "
+                  f"See {summary_url}"
+              )
+              print(f"::error::{message}")
+              finish("configuration failed", True, 0, "", message, 1)
+
+          if not values:
+              message = (
+                  "SonarQube Cloud Quality Gate: skipped - PR measures were not "
+                  f"available after retries ({last_error or 'unknown reason'}). "
+                  f"See {summary_url}"
+              )
+              print(f"::warning::{message}")
+              finish("skipped (measures unavailable)", False, 0, "", message, 0)
+
+          failures = []
+          observed = []
+          for metric, limit in metrics:
+              raw = values.get(metric)
+              if raw is None:
+                  continue
+              try:
+                  actual = int(float(raw))
+              except (TypeError, ValueError):
+                  print(f"::notice::Ignoring non-numeric SonarQube metric {metric}={raw!r}.")
+                  continue
+              observed.append(f"{metric}={actual}")
+              if actual > limit:
+                  failures.append((metric, actual, limit))
+
+          if not observed:
+              message = (
+                  "SonarQube Cloud Quality Gate: skipped - configured new-code "
+                  f"metrics were not present in the PR analysis. See {summary_url}"
+              )
+              print(f"::warning::{message}")
+              finish("skipped (metrics unavailable)", False, 0, "", message, 0)
+
+          if not failures:
+              detail = ", ".join(observed)
+              message = f"SonarQube Cloud Quality Gate: passed ({detail}). See {summary_url}"
+              print(f"::notice::{message}")
+              finish("passed", False, 0, "", message, 0)
+
+          breach_summary = "; ".join(
+              f"{metric}={actual} (threshold {limit})"
+              for metric, actual, limit in failures
+          )
+          for metric, actual, limit in failures:
+              print(f"::error::SonarQube Cloud new-code breach: {metric}={actual} (threshold {limit})")
+          print(f"::error::See SonarQube Cloud PR summary: {summary_url}")
+
+          verdict = f"{'failed' if mode == 'enforce' else 'warn'} - {breach_summary}"
+          message = (
+              f"SonarQube Cloud Quality Gate: {verdict}. "
+              f"Mode: {mode}. See {summary_url}"
+          )
+
+          if mode == "enforce":
+              finish(verdict, True, len(failures), breach_summary, message, 1)
+
+          print("::warning::Gate mode is warn; reporting breaches without failing the PR.")
+          finish(verdict, True, len(failures), breach_summary, message, 0)
+          PY
