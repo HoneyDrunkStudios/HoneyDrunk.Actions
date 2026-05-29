@@ -27,7 +27,7 @@ on:
         required: false
         type: string
         default: >-
-          HoneyDrunk.Kernel,HoneyDrunk.Transport,HoneyDrunk.Vault,HoneyDrunk.Auth,HoneyDrunk.Web.Rest,HoneyDrunk.Data,HoneyDrunk.Notify,HoneyDrunk.Communications,HoneyDrunk.Pulse,HoneyDrunk.Actions,HoneyDrunk.Architecture,HoneyDrunkStudios
+          HoneyDrunk.Kernel,HoneyDrunk.Transport,HoneyDrunk.Vault,HoneyDrunk.Vault.Rotation,HoneyDrunk.Auth,HoneyDrunk.Web.Rest,HoneyDrunk.Data,HoneyDrunk.Notify,HoneyDrunk.Communications,HoneyDrunk.Pulse,HoneyDrunk.Audit,HoneyDrunk.Observe,HoneyDrunk.AI,HoneyDrunk.Operator,HoneyDrunk.Flow,HoneyDrunk.Memory,HoneyDrunk.Knowledge,HoneyDrunk.Capabilities,HoneyDrunk.Agents,HoneyDrunk.Lore,HoneyDrunk.Standards,HoneyDrunk.Actions,HoneyDrunk.Architecture,HoneyDrunkStudios,.github,TheHive
 
 permissions:
   contents: read

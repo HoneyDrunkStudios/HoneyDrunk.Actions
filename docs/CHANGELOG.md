@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `seed-labels-fanout.yml`: refreshed the default Grid fan-out target list so the labels-as-code seed reaches newer repos, including Audit, Observe, AI, Operator, Flow, Memory, Knowledge, Capabilities, Agents, Lore, Standards, `.github`, and TheHive.
+
 - `docs/consumer-usage.md`: documented the standard caller split. Consumer workflows own triggers, version/environment resolution, and repo-specific metadata only; reusable workflow mechanics stay in `HoneyDrunk.Actions`.
 
 - `actions-ci.yml`: chose D4 Outcome B for `docker://` refs and migrated actionlint to direct install-and-invoke.
