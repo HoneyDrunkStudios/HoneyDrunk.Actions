@@ -298,7 +298,7 @@ jobs:
 
 ## Grid Review Request Workflow
 
-**Purpose:** Advisory ADR-0086 trigger rail for the pull-based local-worker Grid Review Runner. This workflow does **not** run Codex, Claude, Anthropic, OpenAI, or any model API in GitHub Actions. It normalizes the worker-state labels and upserts a structured queue comment that the local worker polls.
+**Purpose:** Advisory ADR-0086 trigger rail for the pull-based local-worker Grid Review Runner. This workflow does **not** run Codex, Claude, Anthropic, OpenAI, or any model API in GitHub Actions. It applies high-confidence PR classification labels that already exist on the target repository, normalizes the worker-state labels, and upserts a structured queue comment that the local worker polls.
 
 **When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Architecture` for the Phase 1 pilot.
 
@@ -348,7 +348,9 @@ The workflow emits the ADR-0086 `grid-review-request` payload into a machine-rea
 owner/repo#pr@headSha
 ```
 
-It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
+It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The workflow also infers existing non-worker labels from PR title/body/files, such as ADR number, docs, governance, architecture, security, secrets, and known node labels. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
+
+Set `apply-classification-labels: false` only for a repo that wants the review queue without central PR label classification.
 
 The old OpenClaw webhook inputs are retained as no-op compatibility shims during the cutover, but new callers should not pass them.
 

@@ -7,6 +7,7 @@
 # Responsibilities:
 #   - Decide whether a pull request should request Grid review
 #   - Build the versioned review-request payload
+#   - Apply high-confidence PR classification labels that already exist
 #   - Normalize worker-state labels for the PR/head SHA
 #   - Upsert the structured queue comment consumed by the local worker
 #
@@ -75,6 +76,11 @@ on:
         required: false
         type: string
         default: 'honeydrunk-grid-review-queue:v1'
+      apply-classification-labels:
+        description: 'Apply inferred non-worker PR labels when those labels already exist on the target repository'
+        required: false
+        type: boolean
+        default: true
     secrets:
       openclaw-webhook-secret:
         description: 'Deprecated ADR-0044 secret retained for compatibility; local-worker queueing ignores it'
@@ -289,6 +295,118 @@ jobs:
               output.write(f"deletions={deletions}\n")
           PY
 
+      - name: Apply PR classification labels
+        if: ${{ inputs.apply-classification-labels && steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' }}
+        id: classification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+          EVENT_PATH: ${{ github.event_path }}
+          QUEUE_LABEL: ${{ inputs.queue-label }}
+          IN_PROGRESS_LABEL: ${{ inputs.in-progress-label }}
+          REVIEWED_LABEL: ${{ inputs.reviewed-label }}
+          CHANGES_REQUESTED_LABEL: ${{ inputs.changes-requested-label }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          pr_number='${{ github.event.pull_request.number }}'
+
+          gh api "repos/${repo}/labels?per_page=100" --paginate --slurp > repo-labels.json
+
+          python3 - <<'PY' > inferred-labels.txt
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          event = json.loads(Path(os.environ['EVENT_PATH']).read_text(encoding='utf-8'))
+          pages = json.loads(Path('changed-files.json').read_text(encoding='utf-8'))
+          files = [item for page in pages for item in page]
+          label_pages = json.loads(Path('repo-labels.json').read_text(encoding='utf-8'))
+          existing = {item['name'].lower(): item['name'] for page in label_pages for item in page}
+
+          worker_labels = {
+              os.environ['QUEUE_LABEL'].lower(),
+              os.environ['IN_PROGRESS_LABEL'].lower(),
+              os.environ['REVIEWED_LABEL'].lower(),
+              os.environ['CHANGES_REQUESTED_LABEL'].lower(),
+          }
+
+          pr = event['pull_request']
+          title = pr.get('title') or ''
+          body = pr.get('body') or ''
+          paths = [item['filename'] for item in files]
+          text = '\n'.join([title, body, *paths]).lower()
+          candidates = []
+
+          def add(label):
+              key = label.lower()
+              if key in worker_labels:
+                  return
+              if key in existing and existing[key] not in candidates:
+                  candidates.append(existing[key])
+
+          adr_numbers = sorted(set(re.findall(r'adr[-_/ ]?0*(\d{1,4})', text)))
+          for number in adr_numbers:
+              add(f"adr-{int(number):04d}")
+
+          markdown_paths = [path for path in paths if path.lower().endswith('.md')]
+          if markdown_paths and len(markdown_paths) == len(paths):
+              add('docs')
+          if any(path.startswith(('adrs/', 'constitution/', 'catalogs/', 'initiatives/', 'repos/')) for path in paths):
+              add('architecture')
+              add('governance')
+          if any(path.startswith('constitution/') for path in paths):
+              add('constitution')
+          if any(path.startswith('catalogs/') for path in paths):
+              add('catalog')
+          if any(path.startswith('infrastructure/') for path in paths) or ' infrastructure' in f' {text}':
+              add('infrastructure')
+          if any(path.startswith('.github/workflows/') or path.endswith(('.yml', '.yaml')) for path in paths):
+              add('ci')
+
+          security_terms = ('secret', 'credential', 'token', 'key vault', 'pat', 'api key', 'rotation', 'sensitive')
+          if any(term in text for term in security_terms):
+              add('security')
+              add('secrets')
+
+          if 'bug' in text or 'fix' in title.lower():
+              add('bug')
+          elif any(word in text for word in ('add ', 'create ', 'introduce ', 'standup', 'stand up', 'enable ', 'accept adr')):
+              add('enhancement')
+
+          node_terms = {
+              'actions': ('honeydrunk.actions', '/actions', 'actions/'),
+              'agents': ('honeydrunk.agents',),
+              'ai': ('honeydrunk.ai',),
+              'audit': ('honeydrunk.audit',),
+              'cache': ('honeydrunk.cache', 'redis'),
+              'core': ('honeydrunk.core',),
+              'files': ('honeydrunk.files',),
+              'identity': ('honeydrunk.identity', 'entra'),
+              'web-ui': ('honeydrunk.web.ui', 'web.ui'),
+          }
+          for label, needles in node_terms.items():
+              if any(needle in text for needle in needles):
+                  add(label)
+
+          for label in candidates:
+              print(label)
+          PY
+
+          if [ -s inferred-labels.txt ]; then
+            while IFS= read -r label; do
+              gh issue edit "$pr_number" --repo "$repo" --add-label "$label"
+            done < inferred-labels.txt
+            labels="$(paste -sd ',' inferred-labels.txt)"
+            echo "labels=${labels}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Applied PR classification labels: ${labels}"
+          else
+            echo "labels=" >> "$GITHUB_OUTPUT"
+            echo "::notice::No existing high-confidence PR classification labels matched."
+          fi
+
       - name: Normalize local-worker queue labels
         if: ${{ steps.event.outputs.skip != 'true' && steps.gate.outputs.skip != 'true' }}
         shell: bash
@@ -410,5 +528,6 @@ jobs:
             echo "- Additions/deletions: +${{ steps.payload.outputs.additions }} / -${{ steps.payload.outputs.deletions }}"
             echo "- Queue label: ${{ inputs.queue-label }}"
             echo "- Queue marker: ${{ inputs.queue-comment-marker }}"
+            echo "- Classification labels: ${{ steps.classification.outputs.labels }}"
             echo "- Advisory only: true"
           } >> "$GITHUB_STEP_SUMMARY"
