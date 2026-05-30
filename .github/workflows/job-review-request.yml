@@ -91,7 +91,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
   issues: write
 
 jobs:
@@ -222,9 +222,19 @@ jobs:
           config_path = Path(os.environ['REVIEW_CONFIG_PATH'])
           config_text = config_path.read_text(encoding='utf-8') if config_path.exists() else ''
 
+          allowed_authorship = {'human', 'agent-codex', 'agent-copilot', 'agent-claude-code', 'mixed'}
           authorship_match = re.search(r'(?im)^\s*Authorship\s*:\s*([^\r\n]+)', body)
-          authorship_class = authorship_match.group(1).strip() if authorship_match else 'unknown'
-          authorship_source = 'pr-body' if authorship_match else 'missing'
+          raw_authorship = authorship_match.group(1).strip().lower() if authorship_match else ''
+          if raw_authorship in allowed_authorship:
+              authorship_class = raw_authorship
+              authorship_source = 'pr-body'
+          elif authorship_match:
+              authorship_class = 'unknown'
+              authorship_source = 'invalid'
+              print('::warning::Invalid Authorship value; queue metadata will use unknown.')
+          else:
+              authorship_class = 'unknown'
+              authorship_source = 'missing'
 
           packet_url_match = re.search(r'https://github\.com/HoneyDrunkStudios/[^\s)]+/issues/\d+', body)
           packet_path_match = re.search(r'generated/issue-packets/[^\s)`]+\.md', body)
@@ -290,6 +300,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write(f"idempotency-key={idempotency_key}\n")
               output.write(f"head-sha={head_sha}\n")
+              output.write(f"authorship-class={authorship_class}\n")
               output.write(f"changed-files={len(files)}\n")
               output.write(f"additions={additions}\n")
               output.write(f"deletions={deletions}\n")
@@ -449,6 +460,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.github-token }}
           QUEUE_COMMENT_MARKER: ${{ inputs.queue-comment-marker }}
+          AUTHORSHIP_CLASS: ${{ steps.payload.outputs.authorship-class }}
         run: |
           set -euo pipefail
 
@@ -462,6 +474,7 @@ jobs:
           status: queued
           idempotency_key: ${{ steps.payload.outputs.idempotency-key }}
           head_sha: ${{ steps.payload.outputs.head-sha }}
+          authorship_class: ${AUTHORSHIP_CLASS}
           queued_at: ${queued_at}
           runner: ${{ steps.gate.outputs.runner }}
           risk_class: ${{ steps.gate.outputs.risk-class }}
