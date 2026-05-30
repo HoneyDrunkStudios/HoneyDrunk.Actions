@@ -35,11 +35,13 @@ def parse_rows(path):
     for i, line in enumerate(lines):
         if line.lstrip().startswith("|"):
             cells = split_row(line)
-            if cells and cells[0] == "Name":
+            # Match the FULL expected column set, identical to
+            # inventory-schema-check.py — so both scripts lock onto the same table.
+            if cells == COLUMNS:
                 header_idx = i
                 break
     if header_idx is None:
-        sys.exit(f"PARSE ERROR: no inventory table header in {path}")
+        sys.exit(f"PARSE ERROR: no inventory table with the expected columns in {path}")
     rows = []
     for line in lines[header_idx + 2:]:
         if not line.lstrip().startswith("|"):
@@ -58,7 +60,9 @@ def parse_rows(path):
 
 
 def clean(cell):
-    # Strip Markdown emphasis/backticks/links so "`SONAR_TOKEN`" -> "SONAR_TOKEN".
+    # Strip surrounding backticks/emphasis so "`SONAR_TOKEN`" -> "SONAR_TOKEN".
+    # The cells this is applied to (Name / Rotates / Current Expiration) are never
+    # Markdown links, so no link normalization is needed.
     cell = cell.strip().strip("`").strip("*").strip()
     return cell
 

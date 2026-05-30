@@ -101,8 +101,12 @@ def escalate_expired(esc, architecture_checkout):
     if existing.returncode == 0 and json.loads(existing.stdout or "[]"):
         print(f"  {name}: incident PR for {branch} already exists (any state) — skipping.")
         return
-    remote_branch = gh_quiet(["api", f"repos/{REPO}/branches/{branch}"])
-    if remote_branch.returncode == 0:
+    # `git ls-remote` handles slashes in the branch name natively (the incident
+    # branch is `incident/<date>-...`); the branches REST API would need the name
+    # URL-encoded. Run it from the Architecture checkout, which has the remote.
+    ls = subprocess.run(["git", "-C", architecture_checkout, "ls-remote",
+                         "--heads", "origin", branch], text=True, capture_output=True)
+    if ls.returncode == 0 and ls.stdout.strip():
         print(f"  {name}: incident branch {branch} already exists on remote — skipping.")
         return
 
