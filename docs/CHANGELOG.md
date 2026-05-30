@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `job-review-request.yml`: added central high-confidence PR label classification before ADR-0086 queueing. The workflow now infers existing labels such as ADR number, docs, governance, architecture, security, secrets, CI, and known node labels from the PR title/body/files, while preserving the worker-state labels as queue mechanics only.
+- `job-review-request.yml`: added central high-confidence PR label classification before ADR-0086 queueing. The workflow now infers existing labels such as ADR number, docs, meta, infra, security, secrets, CI, and known node labels from the PR title/body/files, while preserving the worker-state labels as queue mechanics only.
 
 - `.github/config/labels.json`: added ADR-0086 worker-state labels (`needs-agent-review`, `agent-review-in-progress`, `agent-reviewed`, `changes-requested-by-agent`) plus the managed PR-label vocabulary used by the upcoming label-normalizing review enqueue workflow.
 

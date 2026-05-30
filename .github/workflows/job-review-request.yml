@@ -355,6 +355,7 @@ jobs:
           if markdown_paths and len(markdown_paths) == len(paths):
               add('docs')
           if any(path.startswith(('adrs/', 'constitution/', 'catalogs/', 'initiatives/', 'repos/')) for path in paths):
+              add('meta')
               add('architecture')
               add('governance')
           if any(path.startswith('constitution/') for path in paths):
@@ -362,7 +363,7 @@ jobs:
           if any(path.startswith('catalogs/') for path in paths):
               add('catalog')
           if any(path.startswith('infrastructure/') for path in paths) or ' infrastructure' in f' {text}':
-              add('infrastructure')
+              add('infra')
           if any(path.startswith('.github/workflows/') or path.endswith(('.yml', '.yaml')) for path in paths):
               add('ci')
 
@@ -371,7 +372,7 @@ jobs:
               add('security')
               add('secrets')
 
-          if 'bug' in text or 'fix' in title.lower():
+          if re.search(r'\bbugs?\b', text) or re.search(r'\bfix(?:e[sd])?\b', title.lower()):
               add('bug')
           elif any(word in text for word in ('add ', 'create ', 'introduce ', 'standup', 'stand up', 'enable ', 'accept adr')):
               add('enhancement')
@@ -397,7 +398,9 @@ jobs:
 
           if [ -s inferred-labels.txt ]; then
             while IFS= read -r label; do
-              gh issue edit "$pr_number" --repo "$repo" --add-label "$label"
+              if ! gh issue edit "$pr_number" --repo "$repo" --add-label "$label"; then
+                echo "::warning::Could not apply optional classification label '${label}'. Continuing with Grid review queueing."
+              fi
             done < inferred-labels.txt
             labels="$(paste -sd ',' inferred-labels.txt)"
             echo "labels=${labels}" >> "$GITHUB_OUTPUT"

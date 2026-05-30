@@ -348,7 +348,7 @@ The workflow emits the ADR-0086 `grid-review-request` payload into a machine-rea
 owner/repo#pr@headSha
 ```
 
-It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The workflow also infers existing non-worker labels from PR title/body/files, such as ADR number, docs, governance, architecture, security, secrets, and known node labels. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
+It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The workflow also infers existing non-worker labels from PR title/body/files, such as ADR number, docs, meta, infra, security, secrets, and known node labels. Optional classification failures warn and do not block queueing. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
 
 Set `apply-classification-labels: false` only for a repo that wants the review queue without central PR label classification.
 
