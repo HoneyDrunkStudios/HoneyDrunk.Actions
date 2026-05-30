@@ -91,7 +91,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
   issues: write
 
 jobs:
@@ -409,7 +409,7 @@ jobs:
 
           if [ -s inferred-labels.txt ]; then
             while IFS= read -r label; do
-              if ! gh issue edit "$pr_number" --repo "$repo" --add-label "$label"; then
+              if ! gh api --method POST "repos/${repo}/issues/${pr_number}/labels" -f "labels[]=${label}" >/dev/null; then
                 echo "::warning::Could not apply optional classification label '${label}'. Continuing with Grid review queueing."
               fi
             done < inferred-labels.txt
