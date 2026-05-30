@@ -37,6 +37,14 @@ def main(path):
     if header is None:
         sys.exit(f"SCHEMA ERROR: no inventory table header found in {path}")
 
+    # Enforce the "exactly one table" invariant the evaluator relies on: a second
+    # `Name`-headed table would let the parser read the wrong one.
+    second_idx, _ = find_header(lines[idx + 1:])
+    if second_idx is not None:
+        sys.exit(
+            f"SCHEMA ERROR: more than one inventory table found (second header near "
+            f"line {idx + 1 + second_idx + 1}). The inventory must be a single table.")
+
     if header != EXPECTED_COLUMNS:
         sys.exit(
             "SCHEMA ERROR: inventory table columns drifted.\n"

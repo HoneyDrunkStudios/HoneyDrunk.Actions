@@ -17,6 +17,8 @@ Reads escalations.json from inventory-evaluate.py. Uses the `gh` CLI directly
 import argparse
 import datetime
 import json
+import os
+import re
 import subprocess
 import sys
 
@@ -58,9 +60,13 @@ def open_issue(name, expiration):
     )
     out = gh(["issue", "create", "--repo", REPO, "--title",
               f"[Rotate] {name} — expires {expiration}", "--label", LABEL, "--body", body])
-    print(f"  opened standing issue for {name}: {out.strip()}")
-    num = find_issue(name)[0]
-    return num
+    url = out.strip()
+    print(f"  opened standing issue for {name}: {url}")
+    # Parse the number straight from the create URL (.../issues/N) rather than
+    # re-listing — `gh issue list` is eventually consistent and may not yet
+    # return the just-created issue, which would drop the escalation.
+    m = re.search(r"/issues/(\d+)\s*$", url)
+    return int(m.group(1)) if m else None
 
 
 def escalate_label_tier(esc, tier_label, message):
@@ -87,10 +93,17 @@ def escalate_expired(esc, architecture_checkout):
     rel_path = f"generated/incidents/{today}-{safe}-expired.md"
     branch = f"incident/{today}-{safe}-expired"
 
-    # Idempotency: if a PR already exists for this branch, skip.
-    existing = gh_quiet(["pr", "list", "--repo", REPO, "--head", branch, "--json", "number"])
+    # Idempotency: skip if an incident PR for this branch already exists in ANY
+    # state (open, merged, or closed) — a same-day PR merged earlier must not be
+    # re-created — or if the remote branch already exists.
+    existing = gh_quiet(["pr", "list", "--repo", REPO, "--head", branch,
+                         "--state", "all", "--json", "number"])
     if existing.returncode == 0 and json.loads(existing.stdout or "[]"):
-        print(f"  {name}: incident PR for {branch} already exists — skipping.")
+        print(f"  {name}: incident PR for {branch} already exists (any state) — skipping.")
+        return
+    remote_branch = gh_quiet(["api", f"repos/{REPO}/branches/{branch}"])
+    if remote_branch.returncode == 0:
+        print(f"  {name}: incident branch {branch} already exists on remote — skipping.")
         return
 
     incident = (
@@ -115,7 +128,6 @@ def escalate_expired(esc, architecture_checkout):
         f"4. Set this incident's `status: resolved` and merge.\n"
     )
 
-    import os
     cwd = architecture_checkout
     inc_dir = os.path.join(cwd, "generated", "incidents")
     os.makedirs(inc_dir, exist_ok=True)

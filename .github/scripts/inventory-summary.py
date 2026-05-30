@@ -10,20 +10,33 @@ import datetime
 import json
 import sys
 
+# The summary uses emoji; force UTF-8 so it never dies on a non-UTF-8 locale.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
+
 TIER_ICON = {
     "ok": "✅", "urgent_T30": "⚠️", "imminent_T7": "🚨", "expired_T0": "⛔",
 }
 
 
 def main(path):
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    print(f"## External Credentials Drift Check — {today} (UTC)\n")
+
+    # The summary runs with `if: always()`, so a failed evaluate step can leave
+    # escalations.json missing or malformed. Distinguish that from a clean
+    # zero-row result — collapsing both into "no rows" would mask an upstream
+    # failure (and suppress the heartbeat's real signal).
     try:
         with open(path, encoding="utf-8") as fh:
             escalations = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        escalations = []
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"⚠️ Could not read `{path}` ({exc.__class__.__name__}). An earlier "
+              f"step likely failed — **no heartbeat this run**; investigate the run log.")
+        return
 
-    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    print(f"## External Credentials Drift Check — {today} (UTC)\n")
     print(f"💚 Heartbeat: workflow ran. Evaluated {len(escalations)} `Rotates: yes` row(s).\n")
 
     if not escalations:

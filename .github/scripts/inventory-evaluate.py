@@ -46,7 +46,12 @@ def parse_rows(path):
             break
         cells = split_row(line)
         if len(cells) != len(COLUMNS):
-            # Tolerate trailing/leading empties from formatting; otherwise skip.
+            # Never silently drop a row — a malformed `Rotates: yes` credential
+            # would otherwise vanish from escalation. Warn loudly to stderr; the
+            # schema-check step is the hard gate, this is the belt-and-suspenders.
+            sys.stderr.write(
+                f"WARNING: skipping malformed inventory row "
+                f"({len(cells)} cells, expected {len(COLUMNS)}): {line.strip()[:120]}\n")
             continue
         rows.append(dict(zip(COLUMNS, cells)))
     return rows
@@ -78,7 +83,9 @@ def main(path):
         except ValueError:
             sys.exit(f"PARSE ERROR: row '{name}' Current Expiration '{raw_exp}' is not a real date.")
         days = (exp - today).days
-        if days < 0:
+        if days <= 0:
+            # T+0 is the expiration day itself (and anything past it) — treat the
+            # day-of as expired so the SEV-2 fires on the day, not the day after.
             tier = "expired_T0"
         elif days <= 7:
             tier = "imminent_T7"
