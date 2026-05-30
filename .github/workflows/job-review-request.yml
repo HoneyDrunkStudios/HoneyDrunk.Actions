@@ -354,14 +354,15 @@ jobs:
           Queue source: ${run_url}
           EOF
 
-          gh api "repos/${repo}/issues/${pr_number}/comments?per_page=100" > comments.json
+          gh api "repos/${repo}/issues/${pr_number}/comments?per_page=100" --paginate --slurp > comments.json
           comment_id="$(python3 - <<'PY'
           import json
           import os
           from pathlib import Path
 
           marker = os.environ['QUEUE_COMMENT_MARKER']
-          comments = json.loads(Path('comments.json').read_text(encoding='utf-8'))
+          pages = json.loads(Path('comments.json').read_text(encoding='utf-8'))
+          comments = [comment for page in pages for comment in page]
           matches = [comment for comment in comments if marker in (comment.get('body') or '')]
           print(matches[-1]['id'] if matches else '')
           PY
