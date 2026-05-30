@@ -298,7 +298,7 @@ jobs:
 
 ## Grid Review Request Workflow
 
-**Purpose:** Advisory ADR-0044 trigger rail for the OpenClaw/Codex Grid Review Runner. This workflow does **not** run Codex, Anthropic, OpenAI, or any model API in GitHub Actions. It emits a signed review-request payload for OpenClaw, preserves the same payload as a durable fallback artifact, and can post a machine-readable replay pointer comment when OpenClaw is unavailable.
+**Purpose:** Advisory ADR-0086 trigger rail for the pull-based local-worker Grid Review Runner. This workflow does **not** run Codex, Claude, Anthropic, OpenAI, or any model API in GitHub Actions. It normalizes the worker-state labels and upserts a structured queue comment that the local worker polls.
 
 **When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Architecture` for the Phase 1 pilot.
 
@@ -319,10 +319,7 @@ permissions:
 jobs:
   grid-review-request:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-review-request.yml@main
-    with:
-      openclaw-webhook-url: ${{ vars.OPENCLAW_GRID_REVIEW_WEBHOOK_URL }}
     secrets:
-      openclaw-webhook-secret: ${{ secrets.OPENCLAW_GRID_REVIEW_WEBHOOK_SECRET }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -332,7 +329,7 @@ The repo must carry `.honeydrunk-review.yaml` and explicitly opt in:
 
 ```yaml
 enabled: true
-runner: openclaw-codex
+runner: local-worker
 review_risk_class: normal
 ```
 
@@ -343,21 +340,23 @@ Skip behavior:
 - missing `.honeydrunk-review.yaml` is skipped
 - `enabled: false` is skipped
 
-### Payload and Fallback
+### Queue Contract
 
-The workflow emits the ADR-0044 `grid-review-request` payload with idempotency key:
+The workflow emits the ADR-0086 `grid-review-request` payload into a machine-readable PR comment with idempotency key:
 
 ```text
 owner/repo#pr@headSha
 ```
 
-When webhook delivery is unavailable or not configured, the workflow uploads `review-request.json` as an artifact and can post a machine-readable PR comment containing the run id, run attempt, artifact name, head SHA, and idempotency key for OpenClaw cron/poll replay. The workflow is advisory only and must not be made a required blocking check until the Grid explicitly changes ADR-0044's posture.
+It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
+
+The old OpenClaw webhook inputs are retained as no-op compatibility shims during the cutover, but new callers should not pass them.
 
 ---
 
 ### Permissions
 
-`job-review-request.yml` callers need `contents: read`, `pull-requests: read`, and `issues: write`. The issue write scope is used only for the optional fallback replay-pointer comment. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
+`job-review-request.yml` callers need `contents: read`, `pull-requests: read`, and `issues: write`. The issue write scope is used for queue labels and the queue comment. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
 
 
 ## PR SDK Workflow
