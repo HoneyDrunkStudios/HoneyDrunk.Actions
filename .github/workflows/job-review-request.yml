@@ -290,6 +290,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write(f"idempotency-key={idempotency_key}\n")
               output.write(f"head-sha={head_sha}\n")
+              output.write(f"authorship-class={authorship_class}\n")
               output.write(f"changed-files={len(files)}\n")
               output.write(f"additions={additions}\n")
               output.write(f"deletions={deletions}\n")
@@ -462,6 +463,7 @@ jobs:
           status: queued
           idempotency_key: ${{ steps.payload.outputs.idempotency-key }}
           head_sha: ${{ steps.payload.outputs.head-sha }}
+          authorship_class: ${{ steps.payload.outputs.authorship-class }}
           queued_at: ${queued_at}
           runner: ${{ steps.gate.outputs.runner }}
           risk_class: ${{ steps.gate.outputs.risk-class }}
