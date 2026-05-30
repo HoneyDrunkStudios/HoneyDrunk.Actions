@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `job-review-request.yml`: replaced the OpenClaw signed-webhook request path with the ADR-0086 local-worker queue path. The reusable workflow now normalizes worker-state labels, writes the `needs-agent-review` queue label, and upserts the `honeydrunk-grid-review-queue:v1` comment consumed by the pull-based runner.
+
 - `seed-labels-fanout.yml`: refreshed the default Grid fan-out target list so the labels-as-code seed reaches newer repos, including Audit, Observe, AI, Operator, Flow, Memory, Knowledge, Capabilities, Agents, Lore, Standards, `.github`, and TheHive.
 
 - `docs/consumer-usage.md`: documented the standard caller split. Consumer workflows own triggers, version/environment resolution, and repo-specific metadata only; reusable workflow mechanics stay in `HoneyDrunk.Actions`.
