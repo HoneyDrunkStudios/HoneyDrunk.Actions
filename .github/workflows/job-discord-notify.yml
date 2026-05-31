@@ -16,10 +16,10 @@
 # pattern set, the fail-closed scan, and embed formatting live in the focused,
 # unit-tested helper `.github/scripts/discord_notify.py` (tests:
 # `.github/scripts/test_discord_notify.py`, run by actions-ci.yml). This workflow
-# only orchestrates it — it checks out HoneyDrunk.Actions and calls the helper's
-# subcommands. Keeping the logic in a real script (mirroring the inventory-*.py
-# helpers) means it is testable and cannot drift across the two scan call sites
-# the way inline-YAML heredocs do.
+# only orchestrates it — it checks out HoneyDrunk.Actions at the workflow's own
+# revision and calls the helper's subcommands. Keeping the logic in a real script
+# (mirroring the inventory-*.py helpers) means it is testable and cannot drift
+# across the two scan call sites the way inline-YAML heredocs do.
 #
 # What it does:
 #   - Validates `channel` and `severity` against the closed enums.
@@ -82,11 +82,6 @@ on:
         required: false
         type: string
         default: ''
-      actions-ref:
-        description: 'Ref of HoneyDrunk.Actions to check out for the helper script. Defaults to the called workflow ref.'
-        required: false
-        type: string
-        default: ''
     secrets:
       DISCORD_WEBHOOK_OPS_ALERTS:
         required: false
@@ -112,25 +107,28 @@ jobs:
     name: Discord Notify
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve HoneyDrunk.Actions ref
+      - name: Resolve helper ref (deterministic — no caller override)
         id: ref
-        env:
-          INPUT_ACTIONS_REF: ${{ inputs.actions-ref }}
         run: |
           set -euo pipefail
-          # Default to the ref this reusable workflow was called at, so the helper
-          # script and config stay aligned with the pinned workflow version.
-          if [ -n "$INPUT_ACTIONS_REF" ]; then
-            echo "ref=$INPUT_ACTIONS_REF" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
-          fi
+          # Pin the helper checkout to the EXACT ref this reusable workflow was
+          # called at (GITHUB_WORKFLOW_REF looks like
+          # "owner/repo/.github/workflows/job-discord-notify.yml@refs/heads/main").
+          # A caller using @v1 / @<sha> gets the helper from that same revision, so
+          # discord_notify.py cannot drift from the workflow version. There is
+          # deliberately NO caller-supplied `actions-ref` input: this job runs with
+          # the DISCORD_WEBHOOK_* secrets in scope, so letting a caller point the
+          # helper (incl. the redact path) at arbitrary code would be a secret-
+          # exfiltration seam (ADR-0084 D8 / Invariant 8).
+          echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout HoneyDrunk.Actions (helper script)
-        uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/common/checkout-actions-repo@main
+        uses: actions/checkout@v5
         with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
           ref: ${{ steps.ref.outputs.ref }}
           path: .actions-helper
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -167,7 +165,6 @@ jobs:
           python3 .actions-helper/.github/scripts/discord_notify.py precheck
 
       - name: Format embed (validate + final-payload scan)
-        id: format
         env:
           SEVERITY: ${{ inputs.severity }}
           TITLE: ${{ inputs.title }}
