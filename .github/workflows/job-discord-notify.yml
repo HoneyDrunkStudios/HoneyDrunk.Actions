@@ -132,6 +132,11 @@ jobs:
           ref: ${{ steps.ref.outputs.ref }}
           path: .actions-helper
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Validate inputs
         env:
           CHANNEL: ${{ inputs.channel }}
