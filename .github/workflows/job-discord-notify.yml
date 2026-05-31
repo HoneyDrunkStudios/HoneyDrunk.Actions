@@ -9,26 +9,30 @@
 #   Invariant 8 extended to webhook payloads).
 #
 # Single Responsibility:
-#   Format one operator-alert and POST it to exactly one Discord channel's
-#   webhook, after a fail-closed redaction pre-check.
+#   Orchestrate the tested redaction+formatting helper and POST one operator
+#   alert to exactly one Discord channel's webhook.
+#
+# Separation of concerns (per .github/copilot-instructions.md): the redaction
+# pattern set, the fail-closed scan, and embed formatting live in the focused,
+# unit-tested helper `.github/scripts/discord_notify.py` (tests:
+# `.github/scripts/test_discord_notify.py`, run by actions-ci.yml). This workflow
+# only orchestrates it — it checks out HoneyDrunk.Actions and calls the helper's
+# subcommands. Keeping the logic in a real script (mirroring the inventory-*.py
+# helpers) means it is testable and cannot drift across the two scan call sites
+# the way inline-YAML heredocs do.
 #
 # What it does:
-#   - Validates `channel` and `severity` against the closed enums; requires
-#     `metadata` (when set) to be a JSON object.
-#   - Runs the D8 redaction pre-check over title + body + link + metadata, then
-#     AGAIN over the final assembled JSON payload (so a JSON-escaped secret in
-#     metadata can't decode past it). Both passes share one pattern module. A
-#     match ABORTS the post (fail-closed) — a leaked secret in chat is
-#     irreversible; a noisy CI failure is the correct trade. This is regex
+#   - Validates `channel` and `severity` against the closed enums.
+#   - `discord_notify.py precheck` scans title+body+link+metadata for secret
+#     shapes (fail-closed). `format` validates metadata is a JSON object, builds
+#     the embed (severity decoration, truncation, 6000-char total budget across
+#     fields), and re-scans the FINAL assembled payload (closes the JSON-escape
+#     decode bypass). A match ABORTS the post — a leaked secret in chat is
+#     irreversible; a noisy CI failure is the correct trade. Regex is
 #     defense-in-depth against ACCIDENTAL plaintext leaks, not an adversarial
-#     guarantee — a caller-side base64/gzip-encoded secret is out of scope.
-#   - Truncates title (200) and body (4000) and enforces Discord's 6000-char
-#     total embed budget across fields (drops trailing metadata fields with a
-#     note rather than letting Discord 400 the whole alert).
-#   - Decorates by severity (embed color + emoji prefix).
-#   - POSTs the embed to the channel's `DISCORD_WEBHOOK_*` secret via curl with
-#     bounded timeouts; non-2xx and transport failures fail the job with the
-#     response redacted through the same pattern module.
+#     guarantee (caller-side base64/gzip is out of scope).
+#   - POSTs via `curl` with bounded timeouts; non-2xx / transport failures fail
+#     the job with the response body redacted through the same helper.
 #
 # Vendor posture (ADR-0080 D2 / ADR-0084 D7): Discord is Hedge. This workflow is
 # the single Grid-side seam — swapping to Slack/Mattermost/Matrix/Teams is a
@@ -37,8 +41,8 @@
 # Smoke-test (run after merge, once webhooks exist — ADR-0084 packet 02):
 #   1. Simple post: dispatch a caller with channel=ops-alerts, severity=info,
 #      title="job-discord-notify smoke-test" — verify it lands in #ops-alerts.
-#   2. Secret rejection: title="Smoke: token=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-#      — verify the job FAILS at the redaction step and nothing lands in Discord.
+#   2. Secret rejection: a title containing a fake token shape — verify the job
+#      FAILS at the redaction step and nothing lands in Discord.
 #   3. All-channel routing: repeat (1) for each of the seven channels to confirm
 #      each DISCORD_WEBHOOK_* secret resolves and routes correctly.
 # ==============================================================================
@@ -74,7 +78,12 @@ on:
         type: string
         default: ''
       metadata:
-        description: 'Optional JSON object; rendered as embed fields. Must parse as JSON if provided.'
+        description: 'Optional JSON object; rendered as embed fields. Must parse as a JSON object if provided.'
+        required: false
+        type: string
+        default: ''
+      actions-ref:
+        description: 'Ref of HoneyDrunk.Actions to check out for the helper script. Defaults to the called workflow ref.'
         required: false
         type: string
         default: ''
@@ -103,76 +112,46 @@ jobs:
     name: Discord Notify
     runs-on: ubuntu-latest
     steps:
-      - name: Build shared redaction module
+      - name: Resolve HoneyDrunk.Actions ref
+        id: ref
+        env:
+          INPUT_ACTIONS_REF: ${{ inputs.actions-ref }}
         run: |
           set -euo pipefail
-          # Single source of truth for the secret-shape pattern set (ADR-0084 D8 /
-          # Invariant 8). Both the fail-closed pre-check and the error-response
-          # redaction import this module, so the two can never drift apart.
-          cat > /tmp/hd_redaction.py <<'PY'
-          import re
+          # Default to the ref this reusable workflow was called at, so the helper
+          # script and config stay aligned with the pinned workflow version.
+          if [ -n "$INPUT_ACTIONS_REF" ]; then
+            echo "ref=$INPUT_ACTIONS_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          fi
 
-          # name -> regex. Keep this the ONLY place patterns are defined.
-          PATTERNS = {
-              "GitHub classic token (ghp_/gho_/ghu_/ghs_/ghr_)": r"gh[pousr]_[A-Za-z0-9]{36,}",
-              "GitHub fine-grained PAT (github_pat_)": r"github_pat_[A-Za-z0-9_]{40,}",
-              "JWT": r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-              "Discord webhook URL": r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
-              "AWS access key id": r"AKIA[0-9A-Z]{16}",
-              "Azure connection-string key fragment": r"(?:AccountKey|SharedAccessKey)=",
-              "PEM private key header": r"-----BEGIN [A-Z ]+PRIVATE KEY-----",
-              # High-entropy run (32+) adjacent to a credential keyword.
-              "keyword-adjacent secret": r"(?i)(?:token|secret|password|api[_-]?key)[\"'\s:=]+[A-Za-z0-9+/_\-]{32,}",
-              "credit-card-shaped number": r"\b(?:\d[ -]*?){13,16}\b",
-              "US SSN-shaped number": r"\b\d{3}-\d{2}-\d{4}\b",
-          }
-
-          def scan(text):
-              """Return the names of every pattern that matches `text`."""
-              return [name for name, pat in PATTERNS.items() if re.search(pat, text)]
-
-          def redact(text):
-              """Replace every matched secret shape with [REDACTED]."""
-              for pat in PATTERNS.values():
-                  text = re.sub(pat, "[REDACTED]", text)
-              return text
-          PY
+      - name: Checkout HoneyDrunk.Actions (helper script)
+        uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/actions/common/checkout-actions-repo@main
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          path: .actions-helper
 
       - name: Validate inputs
         env:
           CHANNEL: ${{ inputs.channel }}
           SEVERITY: ${{ inputs.severity }}
-          METADATA: ${{ inputs.metadata }}
         run: |
           set -euo pipefail
-
           case "$CHANNEL" in
             ops-alerts|security-alerts|agent-activity|hive-activity|release|announcements|audit-sensitive) ;;
             *)
               echo "::error::Unknown channel '$CHANNEL'. Must be one of: ops-alerts, security-alerts, agent-activity, hive-activity, release, announcements, audit-sensitive (ADR-0084 D2)." >&2
-              exit 1
-              ;;
+              exit 1 ;;
           esac
-
           case "$SEVERITY" in
             info|medium|high|critical) ;;
             *)
               echo "::error::Unknown severity '$SEVERITY'. Must be one of: info, medium, high, critical (ADR-0084 D6)." >&2
-              exit 1
-              ;;
+              exit 1 ;;
           esac
 
-          # metadata, when provided, must be a JSON *object* — the formatter only
-          # consumes a dict (renders its keys as embed fields). Arrays/strings/
-          # numbers would parse but be silently dropped, so reject them up front.
-          if [ -n "$METADATA" ]; then
-            if ! printf '%s' "$METADATA" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d, dict) else 1)" 2>/dev/null; then
-              echo "::error::metadata input must be a JSON object (e.g. {\"key\":\"value\"}). Arrays, strings, numbers, and malformed JSON are rejected." >&2
-              exit 1
-            fi
-          fi
-
-      - name: Redaction pre-check (fail-closed, ADR-0084 D8 / Invariant 8)
+      - name: Redaction pre-check (raw inputs, ADR-0084 D8 / Invariant 8)
         env:
           TITLE: ${{ inputs.title }}
           BODY: ${{ inputs.body }}
@@ -180,42 +159,28 @@ jobs:
           METADATA: ${{ inputs.metadata }}
         run: |
           set -euo pipefail
-          # Scan the operator-controlled payload for secret shapes BEFORE formatting.
-          # Fail-closed: any match aborts the post. We never echo the offending
-          # substring (that would itself leak it) — only the pattern name + remedy.
-          # `link` is included because it is emitted as the embed URL downstream.
-          python3 - <<'PY'
-          import os, sys
-          sys.path.insert(0, "/tmp")
-          from hd_redaction import scan
+          python3 .actions-helper/.github/scripts/discord_notify.py precheck
 
-          payload = "\n".join([
-              os.environ.get("TITLE", ""),
-              os.environ.get("BODY", ""),
-              os.environ.get("LINK", ""),
-              os.environ.get("METADATA", ""),
-          ])
-
-          hits = scan(payload)
-          if hits:
-              for name in hits:
-                  print(f"::error::Redaction pre-check matched '{name}'. "
-                        f"Discord payloads must carry no secret values, PII, or "
-                        f"credentials (ADR-0084 D8 / Invariant 8). Post aborted; "
-                        f"fix the emitter so it sends metadata, not secrets.",
-                        file=sys.stderr)
-              sys.exit(1)
-          print("Redaction pre-check passed.")
-          PY
-
-      - name: Resolve webhook + format embed + POST
+      - name: Format embed (validate + final-payload scan)
+        id: format
         env:
-          CHANNEL: ${{ inputs.channel }}
           SEVERITY: ${{ inputs.severity }}
           TITLE: ${{ inputs.title }}
           BODY: ${{ inputs.body }}
           LINK: ${{ inputs.link }}
           METADATA: ${{ inputs.metadata }}
+        run: |
+          set -euo pipefail
+          # `format` validates metadata is a JSON object, builds the embed, and
+          # re-scans the assembled payload (closing the JSON-escape decode bypass)
+          # before emitting it. Stash the payload in a file (never an output/log)
+          # so the POST step reads it without re-serializing.
+          python3 .actions-helper/.github/scripts/discord_notify.py format > /tmp/discord_payload.json
+
+      - name: POST to Discord
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SEVERITY: ${{ inputs.severity }}
           WEBHOOK_OPS_ALERTS: ${{ secrets.DISCORD_WEBHOOK_OPS_ALERTS }}
           WEBHOOK_SECURITY_ALERTS: ${{ secrets.DISCORD_WEBHOOK_SECURITY_ALERTS }}
           WEBHOOK_AGENT_ACTIVITY: ${{ secrets.DISCORD_WEBHOOK_AGENT_ACTIVITY }}
@@ -226,7 +191,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Map channel -> the resolved webhook URL (from the matching secret).
           case "$CHANNEL" in
             ops-alerts)       WEBHOOK_URL="$WEBHOOK_OPS_ALERTS" ;;
             security-alerts)  WEBHOOK_URL="$WEBHOOK_SECURITY_ALERTS" ;;
@@ -236,134 +200,36 @@ jobs:
             announcements)    WEBHOOK_URL="$WEBHOOK_ANNOUNCEMENTS" ;;
             audit-sensitive)  WEBHOOK_URL="$WEBHOOK_AUDIT_SENSITIVE" ;;
           esac
-          export WEBHOOK_URL
 
           if [ -z "${WEBHOOK_URL:-}" ]; then
             echo "::error::No webhook secret available for channel '$CHANNEL'. The DISCORD_WEBHOOK_* secret is unset or not exposed to this repo (audit-sensitive is restricted to Architecture/Vault/Vault.Rotation/Audit per ADR-0084 D4). Ensure the caller passes 'secrets: inherit'." >&2
             exit 1
           fi
 
-          # Build the embed JSON safely via env vars passed to python (no string
-          # interpolation of operator-controlled text into the shell or JSON).
-          PAYLOAD=$(python3 - <<'PY'
-          import json, os
-
-          colors = {"info": 0x3FB950, "medium": 0xD29922, "high": 0xFB8500, "critical": 0xDA3633}
-          prefixes = {"info": "", "medium": "⚠️ ", "high": "\U0001f525 ", "critical": "\U0001f6a8 "}
-
-          severity = os.environ["SEVERITY"]
-          title = os.environ["TITLE"]
-          body = os.environ.get("BODY", "")
-          link = os.environ.get("LINK", "")
-          metadata = os.environ.get("METADATA", "")
-
-          # Severity decoration: prepend the emoji unless the caller already did.
-          prefix = prefixes[severity]
-          if prefix and not title.startswith(prefix.strip()):
-              title = prefix + title
-
-          # Discord caps: title 256, description 4096. Truncate with headroom.
-          if len(title) > 200:
-              title = title[:199] + "…"
-          if len(body) > 4000:
-              body = body[:4000] + " ... (truncated)"
-
-          embed = {"title": title, "color": colors[severity]}
-          if body:
-              embed["description"] = body
-          if link:
-              embed["url"] = link
-
-          if metadata:
-              try:
-                  md = json.loads(metadata)
-                  if isinstance(md, dict) and md:
-                      embed["fields"] = [
-                          {"name": str(k)[:256], "value": str(v)[:1024], "inline": True}
-                          for k, v in list(md.items())[:25]
-                      ]
-              except json.JSONDecodeError:
-                  pass  # already validated upstream; ignore defensively
-
-          embed["footer"] = {"text": "HoneyDrunk Grid · operator-alerts (ADR-0084)"}
-
-          # Discord rejects (HTTP 400) any embed whose combined character budget
-          # (title + description + field names/values + footer) exceeds 6000.
-          # Per-field caps above are not enough on their own, so trim the
-          # description to fit the total budget rather than let Discord drop the
-          # whole alert.
-          def embed_chars(e):
-              n = len(e.get("title", "")) + len(e.get("description", "")) \
-                  + len(e.get("footer", {}).get("text", ""))
-              for f in e.get("fields", []):
-                  n += len(f["name"]) + len(f["value"])
-              return n
-
-          MAX_TOTAL = 5900  # headroom under Discord's hard 6000 cap
-          over = embed_chars(embed) - MAX_TOTAL
-          if over > 0 and embed.get("description"):
-              marker = " ... (truncated)"
-              keep = max(0, len(embed["description"]) - over - len(marker))
-              embed["description"] = embed["description"][:keep] + marker
-
-          print(json.dumps({"embeds": [embed]}))
-          PY
-          )
-
-          # Final-payload redaction scan (ADR-0084 D8 / Invariant 8). The earlier
-          # pre-check scans the RAW inputs, but `metadata` is JSON — a value like
-          # "ghp_AA…" passes the raw scan and only becomes a literal
-          # token after json.loads during formatting. Scanning the assembled
-          # payload (which json.dumps emits as literal ASCII) closes that decode
-          # bypass. NOTE: this is still regex-based — it cannot catch a secret the
-          # caller base64/gzip-encodes itself; that residual limitation is
-          # documented in the workflow header and README (defense-in-depth against
-          # ACCIDENTAL plaintext leaks, not an adversarial-encoding guarantee).
-          PAYLOAD="$PAYLOAD" python3 - <<'PY'
-          import os, sys
-          sys.path.insert(0, "/tmp")
-          from hd_redaction import scan
-          hits = scan(os.environ.get("PAYLOAD", ""))
-          if hits:
-              for name in hits:
-                  print(f"::error::Final-payload redaction matched '{name}' after "
-                        f"formatting (likely a JSON-escaped secret in metadata). "
-                        f"Post aborted (ADR-0084 D8 / Invariant 8).", file=sys.stderr)
-              sys.exit(1)
-          PY
-
-          # POST via curl directly (Invariant 38 — no marketplace action wrapper).
-          # --connect-timeout / --max-time bound a network stall so the job fails
-          # promptly instead of hanging until the runner timeout. `|| echo 000`
-          # converts a curl transport failure (which exits non-zero and would
-          # otherwise trip `set -e`) into a synthetic 000 status that the error
-          # path below handles uniformly with an HTTP non-2xx.
+          # Direct curl (Invariant 38 — no marketplace action wrapper). Bounded
+          # timeouts so a network stall fails fast. Capture the exit code and the
+          # HTTP status separately — DO NOT use `|| echo 000`, which would append
+          # to curl's own "%{http_code}" output and corrupt the status. On a
+          # transport failure curl exits non-zero; we trap that with `set +e`
+          # around the single call and synthesize 000 only when curl truly failed.
+          set +e
           HTTP_CODE=$(curl -sS -X POST \
             --connect-timeout 10 \
             --max-time 30 \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
+            --data-binary @/tmp/discord_payload.json \
             "$WEBHOOK_URL" \
-            -o /tmp/discord_response.txt -w "%{http_code}" || echo "000")
+            -o /tmp/discord_response.txt -w "%{http_code}")
+          CURL_RC=$?
+          set -e
+          if [ "$CURL_RC" -ne 0 ]; then
+            HTTP_CODE="000"
+          fi
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            # Redact the response body with the SAME pattern set as the pre-check
-            # (shared module) before logging, so an upstream error body can never
-            # leak a secret shape into the workflow log.
-            SAFE_RESPONSE=$(python3 - <<'PY'
-          import sys
-          sys.path.insert(0, "/tmp")
-          from hd_redaction import redact
-          try:
-              with open("/tmp/discord_response.txt") as f:
-                  text = f.read()
-          except FileNotFoundError:
-              text = ""
-          print(redact(text)[:1000])
-          PY
-          )
+            SAFE_RESPONSE=$(python3 .actions-helper/.github/scripts/discord_notify.py redact < /tmp/discord_response.txt)
             if [ "$HTTP_CODE" = "000" ]; then
-              echo "::error::Discord POST to #$CHANNEL failed: network/transport error or timeout (no HTTP response within the curl --max-time budget)." >&2
+              echo "::error::Discord POST to #$CHANNEL failed: network/transport error or timeout (curl exit $CURL_RC; no HTTP response within the --max-time budget)." >&2
             else
               echo "::error::Discord POST to #$CHANNEL failed with HTTP $HTTP_CODE. Response: $SAFE_RESPONSE" >&2
             fi
