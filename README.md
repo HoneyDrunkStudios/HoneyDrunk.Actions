@@ -15,6 +15,7 @@ Central library of reusable GitHub Actions workflows and composite actions for t
 - [HoneyDrunk-Internal Workflows](#honeydrunk-internal-workflows)
 - [Hive Field Mirror](#hive-field-mirror)
 - [Packet Filing](#packet-filing)
+- [Discord Operator-Alerts](#discord-operator-alerts)
 - [Adapting this for your own org](#adapting-this-for-your-own-org)
 
 ## 🎯 Overview
