@@ -774,7 +774,7 @@ jobs:
     secrets: inherit
 ```
 
-Emitters hosted **outside** GitHub Actions are the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner. They do not call this workflow — the runner posts from its own PowerShell path, resolving the channel's **runner** webhook (`Discord--{ChannelPascalCase}--RunnerWebhookUrl`) from the `kv-hd-automation-dev` Key Vault, applying the same redaction contract. (There is no `infrastructure/scripts/discord-notify.ps1` home-server helper — the ADR-0081 home server is decommissioned.)
+Emitters hosted **outside** GitHub Actions are the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner. They do not call this workflow — the runner posts from its own PowerShell path, resolving the channel's **runner** webhook (`Discord--{ChannelPascalCase}--RunnerWebhookUrl`) from the `kv-hd-automation-dev` Key Vault, applying the same redaction contract. (No `infrastructure/scripts/discord-notify.ps1` helper is used; the runner owns the non-Actions emitter path directly.)
 
 ### Workflows that emit to Discord
 
