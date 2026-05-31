@@ -94,6 +94,41 @@ jobs:
     name: Discord Notify
     runs-on: ubuntu-latest
     steps:
+      - name: Build shared redaction module
+        run: |
+          set -euo pipefail
+          # Single source of truth for the secret-shape pattern set (ADR-0084 D8 /
+          # Invariant 8). Both the fail-closed pre-check and the error-response
+          # redaction import this module, so the two can never drift apart.
+          cat > /tmp/hd_redaction.py <<'PY'
+          import re
+
+          # name -> regex. Keep this the ONLY place patterns are defined.
+          PATTERNS = {
+              "GitHub classic token (ghp_/gho_/ghu_/ghs_/ghr_)": r"gh[pousr]_[A-Za-z0-9]{36,}",
+              "GitHub fine-grained PAT (github_pat_)": r"github_pat_[A-Za-z0-9_]{40,}",
+              "JWT": r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+              "Discord webhook URL": r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
+              "AWS access key id": r"AKIA[0-9A-Z]{16}",
+              "Azure connection-string key fragment": r"(?:AccountKey|SharedAccessKey)=",
+              "PEM private key header": r"-----BEGIN [A-Z ]+PRIVATE KEY-----",
+              # High-entropy run (32+) adjacent to a credential keyword.
+              "keyword-adjacent secret": r"(?i)(?:token|secret|password|api[_-]?key)[\"'\s:=]+[A-Za-z0-9+/_\-]{32,}",
+              "credit-card-shaped number": r"\b(?:\d[ -]*?){13,16}\b",
+              "US SSN-shaped number": r"\b\d{3}-\d{2}-\d{4}\b",
+          }
+
+          def scan(text):
+              """Return the names of every pattern that matches `text`."""
+              return [name for name, pat in PATTERNS.items() if re.search(pat, text)]
+
+          def redact(text):
+              """Replace every matched secret shape with [REDACTED]."""
+              for pat in PATTERNS.values():
+                  text = re.sub(pat, "[REDACTED]", text)
+              return text
+          PY
+
       - name: Validate inputs
         env:
           CHANNEL: ${{ inputs.channel }}
@@ -118,9 +153,12 @@ jobs:
               ;;
           esac
 
+          # metadata, when provided, must be a JSON *object* — the formatter only
+          # consumes a dict (renders its keys as embed fields). Arrays/strings/
+          # numbers would parse but be silently dropped, so reject them up front.
           if [ -n "$METADATA" ]; then
-            if ! printf '%s' "$METADATA" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
-              echo "::error::metadata input is not valid JSON. Pass a JSON object or omit it." >&2
+            if ! printf '%s' "$METADATA" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if isinstance(d, dict) else 1)" 2>/dev/null; then
+              echo "::error::metadata input must be a JSON object (e.g. {\"key\":\"value\"}). Arrays, strings, numbers, and malformed JSON are rejected." >&2
               exit 1
             fi
           fi
@@ -129,35 +167,27 @@ jobs:
         env:
           TITLE: ${{ inputs.title }}
           BODY: ${{ inputs.body }}
+          LINK: ${{ inputs.link }}
           METADATA: ${{ inputs.metadata }}
         run: |
           set -euo pipefail
           # Scan the operator-controlled payload for secret shapes BEFORE formatting.
           # Fail-closed: any match aborts the post. We never echo the offending
           # substring (that would itself leak it) — only the pattern name + remedy.
+          # `link` is included because it is emitted as the embed URL downstream.
           python3 - <<'PY'
-          import os, re, sys
+          import os, sys
+          sys.path.insert(0, "/tmp")
+          from hd_redaction import scan
 
           payload = "\n".join([
               os.environ.get("TITLE", ""),
               os.environ.get("BODY", ""),
+              os.environ.get("LINK", ""),
               os.environ.get("METADATA", ""),
           ])
 
-          patterns = {
-              "GitHub token (ghp_/gho_/ghu_/ghs_/ghr_)": r"gh[pousr]_[A-Za-z0-9]{36,}",
-              "JWT": r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-              "Discord webhook URL": r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
-              "AWS access key id": r"AKIA[0-9A-Z]{16}",
-              "Azure connection-string key fragment": r"(?:AccountKey|SharedAccessKey)=",
-              "PEM private key header": r"-----BEGIN [A-Z ]+PRIVATE KEY-----",
-              # High-entropy run (32+) adjacent to a credential keyword.
-              "keyword-adjacent secret": r"(?i)(?:token|secret|password|api[_-]?key)[\"'\s:=]+[A-Za-z0-9+/_\-]{32,}",
-              "credit-card-shaped number": r"\b(?:\d[ -]*?){13,16}\b",
-              "US SSN-shaped number": r"\b\d{3}-\d{2}-\d{4}\b",
-          }
-
-          hits = [name for name, pat in patterns.items() if re.search(pat, payload)]
+          hits = scan(payload)
           if hits:
               for name in hits:
                   print(f"::error::Redaction pre-check matched '{name}'. "
@@ -247,38 +277,65 @@ jobs:
                   pass  # already validated upstream; ignore defensively
 
           embed["footer"] = {"text": "HoneyDrunk Grid · operator-alerts (ADR-0084)"}
+
+          # Discord rejects (HTTP 400) any embed whose combined character budget
+          # (title + description + field names/values + footer) exceeds 6000.
+          # Per-field caps above are not enough on their own, so trim the
+          # description to fit the total budget rather than let Discord drop the
+          # whole alert.
+          def embed_chars(e):
+              n = len(e.get("title", "")) + len(e.get("description", "")) \
+                  + len(e.get("footer", {}).get("text", ""))
+              for f in e.get("fields", []):
+                  n += len(f["name"]) + len(f["value"])
+              return n
+
+          MAX_TOTAL = 5900  # headroom under Discord's hard 6000 cap
+          over = embed_chars(embed) - MAX_TOTAL
+          if over > 0 and embed.get("description"):
+              marker = " ... (truncated)"
+              keep = max(0, len(embed["description"]) - over - len(marker))
+              embed["description"] = embed["description"][:keep] + marker
+
           print(json.dumps({"embeds": [embed]}))
           PY
           )
 
           # POST via curl directly (Invariant 38 — no marketplace action wrapper).
-          # Capture status separately from body so a non-2xx fails the job.
+          # --connect-timeout / --max-time bound a network stall so the job fails
+          # promptly instead of hanging until the runner timeout. `|| echo 000`
+          # converts a curl transport failure (which exits non-zero and would
+          # otherwise trip `set -e`) into a synthetic 000 status that the error
+          # path below handles uniformly with an HTTP non-2xx.
           HTTP_CODE=$(curl -sS -X POST \
+            --connect-timeout 10 \
+            --max-time 30 \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
             "$WEBHOOK_URL" \
-            -o /tmp/discord_response.txt -w "%{http_code}")
+            -o /tmp/discord_response.txt -w "%{http_code}" || echo "000")
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            # Redact the response body with the same secret patterns before logging.
+            # Redact the response body with the SAME pattern set as the pre-check
+            # (shared module) before logging, so an upstream error body can never
+            # leak a secret shape into the workflow log.
             SAFE_RESPONSE=$(python3 - <<'PY'
-          import re
+          import sys
+          sys.path.insert(0, "/tmp")
+          from hd_redaction import redact
           try:
               with open("/tmp/discord_response.txt") as f:
                   text = f.read()
           except FileNotFoundError:
               text = ""
-          pats = [
-              r"gh[pousr]_[A-Za-z0-9]{36,}",
-              r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-              r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
-          ]
-          for p in pats:
-              text = re.sub(p, "[REDACTED]", text)
-          print(text[:1000])
+          print(redact(text)[:1000])
           PY
           )
-            echo "::error::Discord POST to #$CHANNEL failed with HTTP $HTTP_CODE. Response: $SAFE_RESPONSE" >&2
+            if [ "$HTTP_CODE" = "000" ]; then
+              echo "::error::Discord POST to #$CHANNEL failed: network/transport error or timeout (no HTTP response within the curl --max-time budget)." >&2
+            else
+              echo "::error::Discord POST to #$CHANNEL failed with HTTP $HTTP_CODE. Response: $SAFE_RESPONSE" >&2
+            fi
             exit 1
           fi
 
