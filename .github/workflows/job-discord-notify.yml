@@ -301,6 +301,28 @@ jobs:
           PY
           )
 
+          # Final-payload redaction scan (ADR-0084 D8 / Invariant 8). The earlier
+          # pre-check scans the RAW inputs, but `metadata` is JSON — a value like
+          # "ghp_AA…" passes the raw scan and only becomes a literal
+          # token after json.loads during formatting. Scanning the assembled
+          # payload (which json.dumps emits as literal ASCII) closes that decode
+          # bypass. NOTE: this is still regex-based — it cannot catch a secret the
+          # caller base64/gzip-encodes itself; that residual limitation is
+          # documented in the workflow header and README (defense-in-depth against
+          # ACCIDENTAL plaintext leaks, not an adversarial-encoding guarantee).
+          PAYLOAD="$PAYLOAD" python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, "/tmp")
+          from hd_redaction import scan
+          hits = scan(os.environ.get("PAYLOAD", ""))
+          if hits:
+              for name in hits:
+                  print(f"::error::Final-payload redaction matched '{name}' after "
+                        f"formatting (likely a JSON-escaped secret in metadata). "
+                        f"Post aborted (ADR-0084 D8 / Invariant 8).", file=sys.stderr)
+              sys.exit(1)
+          PY
+
           # POST via curl directly (Invariant 38 — no marketplace action wrapper).
           # --connect-timeout / --max-time bound a network stall so the job fails
           # promptly instead of hanging until the runner timeout. `|| echo 000`

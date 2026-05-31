@@ -740,7 +740,9 @@ Flags:
 
 `job-discord-notify.yml` is the single CI-side seam for posting operator-alerts to Discord per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md). Every GitHub-Actions emitter (CI failure on `main`, release/NuGet events, scheduled-workflow failures, credential-rotation escalations, agent/hive/security signals) routes through this workflow; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 — the reusable-workflow boundary is what allows redaction, formatting consistency, and a vendor-posture swap per ADR-0080 D2).
 
-The workflow validates the channel/severity enums, runs a **fail-closed redaction pre-check** over the payload (no secret values, PII, or credentials reach a channel — ADR-0084 D8 / Invariant 8), decorates by severity, and POSTs a formatted embed to the channel's `DISCORD_WEBHOOK_*` org secret.
+The workflow validates the channel/severity enums, runs a **fail-closed redaction pre-check** over the payload (no secret values, PII, or credentials reach a channel — ADR-0084 D8 / Invariant 8), decorates by severity, and POSTs a formatted embed to the channel's `DISCORD_WEBHOOK_*` org secret. The check runs twice — over the raw inputs and again over the final assembled JSON payload (so a JSON-escaped secret in `metadata` can't decode past it). Both passes share one pattern module, so they can't drift.
+
+> **Redaction scope.** The pre-check is regex-based defense-in-depth against *accidental* plaintext secret leaks (the same discipline as `VaultTelemetry`), not an adversarial guarantee. A secret a caller deliberately base64/gzip-encodes will not be caught — emitters must send operational metadata, never secrets, per ADR-0084 D8.
 
 ### Reusable workflow contract
 
