@@ -15,6 +15,7 @@ Central library of reusable GitHub Actions workflows and composite actions for t
 - [HoneyDrunk-Internal Workflows](#honeydrunk-internal-workflows)
 - [Hive Field Mirror](#hive-field-mirror)
 - [Packet Filing](#packet-filing)
+- [Discord Operator-Alerts](#discord-operator-alerts)
 - [Adapting this for your own org](#adapting-this-for-your-own-org)
 
 ## 🎯 Overview
@@ -734,6 +735,46 @@ Flags:
 - `--project-owner`, `--project-number` — override The Hive target.
 - `--architecture-repo` — override the `owner/name` embedded in issue body headers.
 - `--mapping-file` — override the `repo-to-node.yml` path used by the field mirror.
+
+## 🔔 Discord Operator-Alerts
+
+`job-discord-notify.yml` is the single CI-side seam for posting operator-alerts to Discord per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md). Every GitHub-Actions emitter (CI failure on `main`, release/NuGet events, scheduled-workflow failures, credential-rotation escalations, agent/hive/security signals) routes through this workflow; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 — the reusable-workflow boundary is what allows redaction, formatting consistency, and a vendor-posture swap per ADR-0080 D2).
+
+The workflow validates the channel/severity enums, runs a **fail-closed redaction pre-check** over the payload (no secret values, PII, or credentials reach a channel — ADR-0084 D8 / Invariant 8), decorates by severity, and POSTs a formatted embed to the channel's `DISCORD_WEBHOOK_*` org secret. The check runs twice — over the raw inputs and again over the final assembled JSON payload (so a JSON-escaped secret in `metadata` can't decode past it). Both passes share one pattern module, so they can't drift.
+
+> **Redaction scope.** The pre-check is regex-based defense-in-depth against *accidental* plaintext secret leaks (the same discipline as `VaultTelemetry`), not an adversarial guarantee. A secret a caller deliberately base64/gzip-encodes will not be caught — emitters must send operational metadata, never secrets, per ADR-0084 D8.
+
+### Reusable workflow contract
+
+Workflow: `.github/workflows/job-discord-notify.yml`
+
+Inputs:
+- `channel` (required) — one of `ops-alerts`, `security-alerts`, `agent-activity`, `hive-activity`, `release`, `announcements`, `audit-sensitive`
+- `severity` (required) — one of `info`, `medium`, `high`, `critical`
+- `title` (required) — short one-line summary (truncated to 200 chars)
+- `body` (optional) — longer text rendered as the embed description (truncated to 4000 chars)
+- `link` (optional) — URL that makes the embed title clickable
+- `metadata` (optional) — JSON object rendered as embed fields
+
+Secrets (pass `secrets: inherit` from the caller): the seven `DISCORD_WEBHOOK_*` org secrets. `DISCORD_WEBHOOK_AUDIT_SENSITIVE` is restricted to Architecture / Vault / Vault.Rotation / Audit and is unavailable to public-repo workflows by design (ADR-0084 D4).
+
+`permissions: {}` — Discord POST is HTTP-only, so any caller's permissions block is a trivially-satisfied superset (Invariant 39).
+
+### Call from a workflow
+
+```yaml
+jobs:
+  notify:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-discord-notify.yml@v1
+    with:
+      channel: ops-alerts
+      severity: high
+      title: "❌ ${{ github.repository }} / ${{ github.workflow }} failed on main"
+      link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    secrets: inherit
+```
+
+Emitters hosted **outside** GitHub Actions (the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner, home-server automations) do not call this workflow — they use the `infrastructure/scripts/discord-notify.ps1` helper in `HoneyDrunk.Architecture`, which mirrors this contract and resolves the channel's **runner** webhook from the `kv-hd-automation-dev` Key Vault.
 
 ## 🔁 Adapting this for your own org
 

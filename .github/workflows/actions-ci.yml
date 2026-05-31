@@ -18,6 +18,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install actionlint
         shell: bash
         env:
@@ -82,3 +87,13 @@ jobs:
         run: |
           set -euo pipefail
           tests/grid-health-aggregator-smoke.sh
+
+      - name: Unit-test scripts (discord_notify redaction)
+        shell: bash
+        working-directory: .github/scripts
+        run: |
+          set -euo pipefail
+          # Security-critical redaction + embed-budget logic for
+          # job-discord-notify.yml (ADR-0084 D8). This is the gate that keeps the
+          # runtime workflow thin — the reusable workflow trusts this script.
+          python3 -m unittest test_discord_notify -v

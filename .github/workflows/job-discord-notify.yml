@@ -1,0 +1,252 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# ==============================================================================
+# Discord Operator-Alert Notification (Job)
+# ==============================================================================
+# Purpose:
+#   The single CI-side seam for posting operator-alerts to Discord per ADR-0084
+#   D9. Every GitHub-Actions emitter routes through this reusable workflow;
+#   ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 /
+#   Invariant 8 extended to webhook payloads).
+#
+# Single Responsibility:
+#   Orchestrate the tested redaction+formatting helper and POST one operator
+#   alert to exactly one Discord channel's webhook.
+#
+# Separation of concerns (per .github/copilot-instructions.md): the redaction
+# pattern set, the fail-closed scan, and embed formatting live in the focused,
+# unit-tested helper `.github/scripts/discord_notify.py` (tests:
+# `.github/scripts/test_discord_notify.py`, run by actions-ci.yml). This workflow
+# only orchestrates it — it checks out HoneyDrunk.Actions at the workflow's own
+# revision and calls the helper's subcommands. Keeping the logic in a real script
+# (mirroring the inventory-*.py helpers) means it is testable and cannot drift
+# across the two scan call sites the way inline-YAML heredocs do.
+#
+# What it does:
+#   - Validates `channel` and `severity` against the closed enums.
+#   - `discord_notify.py precheck` scans title+body+link+metadata for secret
+#     shapes (fail-closed). `format` validates metadata is a JSON object, builds
+#     the embed (severity decoration, truncation, 6000-char total budget across
+#     fields), and re-scans the FINAL assembled payload (closes the JSON-escape
+#     decode bypass). A match ABORTS the post — a leaked secret in chat is
+#     irreversible; a noisy CI failure is the correct trade. Regex is
+#     defense-in-depth against ACCIDENTAL plaintext leaks, not an adversarial
+#     guarantee (caller-side base64/gzip is out of scope).
+#   - POSTs via `curl` with bounded timeouts; non-2xx / transport failures fail
+#     the job with the response body redacted through the same helper.
+#
+# Vendor posture (ADR-0080 D2 / ADR-0084 D7): Discord is Hedge. This workflow is
+# the single Grid-side seam — swapping to Slack/Mattermost/Matrix/Teams is a
+# change here plus the per-channel secret names, not a per-emitter rewrite.
+#
+# Smoke-test (run after merge, once webhooks exist — ADR-0084 packet 02):
+#   1. Simple post: dispatch a caller with channel=ops-alerts, severity=info,
+#      title="job-discord-notify smoke-test" — verify it lands in #ops-alerts.
+#   2. Secret rejection: a title containing a fake token shape — verify the job
+#      FAILS at the redaction step and nothing lands in Discord.
+#   3. All-channel routing: repeat (1) for each of the seven channels to confirm
+#      each DISCORD_WEBHOOK_* secret resolves and routes correctly.
+# ==============================================================================
+
+name: Discord Notify (Job)
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: >
+          Destination channel. One of: ops-alerts, security-alerts,
+          agent-activity, hive-activity, release, announcements, audit-sensitive.
+          Selects which DISCORD_WEBHOOK_* secret is used.
+        required: true
+        type: string
+      severity:
+        description: 'Disposition: info, medium, high, or critical. Selects embed color + emoji prefix.'
+        required: true
+        type: string
+      title:
+        description: 'Short one-line summary (truncated to 200 chars).'
+        required: true
+        type: string
+      body:
+        description: 'Optional longer text rendered as the embed description (truncated to 4000 chars).'
+        required: false
+        type: string
+        default: ''
+      link:
+        description: 'Optional URL the alert points at; makes the embed title clickable.'
+        required: false
+        type: string
+        default: ''
+      metadata:
+        description: 'Optional JSON object; rendered as embed fields. Must parse as a JSON object if provided.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      DISCORD_WEBHOOK_OPS_ALERTS:
+        required: false
+      DISCORD_WEBHOOK_SECURITY_ALERTS:
+        required: false
+      DISCORD_WEBHOOK_AGENT_ACTIVITY:
+        required: false
+      DISCORD_WEBHOOK_HIVE_ACTIVITY:
+        required: false
+      DISCORD_WEBHOOK_RELEASE:
+        required: false
+      DISCORD_WEBHOOK_ANNOUNCEMENTS:
+        required: false
+      DISCORD_WEBHOOK_AUDIT_SENSITIVE:
+        required: false
+
+# Discord POST is HTTP-only; this workflow needs no GitHub API permissions.
+# Any caller's permissions block is a trivially-satisfied superset (Invariant 39).
+permissions: {}
+
+jobs:
+  discord-notify:
+    name: Discord Notify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve helper ref (deterministic — no caller override)
+        id: ref
+        run: |
+          set -euo pipefail
+          # Pin the helper checkout to the EXACT ref this reusable workflow was
+          # called at (GITHUB_WORKFLOW_REF looks like
+          # "owner/repo/.github/workflows/job-discord-notify.yml@refs/heads/main").
+          # A caller using @v1 / @<sha> gets the helper from that same revision, so
+          # discord_notify.py cannot drift from the workflow version. There is
+          # deliberately NO caller-supplied `actions-ref` input: this job runs with
+          # the DISCORD_WEBHOOK_* secrets in scope, so letting a caller point the
+          # helper (incl. the redact path) at arbitrary code would be a secret-
+          # exfiltration seam (ADR-0084 D8 / Invariant 8).
+          echo "ref=${GITHUB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout HoneyDrunk.Actions (helper script)
+        uses: actions/checkout@v5
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ steps.ref.outputs.ref }}
+          path: .actions-helper
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate inputs
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SEVERITY: ${{ inputs.severity }}
+        run: |
+          set -euo pipefail
+          # Do NOT echo the raw input value back — this runs BEFORE the redaction
+          # pre-check, so an accidentally-miswired secret (or annotation-control
+          # characters) in these enum inputs must not reach the Actions log. List
+          # the allowed values instead.
+          case "$CHANNEL" in
+            ops-alerts|security-alerts|agent-activity|hive-activity|release|announcements|audit-sensitive) ;;
+            *)
+              echo "::error::Invalid 'channel' input. Must be one of: ops-alerts, security-alerts, agent-activity, hive-activity, release, announcements, audit-sensitive (ADR-0084 D2)." >&2
+              exit 1 ;;
+          esac
+          case "$SEVERITY" in
+            info|medium|high|critical) ;;
+            *)
+              echo "::error::Invalid 'severity' input. Must be one of: info, medium, high, critical (ADR-0084 D6)." >&2
+              exit 1 ;;
+          esac
+
+      - name: Redaction pre-check (raw inputs, ADR-0084 D8 / Invariant 8)
+        env:
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+          LINK: ${{ inputs.link }}
+          METADATA: ${{ inputs.metadata }}
+        run: |
+          set -euo pipefail
+          python3 .actions-helper/.github/scripts/discord_notify.py precheck
+
+      - name: Format embed (validate + final-payload scan)
+        env:
+          SEVERITY: ${{ inputs.severity }}
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+          LINK: ${{ inputs.link }}
+          METADATA: ${{ inputs.metadata }}
+        run: |
+          set -euo pipefail
+          # `format` validates metadata is a JSON object, builds the embed, and
+          # re-scans the assembled payload (closing the JSON-escape decode bypass)
+          # before emitting it. Stash the payload in a file (never an output/log)
+          # so the POST step reads it without re-serializing.
+          python3 .actions-helper/.github/scripts/discord_notify.py format > /tmp/discord_payload.json
+
+      - name: POST to Discord
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SEVERITY: ${{ inputs.severity }}
+          WEBHOOK_OPS_ALERTS: ${{ secrets.DISCORD_WEBHOOK_OPS_ALERTS }}
+          WEBHOOK_SECURITY_ALERTS: ${{ secrets.DISCORD_WEBHOOK_SECURITY_ALERTS }}
+          WEBHOOK_AGENT_ACTIVITY: ${{ secrets.DISCORD_WEBHOOK_AGENT_ACTIVITY }}
+          WEBHOOK_HIVE_ACTIVITY: ${{ secrets.DISCORD_WEBHOOK_HIVE_ACTIVITY }}
+          WEBHOOK_RELEASE: ${{ secrets.DISCORD_WEBHOOK_RELEASE }}
+          WEBHOOK_ANNOUNCEMENTS: ${{ secrets.DISCORD_WEBHOOK_ANNOUNCEMENTS }}
+          WEBHOOK_AUDIT_SENSITIVE: ${{ secrets.DISCORD_WEBHOOK_AUDIT_SENSITIVE }}
+        run: |
+          set -euo pipefail
+
+          case "$CHANNEL" in
+            ops-alerts)       WEBHOOK_URL="$WEBHOOK_OPS_ALERTS" ;;
+            security-alerts)  WEBHOOK_URL="$WEBHOOK_SECURITY_ALERTS" ;;
+            agent-activity)   WEBHOOK_URL="$WEBHOOK_AGENT_ACTIVITY" ;;
+            hive-activity)    WEBHOOK_URL="$WEBHOOK_HIVE_ACTIVITY" ;;
+            release)          WEBHOOK_URL="$WEBHOOK_RELEASE" ;;
+            announcements)    WEBHOOK_URL="$WEBHOOK_ANNOUNCEMENTS" ;;
+            audit-sensitive)  WEBHOOK_URL="$WEBHOOK_AUDIT_SENSITIVE" ;;
+          esac
+
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "::error::No webhook secret available for channel '$CHANNEL'. The DISCORD_WEBHOOK_* secret is unset or not exposed to this repo (audit-sensitive is restricted to Architecture/Vault/Vault.Rotation/Audit per ADR-0084 D4). Ensure the caller passes 'secrets: inherit'." >&2
+            exit 1
+          fi
+
+          # Direct curl (Invariant 38 — no marketplace action wrapper). Bounded
+          # timeouts so a network stall fails fast. Capture the exit code and the
+          # HTTP status separately — DO NOT use `|| echo 000`, which would append
+          # to curl's own "%{http_code}" output and corrupt the status. On a
+          # transport failure curl exits non-zero; we trap that with `set +e`
+          # around the single call and synthesize 000 only when curl truly failed.
+          set +e
+          HTTP_CODE=$(curl -sS -X POST \
+            --connect-timeout 10 \
+            --max-time 30 \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/discord_payload.json \
+            "$WEBHOOK_URL" \
+            -o /tmp/discord_response.txt -w "%{http_code}")
+          CURL_RC=$?
+          set -e
+          if [ "$CURL_RC" -ne 0 ]; then
+            HTTP_CODE="000"
+          fi
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            if [ "$HTTP_CODE" = "000" ]; then
+              # Transport failure: curl may not have written the response file at
+              # all, so do NOT read it here (that redirection would error and mask
+              # this annotation). There is no HTTP body to report anyway.
+              echo "::error::Discord POST to #$CHANNEL failed: network/transport error or timeout (curl exit $CURL_RC; no HTTP response within the --max-time budget)." >&2
+            else
+              # We have an HTTP response; redact the body before logging it.
+              SAFE_RESPONSE=""
+              if [ -f /tmp/discord_response.txt ]; then
+                SAFE_RESPONSE=$(python3 .actions-helper/.github/scripts/discord_notify.py redact < /tmp/discord_response.txt)
+              fi
+              echo "::error::Discord POST to #$CHANNEL failed with HTTP $HTTP_CODE. Response: $SAFE_RESPONSE" >&2
+            fi
+            exit 1
+          fi
+
+          echo "Posted to #$CHANNEL (severity=$SEVERITY, HTTP $HTTP_CODE)."

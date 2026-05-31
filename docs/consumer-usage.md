@@ -19,6 +19,7 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
+| `job-discord-notify.yml` | none required (`permissions: {}` callee; any caller block is a superset) |
 | `release.yml` | `contents: write`, `packages: write`, `id-token: write`, `security-events: write` |
 | `job-solution-preflight.yml` | `contents: read` |
 | `job-dotnet-publish-artifact.yml` | `contents: read` |
@@ -40,6 +41,7 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 - [SonarQube Cloud Quality Gate](#sonarqube-cloud-quality-gate)
 - [PR SDK Workflow](#pr-sdk-workflow)
 - [Grid Review Request Workflow](#grid-review-request-workflow)
+- [Discord Operator-Alert Notification](#discord-operator-alert-notification)
 - [Release Workflow](#release-workflow)
 - [Deploy Container to Azure App Service](#deploy-container-to-azure-app-service)
 - [Deploy Azure Container App](#deploy-azure-container-app)
@@ -360,6 +362,61 @@ The old OpenClaw webhook inputs are retained as no-op compatibility shims during
 
 `job-review-request.yml` callers need `contents: read`, `pull-requests: read`, and `issues: write`. The issue write scope is used for queue labels and the queue comment. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
 
+---
+
+## Discord Operator-Alert Notification
+
+**Purpose:** Post one operator-alert to a Discord channel via the canonical seam per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md) D9. Every GitHub-Actions emitter routes through `job-discord-notify.yml`; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11).
+
+**When to Use:** Any workflow that needs to surface an operator-actionable event (CI failure on `main`, release/NuGet event, scheduled-workflow failure, credential-rotation escalation, agent/hive/security signal). Pick the channel + severity from the ADR-0084 D6 routing table.
+
+The callee validates the `channel`/`severity` enums, runs a fail-closed redaction pre-check (no secret values, PII, or credentials reach a channel — ADR-0084 D8 / Invariant 8), enforces Discord's embed limits, and POSTs the formatted embed to the channel's `DISCORD_WEBHOOK_*` org secret.
+
+### Minimal Caller
+
+```yaml
+jobs:
+  notify:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-discord-notify.yml@v1
+    with:
+      channel: ops-alerts          # ops-alerts | security-alerts | agent-activity | hive-activity | release | announcements | audit-sensitive
+      severity: high               # info | medium | high | critical
+      title: "❌ ${{ github.repository }} / ${{ github.workflow }} failed on main"
+      link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    secrets: inherit
+```
+
+### With body + structured metadata
+
+```yaml
+jobs:
+  notify:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-discord-notify.yml@v1
+    with:
+      channel: release
+      severity: info
+      title: "📦 HoneyDrunk.Kernel 1.4.0 published"
+      body: "Published to nuget.org from ${{ github.sha }}"
+      metadata: '{"package":"HoneyDrunk.Kernel","version":"1.4.0"}'   # JSON OBJECT only; rendered as embed fields
+    secrets: inherit
+```
+
+### Inputs
+
+| Input | Required | Notes |
+|---|---|---|
+| `channel` | yes | One of the seven ADR-0084 D2 channels. |
+| `severity` | yes | `info` / `medium` / `high` / `critical` — selects embed color + emoji. |
+| `title` | yes | One-line summary (truncated to 200 chars). |
+| `body` | no | Longer text → embed description (truncated to 4000 chars). |
+| `link` | no | URL the alert points at; makes the title clickable. Scanned by the redaction pre-check. |
+| `metadata` | no | A JSON **object** rendered as embed fields. Arrays/strings/numbers are rejected. |
+
+### Permissions
+
+`job-discord-notify.yml` declares `permissions: {}` — the Discord POST is HTTP-only and needs no GitHub API scope, so **any** caller `permissions:` block is a trivially-satisfied superset (Invariant 39). Pass `secrets: inherit` so the seven `DISCORD_WEBHOOK_*` org secrets resolve. `DISCORD_WEBHOOK_AUDIT_SENSITIVE` is restricted to Architecture / Vault / Vault.Rotation / Audit (ADR-0084 D4); a `channel: audit-sensitive` call from any other repo fails at secret resolution, which is correct.
+
+---
 
 ## PR SDK Workflow
 
