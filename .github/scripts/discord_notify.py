@@ -39,7 +39,7 @@ PATTERNS = {
     "Discord webhook URL": r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
     "AWS access key id": r"AKIA[0-9A-Z]{16}",
     "Azure connection-string key fragment": r"(?:AccountKey|SharedAccessKey)=",
-    "PEM private key header": r"-----BEGIN [A-Z ]+PRIVATE KEY-----",
+    "PEM private key header": r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----",
     # High-entropy run (32+) adjacent to a credential keyword.
     "keyword-adjacent secret": r"(?i)(?:token|secret|password|api[_-]?key)[\"'\s:=]+[A-Za-z0-9+/_\-]{32,}",
     "credit-card-shaped number": r"\b(?:\d[ -]*?){13,16}\b",
@@ -111,8 +111,10 @@ def format_embed(severity, title, body="", link="", metadata=""):
             # (by Discord's 25-field cap and the char budget) and reserves a slot
             # for the omitted-fields note. Capping at [:25] here would hide the
             # true count and let an appended note push the payload to 26 fields.
+            # Discord rejects fields with an empty name or value, so normalize
+            # empties to a single "-" placeholder rather than 400 the whole post.
             embed["fields"] = [
-                {"name": str(k)[:256], "value": str(v)[:1024], "inline": True}
+                {"name": (str(k)[:256] or "-"), "value": (str(v)[:1024] or "-"), "inline": True}
                 for k, v in md.items()
             ]
 

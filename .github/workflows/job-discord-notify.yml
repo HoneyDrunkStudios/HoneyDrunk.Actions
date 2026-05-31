@@ -141,16 +141,20 @@ jobs:
           SEVERITY: ${{ inputs.severity }}
         run: |
           set -euo pipefail
+          # Do NOT echo the raw input value back — this runs BEFORE the redaction
+          # pre-check, so an accidentally-miswired secret (or annotation-control
+          # characters) in these enum inputs must not reach the Actions log. List
+          # the allowed values instead.
           case "$CHANNEL" in
             ops-alerts|security-alerts|agent-activity|hive-activity|release|announcements|audit-sensitive) ;;
             *)
-              echo "::error::Unknown channel '$CHANNEL'. Must be one of: ops-alerts, security-alerts, agent-activity, hive-activity, release, announcements, audit-sensitive (ADR-0084 D2)." >&2
+              echo "::error::Invalid 'channel' input. Must be one of: ops-alerts, security-alerts, agent-activity, hive-activity, release, announcements, audit-sensitive (ADR-0084 D2)." >&2
               exit 1 ;;
           esac
           case "$SEVERITY" in
             info|medium|high|critical) ;;
             *)
-              echo "::error::Unknown severity '$SEVERITY'. Must be one of: info, medium, high, critical (ADR-0084 D6)." >&2
+              echo "::error::Invalid 'severity' input. Must be one of: info, medium, high, critical (ADR-0084 D6)." >&2
               exit 1 ;;
           esac
 

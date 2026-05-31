@@ -35,6 +35,8 @@ class TestScan(unittest.TestCase):
         for label, fixture in [
             ("ghp", GHP), ("github_pat", GHPAT), ("aws", AWS),
             ("discord", DISCORD_URL), ("jwt", JWT), ("pem", PEM),
+            ("pem-pkcs8-untyped", "-----BEGIN PRIVATE KEY-----"),
+            ("pem-ec", "-----BEGIN EC PRIVATE KEY-----"),
             ("ssn", "123-45-6789"),
             ("azure", "AccountKey=abc123=="),
         ]:
@@ -97,6 +99,13 @@ class TestFormat(unittest.TestCase):
         note = next(f for f in e["fields"] if "omitted" in f["value"])
         kept_real = len(e["fields"]) - 1  # minus the note
         self.assertIn(f"{40 - kept_real} field", note["value"])
+
+    def test_empty_field_name_value_normalized(self):
+        # Discord rejects empty field name/value; normalize to "-" rather than 400.
+        e = dn.format_embed("info", "t", metadata='{"":""}')["embeds"][0]
+        f = e["fields"][0]
+        self.assertEqual(f["name"], "-")
+        self.assertEqual(f["value"], "-")
 
     def test_exactly_25_fields_no_note(self):
         # Exactly 25 small fields that fit the char budget: keep all 25, no note.
