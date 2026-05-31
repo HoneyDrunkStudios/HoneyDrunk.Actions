@@ -735,6 +735,44 @@ Flags:
 - `--architecture-repo` — override the `owner/name` embedded in issue body headers.
 - `--mapping-file` — override the `repo-to-node.yml` path used by the field mirror.
 
+## 🔔 Discord Operator-Alerts
+
+`job-discord-notify.yml` is the single CI-side seam for posting operator-alerts to Discord per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md). Every GitHub-Actions emitter (CI failure on `main`, release/NuGet events, scheduled-workflow failures, credential-rotation escalations, agent/hive/security signals) routes through this workflow; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 — the reusable-workflow boundary is what allows redaction, formatting consistency, and a vendor-posture swap per ADR-0080 D2).
+
+The workflow validates the channel/severity enums, runs a **fail-closed redaction pre-check** over the payload (no secret values, PII, or credentials reach a channel — ADR-0084 D8 / Invariant 8), decorates by severity, and POSTs a formatted embed to the channel's `DISCORD_WEBHOOK_*` org secret.
+
+### Reusable workflow contract
+
+Workflow: `.github/workflows/job-discord-notify.yml`
+
+Inputs:
+- `channel` (required) — one of `ops-alerts`, `security-alerts`, `agent-activity`, `hive-activity`, `release`, `announcements`, `audit-sensitive`
+- `severity` (required) — one of `info`, `medium`, `high`, `critical`
+- `title` (required) — short one-line summary (truncated to 200 chars)
+- `body` (optional) — longer text rendered as the embed description (truncated to 4000 chars)
+- `link` (optional) — URL that makes the embed title clickable
+- `metadata` (optional) — JSON object rendered as embed fields
+
+Secrets (pass `secrets: inherit` from the caller): the seven `DISCORD_WEBHOOK_*` org secrets. `DISCORD_WEBHOOK_AUDIT_SENSITIVE` is restricted to Architecture / Vault / Vault.Rotation / Audit and is unavailable to public-repo workflows by design (ADR-0084 D4).
+
+`permissions: {}` — Discord POST is HTTP-only, so any caller's permissions block is a trivially-satisfied superset (Invariant 39).
+
+### Call from a workflow
+
+```yaml
+jobs:
+  notify:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-discord-notify.yml@v1
+    with:
+      channel: ops-alerts
+      severity: high
+      title: "❌ ${{ github.repository }} / ${{ github.workflow }} failed on main"
+      link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    secrets: inherit
+```
+
+Emitters hosted **outside** GitHub Actions (the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner, home-server automations) do not call this workflow — they use the `infrastructure/scripts/discord-notify.ps1` helper in `HoneyDrunk.Architecture`, which mirrors this contract and resolves the channel's **runner** webhook from the `kv-hd-automation-dev` Key Vault.
+
 ## 🔁 Adapting this for your own org
 
 The two internal workflows are small enough to fork. If you want the same "label an issue → fields populate on a project board" loop, or "merge a planning doc → GitHub Issues get created automatically" loop for your own organization, here is the minimum you need to replace.
