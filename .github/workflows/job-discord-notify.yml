@@ -13,13 +13,22 @@
 #   webhook, after a fail-closed redaction pre-check.
 #
 # What it does:
-#   - Validates `channel` and `severity` against the closed enums.
-#   - Runs the D8 redaction pre-check over title + body + metadata. A match
-#     ABORTS the post (fail-closed) — a leaked secret in chat is irreversible;
-#     a noisy CI failure is the correct trade.
-#   - Truncates title (200) and body (4000) to stay under Discord's embed caps.
+#   - Validates `channel` and `severity` against the closed enums; requires
+#     `metadata` (when set) to be a JSON object.
+#   - Runs the D8 redaction pre-check over title + body + link + metadata, then
+#     AGAIN over the final assembled JSON payload (so a JSON-escaped secret in
+#     metadata can't decode past it). Both passes share one pattern module. A
+#     match ABORTS the post (fail-closed) — a leaked secret in chat is
+#     irreversible; a noisy CI failure is the correct trade. This is regex
+#     defense-in-depth against ACCIDENTAL plaintext leaks, not an adversarial
+#     guarantee — a caller-side base64/gzip-encoded secret is out of scope.
+#   - Truncates title (200) and body (4000) and enforces Discord's 6000-char
+#     total embed budget across fields (drops trailing metadata fields with a
+#     note rather than letting Discord 400 the whole alert).
 #   - Decorates by severity (embed color + emoji prefix).
-#   - POSTs the embed to the channel's `DISCORD_WEBHOOK_*` secret via curl.
+#   - POSTs the embed to the channel's `DISCORD_WEBHOOK_*` secret via curl with
+#     bounded timeouts; non-2xx and transport failures fail the job with the
+#     response redacted through the same pattern module.
 #
 # Vendor posture (ADR-0080 D2 / ADR-0084 D7): Discord is Hedge. This workflow is
 # the single Grid-side seam — swapping to Slack/Mattermost/Matrix/Teams is a
