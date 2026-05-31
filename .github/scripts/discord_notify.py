@@ -31,8 +31,17 @@ import os
 import re
 import sys
 
-# name -> regex. The ONLY place secret patterns are defined.
-PATTERNS = {
+# Patterns are split into two classes because they have different false-positive
+# profiles against URLs:
+#
+#   CREDENTIAL_PATTERNS — token/key/webhook shapes. Safe to scan EVERYWHERE,
+#     including `link` (a credential in a URL is exactly what we must block).
+#   PII_PATTERNS — generic credit-card / SSN digit-run heuristics. These match
+#     any 13-16 digit run, which a legitimate URL path can contain (e.g. a
+#     GitHub Actions run id in `.../actions/runs/<id>`). Scanning a URL with
+#     these would fail-closed on clean alert links, so PII heuristics apply ONLY
+#     to human-text surfaces (title / body / metadata), never to `link`.
+CREDENTIAL_PATTERNS = {
     "GitHub classic token (ghp_/gho_/ghu_/ghs_/ghr_)": r"gh[pousr]_[A-Za-z0-9]{36,}",
     "GitHub fine-grained PAT (github_pat_)": r"github_pat_[A-Za-z0-9_]{40,}",
     "JWT": r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
@@ -42,9 +51,14 @@ PATTERNS = {
     "PEM private key header": r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----",
     # High-entropy run (32+) adjacent to a credential keyword.
     "keyword-adjacent secret": r"(?i)(?:token|secret|password|api[_-]?key)[\"'\s:=]+[A-Za-z0-9+/_\-]{32,}",
+}
+PII_PATTERNS = {
     "credit-card-shaped number": r"\b(?:\d[ -]*?){13,16}\b",
     "US SSN-shaped number": r"\b\d{3}-\d{2}-\d{4}\b",
 }
+# Full set — used by redact() on response bodies (not URLs) and kept as the
+# canonical "everything" view.
+PATTERNS = {**CREDENTIAL_PATTERNS, **PII_PATTERNS}
 
 # Discord embed limits.
 TITLE_MAX = 200          # headroom under the 256 hard cap
@@ -57,13 +71,19 @@ PREFIXES = {"info": "", "medium": "⚠️ ", "high": "\U0001f525 ", "critical": 
 FOOTER = "HoneyDrunk Grid · operator-alerts (ADR-0084)"
 
 
-def scan(text):
-    """Return the names of every pattern that matches `text`."""
-    return [name for name, pat in PATTERNS.items() if re.search(pat, text)]
+def scan(text, include_pii=True):
+    """Return the names of every pattern that matches `text`.
+
+    include_pii=False scans only CREDENTIAL_PATTERNS — use it for URL-shaped
+    inputs (`link`) where the generic card/SSN digit-run heuristics would
+    false-positive on legitimate numeric path segments (e.g. CI run ids).
+    """
+    pats = CREDENTIAL_PATTERNS if not include_pii else PATTERNS
+    return [name for name, pat in pats.items() if re.search(pat, text)]
 
 
 def redact(text):
-    """Replace every matched secret shape with [REDACTED]."""
+    """Replace every matched secret shape with [REDACTED] (full pattern set)."""
     for pat in PATTERNS.values():
         text = re.sub(pat, "[REDACTED]", text)
     return text
@@ -162,10 +182,15 @@ def _err(msg):
 
 
 def cmd_precheck():
-    payload = "\n".join(os.environ.get(k, "") for k in ("TITLE", "BODY", "LINK", "METADATA"))
-    hits = scan(payload)
+    # Human-text surfaces get the full set (credentials + PII heuristics).
+    text = "\n".join(os.environ.get(k, "") for k in ("TITLE", "BODY", "METADATA"))
+    # The link is URL-shaped: scan it for credential/webhook/token shapes only,
+    # so a legitimate URL path containing a long digit run (e.g. a CI run id)
+    # does not fail-closed as a card/SSN false positive.
+    link = os.environ.get("LINK", "")
+    hits = scan(text, include_pii=True) + scan(link, include_pii=False)
     if hits:
-        for name in hits:
+        for name in dict.fromkeys(hits):  # de-dupe, preserve order
             _err(f"Redaction pre-check matched '{name}'. Discord payloads must "
                  f"carry no secret values, PII, or credentials (ADR-0084 D8 / "
                  f"Invariant 8). Post aborted; fix the emitter so it sends "
@@ -195,12 +220,24 @@ def cmd_format():
         _err(f"could not format Discord payload: {exc}")
         return 1
     serialized = json.dumps(payload)
-    # Final-payload scan: METADATA is JSON, so a "\\u0067hp_..." value passes the
-    # raw precheck and only becomes a literal token after json.loads here. Scan
-    # the assembled ASCII payload to close that decode bypass.
-    hits = scan(serialized)
+    # Final-payload scan closes the decode bypass: METADATA is JSON, so a
+    # "\\u0067hp_..." value passes the raw precheck and only becomes a literal
+    # token after json.loads during formatting. Scan the DECODED human-text
+    # surfaces (title / description / field names+values) with the full set
+    # (credentials + PII). The embed `url` (the link) is deliberately excluded —
+    # it is not JSON-decoded (no bypass risk) and was already credential-scanned
+    # in precheck, and scanning it with PII heuristics would false-positive on a
+    # legitimate URL digit run (e.g. a CI run id).
+    embed = payload["embeds"][0]
+    decoded_surfaces = "\n".join(filter(None, [
+        embed.get("title", ""),
+        embed.get("description", ""),
+        *[f["name"] for f in embed.get("fields", [])],
+        *[f["value"] for f in embed.get("fields", [])],
+    ]))
+    hits = scan(decoded_surfaces, include_pii=True)
     if hits:
-        for name in hits:
+        for name in dict.fromkeys(hits):
             _err(f"Final-payload redaction matched '{name}' after formatting "
                  f"(likely a JSON-escaped secret in metadata). Post aborted "
                  f"(ADR-0084 D8 / Invariant 8).")

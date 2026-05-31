@@ -42,6 +42,23 @@ class TestScan(unittest.TestCase):
         ]:
             self.assertTrue(dn.scan(fixture), f"{label} fixture not detected: {fixture!r}")
 
+    def test_link_with_long_run_id_not_flagged_as_pii(self):
+        # A clean GitHub Actions run URL whose run id is a 13-16 digit number
+        # must NOT fail-closed as a "credit-card-shaped number" when scanned as a
+        # link (include_pii=False). Run ids grow monotonically and will reach
+        # this length, so the primary CI-failure alert link must survive.
+        url = "https://github.com/HoneyDrunkStudios/HoneyDrunk.Actions/actions/runs/1234567890123"
+        self.assertEqual(dn.scan(url, include_pii=False), [],
+                         "clean run-id URL flagged when scanned as a link")
+        # The same digit run, in human text, IS still caught (PII on by default).
+        self.assertTrue(dn.scan("card 1234567890123", include_pii=True))
+
+    def test_link_still_scanned_for_credentials(self):
+        # Excluding PII from link scans must NOT weaken credential detection: a
+        # token-bearing or webhook URL in a link is still blocked.
+        self.assertTrue(dn.scan(DISCORD_URL, include_pii=False))
+        self.assertTrue(dn.scan("https://x.example/cb?token=" + GHP, include_pii=False))
+
     def test_redact_uses_same_set(self):
         leaked = f"err {AWS} and {GHP}"
         out = dn.redact(leaked)
