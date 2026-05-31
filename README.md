@@ -774,7 +774,17 @@ jobs:
     secrets: inherit
 ```
 
-Emitters hosted **outside** GitHub Actions (the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner, home-server automations) do not call this workflow — they use the `infrastructure/scripts/discord-notify.ps1` helper in `HoneyDrunk.Architecture`, which mirrors this contract and resolves the channel's **runner** webhook from the `kv-hd-automation-dev` Key Vault.
+Emitters hosted **outside** GitHub Actions are the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner. They do not call this workflow — the runner posts from its own PowerShell path, resolving the channel's **runner** webhook (`Discord--{ChannelPascalCase}--RunnerWebhookUrl`) from the `kv-hd-automation-dev` Key Vault, applying the same redaction contract. (There is no `infrastructure/scripts/discord-notify.ps1` home-server helper — the ADR-0081 home server is decommissioned.)
+
+### Workflows that emit to Discord
+
+These workflows in this repo now route operator-alerts through `job-discord-notify.yml` (per ADR-0084 D6):
+
+| Workflow | Event → channel |
+|---|---|
+| `external-credentials-check.yml` | Credential-rotation escalation (ADR-0083): T-30 → `#ops-alerts`; T-7 → `#ops-alerts` + `#security-alerts`; T+0 → `#security-alerts`. Plus a scheduled-workflow-failure notice to `#ops-alerts`. |
+
+Further emitter families (CI failure on `main`, release/NuGet/deploy events, and the Phase 3/4 vendor-webhook sources) are phased in per ADR-0084's rollout; review verdicts and hive-sync drift are emitted by the ADR-0086 runner, not this repo.
 
 ## 🔁 Adapting this for your own org
 
