@@ -1,0 +1,285 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# ==============================================================================
+# Discord Operator-Alert Notification (Job)
+# ==============================================================================
+# Purpose:
+#   The single CI-side seam for posting operator-alerts to Discord per ADR-0084
+#   D9. Every GitHub-Actions emitter routes through this reusable workflow;
+#   ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 /
+#   Invariant 8 extended to webhook payloads).
+#
+# Single Responsibility:
+#   Format one operator-alert and POST it to exactly one Discord channel's
+#   webhook, after a fail-closed redaction pre-check.
+#
+# What it does:
+#   - Validates `channel` and `severity` against the closed enums.
+#   - Runs the D8 redaction pre-check over title + body + metadata. A match
+#     ABORTS the post (fail-closed) — a leaked secret in chat is irreversible;
+#     a noisy CI failure is the correct trade.
+#   - Truncates title (200) and body (4000) to stay under Discord's embed caps.
+#   - Decorates by severity (embed color + emoji prefix).
+#   - POSTs the embed to the channel's `DISCORD_WEBHOOK_*` secret via curl.
+#
+# Vendor posture (ADR-0080 D2 / ADR-0084 D7): Discord is Hedge. This workflow is
+# the single Grid-side seam — swapping to Slack/Mattermost/Matrix/Teams is a
+# change here plus the per-channel secret names, not a per-emitter rewrite.
+#
+# Smoke-test (run after merge, once webhooks exist — ADR-0084 packet 02):
+#   1. Simple post: dispatch a caller with channel=ops-alerts, severity=info,
+#      title="job-discord-notify smoke-test" — verify it lands in #ops-alerts.
+#   2. Secret rejection: title="Smoke: token=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+#      — verify the job FAILS at the redaction step and nothing lands in Discord.
+#   3. All-channel routing: repeat (1) for each of the seven channels to confirm
+#      each DISCORD_WEBHOOK_* secret resolves and routes correctly.
+# ==============================================================================
+
+name: Discord Notify (Job)
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: >
+          Destination channel. One of: ops-alerts, security-alerts,
+          agent-activity, hive-activity, release, announcements, audit-sensitive.
+          Selects which DISCORD_WEBHOOK_* secret is used.
+        required: true
+        type: string
+      severity:
+        description: 'Disposition: info, medium, high, or critical. Selects embed color + emoji prefix.'
+        required: true
+        type: string
+      title:
+        description: 'Short one-line summary (truncated to 200 chars).'
+        required: true
+        type: string
+      body:
+        description: 'Optional longer text rendered as the embed description (truncated to 4000 chars).'
+        required: false
+        type: string
+        default: ''
+      link:
+        description: 'Optional URL the alert points at; makes the embed title clickable.'
+        required: false
+        type: string
+        default: ''
+      metadata:
+        description: 'Optional JSON object; rendered as embed fields. Must parse as JSON if provided.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      DISCORD_WEBHOOK_OPS_ALERTS:
+        required: false
+      DISCORD_WEBHOOK_SECURITY_ALERTS:
+        required: false
+      DISCORD_WEBHOOK_AGENT_ACTIVITY:
+        required: false
+      DISCORD_WEBHOOK_HIVE_ACTIVITY:
+        required: false
+      DISCORD_WEBHOOK_RELEASE:
+        required: false
+      DISCORD_WEBHOOK_ANNOUNCEMENTS:
+        required: false
+      DISCORD_WEBHOOK_AUDIT_SENSITIVE:
+        required: false
+
+# Discord POST is HTTP-only; this workflow needs no GitHub API permissions.
+# Any caller's permissions block is a trivially-satisfied superset (Invariant 39).
+permissions: {}
+
+jobs:
+  discord-notify:
+    name: Discord Notify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SEVERITY: ${{ inputs.severity }}
+          METADATA: ${{ inputs.metadata }}
+        run: |
+          set -euo pipefail
+
+          case "$CHANNEL" in
+            ops-alerts|security-alerts|agent-activity|hive-activity|release|announcements|audit-sensitive) ;;
+            *)
+              echo "::error::Unknown channel '$CHANNEL'. Must be one of: ops-alerts, security-alerts, agent-activity, hive-activity, release, announcements, audit-sensitive (ADR-0084 D2)." >&2
+              exit 1
+              ;;
+          esac
+
+          case "$SEVERITY" in
+            info|medium|high|critical) ;;
+            *)
+              echo "::error::Unknown severity '$SEVERITY'. Must be one of: info, medium, high, critical (ADR-0084 D6)." >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -n "$METADATA" ]; then
+            if ! printf '%s' "$METADATA" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
+              echo "::error::metadata input is not valid JSON. Pass a JSON object or omit it." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Redaction pre-check (fail-closed, ADR-0084 D8 / Invariant 8)
+        env:
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+          METADATA: ${{ inputs.metadata }}
+        run: |
+          set -euo pipefail
+          # Scan the operator-controlled payload for secret shapes BEFORE formatting.
+          # Fail-closed: any match aborts the post. We never echo the offending
+          # substring (that would itself leak it) — only the pattern name + remedy.
+          python3 - <<'PY'
+          import os, re, sys
+
+          payload = "\n".join([
+              os.environ.get("TITLE", ""),
+              os.environ.get("BODY", ""),
+              os.environ.get("METADATA", ""),
+          ])
+
+          patterns = {
+              "GitHub token (ghp_/gho_/ghu_/ghs_/ghr_)": r"gh[pousr]_[A-Za-z0-9]{36,}",
+              "JWT": r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+              "Discord webhook URL": r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
+              "AWS access key id": r"AKIA[0-9A-Z]{16}",
+              "Azure connection-string key fragment": r"(?:AccountKey|SharedAccessKey)=",
+              "PEM private key header": r"-----BEGIN [A-Z ]+PRIVATE KEY-----",
+              # High-entropy run (32+) adjacent to a credential keyword.
+              "keyword-adjacent secret": r"(?i)(?:token|secret|password|api[_-]?key)[\"'\s:=]+[A-Za-z0-9+/_\-]{32,}",
+              "credit-card-shaped number": r"\b(?:\d[ -]*?){13,16}\b",
+              "US SSN-shaped number": r"\b\d{3}-\d{2}-\d{4}\b",
+          }
+
+          hits = [name for name, pat in patterns.items() if re.search(pat, payload)]
+          if hits:
+              for name in hits:
+                  print(f"::error::Redaction pre-check matched '{name}'. "
+                        f"Discord payloads must carry no secret values, PII, or "
+                        f"credentials (ADR-0084 D8 / Invariant 8). Post aborted; "
+                        f"fix the emitter so it sends metadata, not secrets.",
+                        file=sys.stderr)
+              sys.exit(1)
+          print("Redaction pre-check passed.")
+          PY
+
+      - name: Resolve webhook + format embed + POST
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SEVERITY: ${{ inputs.severity }}
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+          LINK: ${{ inputs.link }}
+          METADATA: ${{ inputs.metadata }}
+          WEBHOOK_OPS_ALERTS: ${{ secrets.DISCORD_WEBHOOK_OPS_ALERTS }}
+          WEBHOOK_SECURITY_ALERTS: ${{ secrets.DISCORD_WEBHOOK_SECURITY_ALERTS }}
+          WEBHOOK_AGENT_ACTIVITY: ${{ secrets.DISCORD_WEBHOOK_AGENT_ACTIVITY }}
+          WEBHOOK_HIVE_ACTIVITY: ${{ secrets.DISCORD_WEBHOOK_HIVE_ACTIVITY }}
+          WEBHOOK_RELEASE: ${{ secrets.DISCORD_WEBHOOK_RELEASE }}
+          WEBHOOK_ANNOUNCEMENTS: ${{ secrets.DISCORD_WEBHOOK_ANNOUNCEMENTS }}
+          WEBHOOK_AUDIT_SENSITIVE: ${{ secrets.DISCORD_WEBHOOK_AUDIT_SENSITIVE }}
+        run: |
+          set -euo pipefail
+
+          # Map channel -> the resolved webhook URL (from the matching secret).
+          case "$CHANNEL" in
+            ops-alerts)       WEBHOOK_URL="$WEBHOOK_OPS_ALERTS" ;;
+            security-alerts)  WEBHOOK_URL="$WEBHOOK_SECURITY_ALERTS" ;;
+            agent-activity)   WEBHOOK_URL="$WEBHOOK_AGENT_ACTIVITY" ;;
+            hive-activity)    WEBHOOK_URL="$WEBHOOK_HIVE_ACTIVITY" ;;
+            release)          WEBHOOK_URL="$WEBHOOK_RELEASE" ;;
+            announcements)    WEBHOOK_URL="$WEBHOOK_ANNOUNCEMENTS" ;;
+            audit-sensitive)  WEBHOOK_URL="$WEBHOOK_AUDIT_SENSITIVE" ;;
+          esac
+          export WEBHOOK_URL
+
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "::error::No webhook secret available for channel '$CHANNEL'. The DISCORD_WEBHOOK_* secret is unset or not exposed to this repo (audit-sensitive is restricted to Architecture/Vault/Vault.Rotation/Audit per ADR-0084 D4). Ensure the caller passes 'secrets: inherit'." >&2
+            exit 1
+          fi
+
+          # Build the embed JSON safely via env vars passed to python (no string
+          # interpolation of operator-controlled text into the shell or JSON).
+          PAYLOAD=$(python3 - <<'PY'
+          import json, os
+
+          colors = {"info": 0x3FB950, "medium": 0xD29922, "high": 0xFB8500, "critical": 0xDA3633}
+          prefixes = {"info": "", "medium": "⚠️ ", "high": "\U0001f525 ", "critical": "\U0001f6a8 "}
+
+          severity = os.environ["SEVERITY"]
+          title = os.environ["TITLE"]
+          body = os.environ.get("BODY", "")
+          link = os.environ.get("LINK", "")
+          metadata = os.environ.get("METADATA", "")
+
+          # Severity decoration: prepend the emoji unless the caller already did.
+          prefix = prefixes[severity]
+          if prefix and not title.startswith(prefix.strip()):
+              title = prefix + title
+
+          # Discord caps: title 256, description 4096. Truncate with headroom.
+          if len(title) > 200:
+              title = title[:199] + "…"
+          if len(body) > 4000:
+              body = body[:4000] + " ... (truncated)"
+
+          embed = {"title": title, "color": colors[severity]}
+          if body:
+              embed["description"] = body
+          if link:
+              embed["url"] = link
+
+          if metadata:
+              try:
+                  md = json.loads(metadata)
+                  if isinstance(md, dict) and md:
+                      embed["fields"] = [
+                          {"name": str(k)[:256], "value": str(v)[:1024], "inline": True}
+                          for k, v in list(md.items())[:25]
+                      ]
+              except json.JSONDecodeError:
+                  pass  # already validated upstream; ignore defensively
+
+          embed["footer"] = {"text": "HoneyDrunk Grid · operator-alerts (ADR-0084)"}
+          print(json.dumps({"embeds": [embed]}))
+          PY
+          )
+
+          # POST via curl directly (Invariant 38 — no marketplace action wrapper).
+          # Capture status separately from body so a non-2xx fails the job.
+          HTTP_CODE=$(curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$WEBHOOK_URL" \
+            -o /tmp/discord_response.txt -w "%{http_code}")
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            # Redact the response body with the same secret patterns before logging.
+            SAFE_RESPONSE=$(python3 - <<'PY'
+          import re
+          try:
+              with open("/tmp/discord_response.txt") as f:
+                  text = f.read()
+          except FileNotFoundError:
+              text = ""
+          pats = [
+              r"gh[pousr]_[A-Za-z0-9]{36,}",
+              r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+              r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
+          ]
+          for p in pats:
+              text = re.sub(p, "[REDACTED]", text)
+          print(text[:1000])
+          PY
+          )
+            echo "::error::Discord POST to #$CHANNEL failed with HTTP $HTTP_CODE. Response: $SAFE_RESPONSE" >&2
+            exit 1
+          fi
+
+          echo "Posted to #$CHANNEL (severity=$SEVERITY, HTTP $HTTP_CODE)."
