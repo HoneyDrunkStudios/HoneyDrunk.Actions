@@ -19,6 +19,7 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
+| `job-discord-notify.yml` | none required (`permissions: {}` callee; any caller block is a superset) |
 | `release.yml` | `contents: write`, `packages: write`, `id-token: write`, `security-events: write` |
 | `job-solution-preflight.yml` | `contents: read` |
 | `job-dotnet-publish-artifact.yml` | `contents: read` |
@@ -40,6 +41,7 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 - [SonarQube Cloud Quality Gate](#sonarqube-cloud-quality-gate)
 - [PR SDK Workflow](#pr-sdk-workflow)
 - [Grid Review Request Workflow](#grid-review-request-workflow)
+- [Discord Operator-Alert Notification](#discord-operator-alert-notification)
 - [Release Workflow](#release-workflow)
 - [Deploy Container to Azure App Service](#deploy-container-to-azure-app-service)
 - [Deploy Azure Container App](#deploy-azure-container-app)

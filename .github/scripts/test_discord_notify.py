@@ -86,6 +86,25 @@ class TestFormat(unittest.TestCase):
         # An omitted-fields note is present when fields were dropped.
         self.assertTrue(any("omitted" in f["value"] for f in e["fields"]))
 
+    def test_field_count_never_exceeds_25_with_note(self):
+        # >25 small fields: must cap at 25 INCLUDING the omitted-fields note
+        # (the bug was capping at 25 then appending a 26th note -> Discord 400).
+        md = json.dumps({f"k{i}": "v" for i in range(40)})
+        e = dn.format_embed("info", "t", metadata=md)["embeds"][0]
+        self.assertLessEqual(len(e["fields"]), 25)
+        self.assertTrue(any("omitted" in f["value"] for f in e["fields"]))
+        # The count reported as omitted must reconcile with what was kept.
+        note = next(f for f in e["fields"] if "omitted" in f["value"])
+        kept_real = len(e["fields"]) - 1  # minus the note
+        self.assertIn(f"{40 - kept_real} field", note["value"])
+
+    def test_exactly_25_fields_no_note(self):
+        # Exactly 25 small fields that fit the char budget: keep all 25, no note.
+        md = json.dumps({f"k{i}": "v" for i in range(25)})
+        e = dn.format_embed("info", "t", metadata=md)["embeds"][0]
+        self.assertEqual(len(e["fields"]), 25)
+        self.assertFalse(any("omitted" in f["value"] for f in e["fields"]))
+
     def test_final_payload_scan_catches_json_escaped_secret(self):
         # A GitHub token JSON-escaped in metadata passes the RAW precheck...
         escaped = "ghp_" + "\\u0041" * 36

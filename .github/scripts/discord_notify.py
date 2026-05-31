@@ -50,6 +50,7 @@ PATTERNS = {
 TITLE_MAX = 200          # headroom under the 256 hard cap
 BODY_MAX = 4000          # headroom under the 4096 hard cap
 TOTAL_MAX = 5900         # headroom under the 6000 total-embed hard cap
+FIELD_MAX = 25           # Discord's hard cap on fields per embed
 
 COLORS = {"info": 0x3FB950, "medium": 0xD29922, "high": 0xFB8500, "critical": 0xDA3633}
 PREFIXES = {"info": "", "medium": "⚠️ ", "high": "\U0001f525 ", "critical": "\U0001f6a8 "}
@@ -105,33 +106,51 @@ def format_embed(severity, title, body="", link="", metadata=""):
         if not isinstance(md, dict):
             raise ValueError("metadata must be a JSON object")
         if md:
+            field_count = len(md)
+            # Build ALL fields first; the budgeting loop below drops the excess
+            # (by Discord's 25-field cap and the char budget) and reserves a slot
+            # for the omitted-fields note. Capping at [:25] here would hide the
+            # true count and let an appended note push the payload to 26 fields.
             embed["fields"] = [
                 {"name": str(k)[:256], "value": str(v)[:1024], "inline": True}
-                for k, v in list(md.items())[:25]
+                for k, v in md.items()
             ]
-            field_count = len(md)
 
     embed["footer"] = {"text": FOOTER}
 
-    # Enforce the total budget. Trim the description first (most expendable),
-    # then drop trailing metadata fields, recording how many were omitted so a
-    # delivered-minus-fields alert beats a 400 that drops the whole thing.
+    # Trim the description first (it is the most expendable long text) to fit the
+    # total character budget.
     over = _embed_chars(embed) - TOTAL_MAX
     if over > 0 and embed.get("description"):
         marker = " ... (truncated)"
         keep = max(0, len(embed["description"]) - over - len(marker))
         embed["description"] = embed["description"][:keep] + marker
+
+    # Drop trailing metadata fields until BOTH limits hold: Discord's 25-field
+    # cap AND the 6000-char budget — counting the omitted-fields note (one slot +
+    # its chars) whenever any field has been dropped. This guarantees the final
+    # field list (real fields + note) never exceeds 25 and never busts the budget,
+    # so a delivered-minus-fields alert beats a 400 that drops the whole thing.
     if embed.get("fields"):
-        while embed["fields"] and _embed_chars(embed) > TOTAL_MAX:
+        def _note_chars():
+            return len("…") + len(f"({field_count} field(s) omitted to fit Discord's limits)")
+
+        def _over_limit():
+            need_note = len(embed["fields"]) < field_count
+            slots = len(embed["fields"]) + (1 if need_note else 0)
+            chars = _embed_chars(embed) + (_note_chars() if need_note else 0)
+            return slots > FIELD_MAX or chars > TOTAL_MAX
+
+        while embed["fields"] and _over_limit():
             embed["fields"].pop()
+
         dropped = field_count - len(embed["fields"])
         if dropped > 0:
-            note = {"name": "…",
-                    "value": f"({dropped} field(s) omitted to fit Discord's size limit)",
-                    "inline": False}
-            while embed["fields"] and _embed_chars(embed) + len(note["name"]) + len(note["value"]) > TOTAL_MAX:
-                embed["fields"].pop()
-            embed["fields"].append(note)
+            embed["fields"].append({
+                "name": "…",
+                "value": f"({dropped} field(s) omitted to fit Discord's limits)",
+                "inline": False,
+            })
 
     return {"embeds": [embed]}
 
