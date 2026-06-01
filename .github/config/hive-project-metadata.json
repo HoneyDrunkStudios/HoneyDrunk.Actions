@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": "1.0",
-    "last_refreshed_utc": "2026-05-02T12:24:13Z",
+    "last_refreshed_utc": "2026-06-01T08:08:19Z",
     "project_owner": "HoneyDrunkStudios",
     "project_number": 4,
     "refresh_workflow": ".github/workflows/refresh-hive-project-metadata.yml"
@@ -38,16 +38,8 @@
             "name": "In Progress"
           },
           {
-            "id": "9193871d",
-            "name": "In Progress - Agent"
-          },
-          {
             "id": "98236657",
             "name": "Done"
-          },
-          {
-            "id": "2b646205",
-            "name": "Blocked"
           }
         ],
         "type": "ProjectV2SingleSelectField"
@@ -88,6 +80,21 @@
         "type": "ProjectV2Field"
       },
       {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQN4",
+        "name": "Created",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQN8",
+        "name": "Updated",
+        "type": "ProjectV2Field"
+      },
+      {
+        "id": "PVTF_lADOCxPmns4BUMbizhBWQOA",
+        "name": "Closed",
+        "type": "ProjectV2Field"
+      },
+      {
         "id": "PVTSSF_lADOCxPmns4BUMbizhBWQ88",
         "name": "Wave",
         "options": [
@@ -115,36 +122,336 @@
         "name": "Initiative",
         "options": [
           {
-            "id": "4912648b",
+            "id": "0996ce13",
             "name": "adr-0005-0006-rollout"
           },
           {
-            "id": "25b89f58",
+            "id": "2630db35",
             "name": "honeydrunk-lore-bringup"
           },
           {
-            "id": "ad1300ef",
+            "id": "4548ff14",
             "name": "adr-0009-package-scanning-rollout"
           },
           {
-            "id": "a2b61615",
+            "id": "b9510c15",
             "name": "standalone"
           },
           {
-            "id": "35ad711d",
+            "id": "676332dd",
             "name": "adr-0010-observe-ai-routing-phase-1"
           },
           {
-            "id": "8e53c06a",
+            "id": "f081bebf",
             "name": "adr-0015-container-apps-rollout"
           },
           {
-            "id": "a6b15048",
+            "id": "b45c6d37",
             "name": "adr-0011-code-review-pipeline"
           },
           {
-            "id": "b7b8ae4c",
+            "id": "08e16b67",
             "name": "adr-0012-grid-cicd-control-plane"
+          },
+          {
+            "id": "bdace4c0",
+            "name": "adr-0013-communications-bringup"
+          },
+          {
+            "id": "5406fa13",
+            "name": "adr-0026-grid-multi-tenant-primitives"
+          },
+          {
+            "id": "797c8043",
+            "name": "adr-0014-hive-sync-rollout"
+          },
+          {
+            "id": "0b4cd6e0",
+            "name": "adr-0016-honeydrunk-ai-standup"
+          },
+          {
+            "id": "cd0a6625",
+            "name": "adr-0017-capabilities-standup"
+          },
+          {
+            "id": "4f1ac920",
+            "name": "adr-0029-cloudflare-dns-rollout"
+          },
+          {
+            "id": "fe193dd3",
+            "name": "adr-0030-audit-substrate"
+          },
+          {
+            "id": "f335367c",
+            "name": "adr-0032-pr-validation-policy"
+          },
+          {
+            "id": "9506c418",
+            "name": "kernel-adoption-alignment"
+          },
+          {
+            "id": "ee32580a",
+            "name": "adr-0033-deploy-trigger-model"
+          },
+          {
+            "id": "eff94109",
+            "name": "adr-0028-event-driven-architecture"
+          },
+          {
+            "id": "4b1fd249",
+            "name": "adr-0018-operator-standup"
+          },
+          {
+            "id": "babb6c69",
+            "name": "adr-0020-agents-standup"
+          },
+          {
+            "id": "112a33b0",
+            "name": "adr-0021-knowledge-standup"
+          },
+          {
+            "id": "4c889f4d",
+            "name": "adr-0022-memory-standup"
+          },
+          {
+            "id": "13ae484c",
+            "name": "adr-0023-evals-standup"
+          },
+          {
+            "id": "b982cc50",
+            "name": "adr-0024-flow-standup"
+          },
+          {
+            "id": "9c6f37df",
+            "name": "adr-0025-sim-standup"
+          },
+          {
+            "id": "ce8b18c7",
+            "name": "adr-0027-notify-cloud-standup"
+          },
+          {
+            "id": "4bcd7441",
+            "name": "adr-0031-audit-node-standup"
+          },
+          {
+            "id": "c2b9e93d",
+            "name": "adr-0044-cloud-code-review"
+          },
+          {
+            "id": "c3417d62",
+            "name": "adr-0047-testing-patterns-and-tooling"
+          },
+          {
+            "id": "c6d1ec16",
+            "name": "adr-0034-public-package-distribution"
+          },
+          {
+            "id": "dc991dcd",
+            "name": "adr-0035-abstractions-versioning"
+          },
+          {
+            "id": "70f8dea8",
+            "name": "adr-0036-disaster-recovery"
+          },
+          {
+            "id": "f44df852",
+            "name": "adr-0037-payment-billing"
+          },
+          {
+            "id": "bcf96b67",
+            "name": "adr-0038-sender-identity"
+          },
+          {
+            "id": "10222013",
+            "name": "adr-0039-license-policy"
+          },
+          {
+            "id": "e35c7eb0",
+            "name": "adr-0040-telemetry-backend"
+          },
+          {
+            "id": "48442eeb",
+            "name": "adr-0041-model-registry"
+          },
+          {
+            "id": "c51206b6",
+            "name": "adr-0042-idempotency"
+          },
+          {
+            "id": "444151a7",
+            "name": "adr-0043-continuous-backlog-generation"
+          },
+          {
+            "id": "c1421ea4",
+            "name": "adr-0045-grid-wide-error-tracking"
+          },
+          {
+            "id": "f0f083ca",
+            "name": "adr-0046-specialist-review-agents"
+          },
+          {
+            "id": "ac76a798",
+            "name": "adr-0063-clock-policy"
+          },
+          {
+            "id": "c9c058f7",
+            "name": "adr-0066-health-endpoints"
+          },
+          {
+            "id": "b4d32138",
+            "name": "adr-0069-currency-handling"
+          },
+          {
+            "id": "910bf6b3",
+            "name": "adr-0058-caching-strategy"
+          },
+          {
+            "id": "6d589dc1",
+            "name": "adr-0062-webhook-verification"
+          },
+          {
+            "id": "d3d0261f",
+            "name": "adr-0067-rate-limiting"
+          },
+          {
+            "id": "bc707a4d",
+            "name": "adr-0054-incident-response"
+          },
+          {
+            "id": "a156b256",
+            "name": "adr-0055-feature-flags"
+          },
+          {
+            "id": "b0e2332b",
+            "name": "adr-0056-threat-model"
+          },
+          {
+            "id": "9631e62b",
+            "name": "adr-0072-data-access-stance"
+          },
+          {
+            "id": "15e42106",
+            "name": "adr-0079-pr-review-stack"
+          },
+          {
+            "id": "6eaf9625",
+            "name": "adr-0080-vendor-lockin"
+          },
+          {
+            "id": "977d711a",
+            "name": "adr-0051-agent-authorization"
+          },
+          {
+            "id": "f885f405",
+            "name": "adr-0052-cost-governance"
+          },
+          {
+            "id": "6d96f8de",
+            "name": "adr-0053-release-cadence"
+          },
+          {
+            "id": "81c0bdc5",
+            "name": "adr-0070-frontend-stack"
+          },
+          {
+            "id": "2594745c",
+            "name": "adr-0074-testing-stack"
+          },
+          {
+            "id": "99805d76",
+            "name": "adr-0075-docs-tooling"
+          },
+          {
+            "id": "fa2a1610",
+            "name": "adr-0065-aspire-orchestration"
+          },
+          {
+            "id": "cc538677",
+            "name": "adr-0068-background-jobs"
+          },
+          {
+            "id": "177e17fb",
+            "name": "adr-0077-iac-bicep"
+          },
+          {
+            "id": "831ca062",
+            "name": "adr-0059-cache-standup"
+          },
+          {
+            "id": "7fd70fb0",
+            "name": "adr-0060-identity-standup"
+          },
+          {
+            "id": "2082d08a",
+            "name": "adr-0048-schema-evolution"
+          },
+          {
+            "id": "e1997f09",
+            "name": "adr-0049-pii-classification"
+          },
+          {
+            "id": "223bc29f",
+            "name": "adr-0050-tenant-lifecycle"
+          },
+          {
+            "id": "cd20da30",
+            "name": "adr-0061-files-standup"
+          },
+          {
+            "id": "ac638a07",
+            "name": "adr-0057-api-versioning"
+          },
+          {
+            "id": "3db7cb6e",
+            "name": "adr-0064-prompt-registry"
+          },
+          {
+            "id": "b564eead",
+            "name": "adr-0073-notify-providers"
+          },
+          {
+            "id": "bfd4b197",
+            "name": "adr-0071-web-ui-standup"
+          },
+          {
+            "id": "af7b8e39",
+            "name": "adr-0076-cache-backing-redis"
+          },
+          {
+            "id": "07ad7c06",
+            "name": "adr-0078-entra-external-id"
+          },
+          {
+            "id": "f9e8ae87",
+            "name": "adr-0081-home-server"
+          },
+          {
+            "id": "b84e830a",
+            "name": "adr-0082-node-standup"
+          },
+          {
+            "id": "2a182089",
+            "name": "adr-0083-external-saas-credentials"
+          },
+          {
+            "id": "420dada0",
+            "name": "adr-0084-discord-alerts"
+          },
+          {
+            "id": "9524cdab",
+            "name": "adr-0085-docs-sync"
+          },
+          {
+            "id": "14e0ea35",
+            "name": "adr-0086-pull-based-local-worker-grid-r"
+          },
+          {
+            "id": "ee9fa89f",
+            "name": "adr-0087-per-change-risk-scoring"
+          },
+          {
+            "id": "2ed46ba2",
+            "name": "adr-0088-openclaw-decommission"
           }
         ],
         "type": "ProjectV2SingleSelectField"
@@ -154,92 +461,104 @@
         "name": "Node",
         "options": [
           {
-            "id": "3d8a9b1e",
+            "id": "4b7bc499",
             "name": "honeydrunk-kernel"
           },
           {
-            "id": "ab216194",
+            "id": "4e3b5361",
             "name": "honeydrunk-transport"
           },
           {
-            "id": "41f8808e",
+            "id": "6eab33b2",
             "name": "honeydrunk-vault"
           },
           {
-            "id": "a0556f9a",
+            "id": "86ad1c9c",
             "name": "honeydrunk-auth"
           },
           {
-            "id": "859ce664",
+            "id": "0ef481a6",
             "name": "honeydrunk-web-rest"
           },
           {
-            "id": "1ff4dbfb",
+            "id": "882d7934",
             "name": "honeydrunk-data"
           },
           {
-            "id": "c23f7a9b",
+            "id": "58bef39f",
             "name": "pulse"
           },
           {
-            "id": "7ce4d8ad",
+            "id": "6b90e757",
             "name": "honeydrunk-notify"
           },
           {
-            "id": "80f827e5",
+            "id": "8bec2696",
             "name": "honeydrunk-actions"
           },
           {
-            "id": "f9330322",
+            "id": "85088d5c",
             "name": "honeydrunk-architecture"
           },
           {
-            "id": "86ae7f5e",
+            "id": "0f5e9bd6",
             "name": "honeydrunk-studios"
           },
           {
-            "id": "6239c7de",
+            "id": "b66048ba",
             "name": "honeydrunk-ai"
           },
           {
-            "id": "4a5f1359",
+            "id": "9c9781e8",
             "name": "honeydrunk-capabilities"
           },
           {
-            "id": "ed58d574",
+            "id": "5aa2691e",
             "name": "honeydrunk-agents"
           },
           {
-            "id": "bdf006d9",
+            "id": "4297e9ea",
             "name": "honeydrunk-memory"
           },
           {
-            "id": "f0f854de",
+            "id": "6c4b9642",
             "name": "honeydrunk-knowledge"
           },
           {
-            "id": "32133319",
+            "id": "fa9c89e9",
             "name": "honeydrunk-flow"
           },
           {
-            "id": "3c326960",
+            "id": "f94ba6fe",
             "name": "honeydrunk-operator"
           },
           {
-            "id": "bcc89b82",
+            "id": "c2a6e386",
             "name": "honeydrunk-evals"
           },
           {
-            "id": "d97442dd",
+            "id": "6c292ebb",
             "name": "honeydrunk-sim"
           },
           {
-            "id": "7b2cd20f",
+            "id": "123d7708",
             "name": "honeydrunk-lore"
           },
           {
-            "id": "929b1a7f",
+            "id": "c2060c5e",
             "name": "honeydrunk-standards"
+          },
+          {
+            "id": "6861ccfb",
+            "name": "honeydrunk-vault-rotation"
+          },
+          {
+            "id": "95d41ef3",
+            "name": "honeydrunk-communications"
+          },
+          {
+            "id": "711dbd7a",
+            "name": "honeydrunk-audit"
           }
         ],
         "type": "ProjectV2SingleSelectField"
@@ -284,6 +603,6 @@
         "type": "ProjectV2SingleSelectField"
       }
     ],
-    "totalCount": 16
+    "totalCount": 19
   }
 }
