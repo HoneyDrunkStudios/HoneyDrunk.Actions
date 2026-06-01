@@ -354,7 +354,7 @@ It adds `needs-agent-review`, removes stale worker-state completion/claim labels
 
 Set `apply-classification-labels: false` only for a repo that wants the review queue without central PR label classification.
 
-The old OpenClaw webhook inputs are retained as no-op compatibility shims during the cutover, but new callers should not pass them.
+ADR-0088 removed the old OpenClaw webhook compatibility inputs. Callers should pass only the local-worker queue settings and `github-token`.
 
 ---
 

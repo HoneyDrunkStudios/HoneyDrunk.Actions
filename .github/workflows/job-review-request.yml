@@ -31,26 +31,6 @@ on:
         required: false
         type: string
         default: '.honeydrunk-review.yaml'
-      openclaw-webhook-url:
-        description: 'Deprecated ADR-0044 input retained for compatibility; local-worker queueing ignores it'
-        required: false
-        type: string
-        default: ''
-      upload-fallback-artifact:
-        description: 'Deprecated ADR-0044 input retained for compatibility; local-worker queueing ignores it'
-        required: false
-        type: boolean
-        default: false
-      post-fallback-comment:
-        description: 'Deprecated ADR-0044 input retained for compatibility; local-worker queueing ignores it'
-        required: false
-        type: boolean
-        default: false
-      artifact-name:
-        description: 'Deprecated ADR-0044 input retained for compatibility; local-worker queueing ignores it'
-        required: false
-        type: string
-        default: 'grid-review-request'
       queue-label:
         description: 'Label that marks a PR as queued for local-worker review'
         required: false
@@ -82,9 +62,6 @@ on:
         type: boolean
         default: true
     secrets:
-      openclaw-webhook-secret:
-        description: 'Deprecated ADR-0044 secret retained for compatibility; local-worker queueing ignores it'
-        required: false
       github-token:
         description: 'GitHub token for PR metadata, labels, and queue comments'
         required: true
