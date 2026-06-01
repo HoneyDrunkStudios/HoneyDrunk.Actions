@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `job-review-request.yml`: removed the deprecated ADR-0044/OpenClaw compatibility inputs (`openclaw-webhook-url`, `upload-fallback-artifact`, `post-fallback-comment`, `artifact-name`) and the no-op `openclaw-webhook-secret` workflow-call secret. The workflow now exposes only the ADR-0086 local-worker queue contract plus `github-token`; the org secret itself is intentionally left for operator deletion under ADR-0088.
+
 ### Fixed
 
 - `job-sonarcloud.yml`: exclude consumer `.github/workflows/**` wrapper YAML from SonarQube Cloud source analysis by default. The wrapper workflows intentionally call first-party reusable workflows from `HoneyDrunk.Actions@main` so repos receive centralized workflow fixes; SonarCloud reports those new wrapper calls as Security Hotspots even though the executable workflow logic is governed in this repo. Consumers can override the new `sonar-exclusions` input when they intentionally want Sonar to scan workflow YAML.
