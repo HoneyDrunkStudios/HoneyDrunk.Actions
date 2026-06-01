@@ -147,11 +147,30 @@ jobs:
 
           dotnet publish "${ARGS[@]}"
 
+      - name: Resolve artifact path
+        id: artifact-path
+        shell: bash
+        env:
+          WORKING_DIR: ${{ inputs.working-directory }}
+          PUBLISH_OUTPUT: ${{ inputs.publish-output }}
+        run: |
+          set -euo pipefail
+          # actions/upload-artifact@v6 rejects path patterns containing '.' or
+          # '..' segments (e.g. './publish' or '././publish'). Combine
+          # working-directory + publish-output into a clean, workspace-relative
+          # path with any leading './' stripped.
+          po="${PUBLISH_OUTPUT#./}"
+          combined="${WORKING_DIR%/}/${po}"
+          combined="${combined#./}"
+          combined="${combined#/}"
+          echo "path=${combined}" >> "$GITHUB_OUTPUT"
+          echo "Resolved upload path: ${combined}"
+
       - name: Upload published artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.artifact-name }}
-          path: ${{ inputs.working-directory }}/${{ inputs.publish-output }}
+          path: ${{ steps.artifact-path.outputs.path }}
           retention-days: 90
           if-no-files-found: error
 
