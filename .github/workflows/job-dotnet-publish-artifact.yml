@@ -155,16 +155,16 @@ jobs:
           PUBLISH_OUTPUT: ${{ inputs.publish-output }}
         run: |
           set -euo pipefail
-          # actions/upload-artifact@v6 rejects path patterns containing '.' or
-          # '..' segments (e.g. './publish' or '././publish'). Combine
-          # working-directory + publish-output into a clean, workspace-relative
-          # path with any leading './' stripped.
-          po="${PUBLISH_OUTPUT#./}"
-          combined="${WORKING_DIR%/}/${po}"
-          combined="${combined#./}"
-          combined="${combined#/}"
-          echo "path=${combined}" >> "$GITHUB_OUTPUT"
-          echo "Resolved upload path: ${combined}"
+          # actions/upload-artifact@v6 rejects path patterns containing any '.'
+          # or '..' segment (e.g. './publish', '././publish', 'src/./out').
+          # The publish step ran in WORKING_DIR and wrote to PUBLISH_OUTPUT, so
+          # the files live at <workspace>/<WORKING_DIR>/<PUBLISH_OUTPUT>. Use
+          # realpath -m (collapses every '.'/'..' without requiring the path to
+          # exist) to derive a clean workspace-relative path for upload.
+          abs="$(realpath -m -- "${GITHUB_WORKSPACE}/${WORKING_DIR}/${PUBLISH_OUTPUT}")"
+          rel="$(realpath -m --relative-to="${GITHUB_WORKSPACE}" -- "${abs}")"
+          echo "path=${rel}" >> "$GITHUB_OUTPUT"
+          echo "Resolved upload path: ${rel}"
 
       - name: Upload published artifact
         uses: actions/upload-artifact@v6
