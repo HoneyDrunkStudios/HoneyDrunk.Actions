@@ -147,11 +147,30 @@ jobs:
 
           dotnet publish "${ARGS[@]}"
 
+      - name: Resolve artifact path
+        id: artifact-path
+        shell: bash
+        env:
+          WORKING_DIR: ${{ inputs.working-directory }}
+          PUBLISH_OUTPUT: ${{ inputs.publish-output }}
+        run: |
+          set -euo pipefail
+          # actions/upload-artifact@v6 rejects path patterns containing any '.'
+          # or '..' segment (e.g. './publish', '././publish', 'src/./out').
+          # The publish step ran in WORKING_DIR and wrote to PUBLISH_OUTPUT, so
+          # the files live at <workspace>/<WORKING_DIR>/<PUBLISH_OUTPUT>. Use
+          # realpath -m (collapses every '.'/'..' without requiring the path to
+          # exist) to derive a clean workspace-relative path for upload.
+          abs="$(realpath -m -- "${GITHUB_WORKSPACE}/${WORKING_DIR}/${PUBLISH_OUTPUT}")"
+          rel="$(realpath -m --relative-to="${GITHUB_WORKSPACE}" -- "${abs}")"
+          echo "path=${rel}" >> "$GITHUB_OUTPUT"
+          echo "Resolved upload path: ${rel}"
+
       - name: Upload published artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.artifact-name }}
-          path: ${{ inputs.working-directory }}/${{ inputs.publish-output }}
+          path: ${{ steps.artifact-path.outputs.path }}
           retention-days: 90
           if-no-files-found: error
 
