@@ -74,12 +74,9 @@ runs:
           --revision-suffix "$SAFE_SUFFIX" \
           --output none
 
+        # SAFE_SUFFIX is already validated non-empty above and APP_NAME is a
+        # required input, so REVISION_NAME is guaranteed non-empty here.
         REVISION_NAME="${APP_NAME}--${SAFE_SUFFIX}"
-
-        if [ -z "$SAFE_SUFFIX" ]; then
-          echo "::error::Container App revision copy did not produce a revision name"
-          exit 1
-        fi
 
         echo "Created revision: $REVISION_NAME"
 
