@@ -442,12 +442,36 @@ jobs:
           labels = {line.strip() for line in labels_stdout.splitlines() if line.strip()}
           has_label = 'out-of-band' in labels
 
+          # Label mutation uses `gh issue edit` (the issue-level labels API), which
+          # matches this job's `issues: write` permission — `gh pr edit --add-label`
+          # goes through the PR GraphQL mutation and would need `pull-requests: write`,
+          # so under our least-privilege grant it fails outright ("Resource not
+          # accessible by integration"); the best-effort handler below only downgrades
+          # that to a warning, so the label is never actually applied. (PRs are issues
+          # for labeling purposes; the large-pr labeling below uses the same
+          # `gh issue edit` path.) Even so, labeling stays best-effort: the Authorship
+          # + Packet/Out-of-band fields in the body (validated and gated above) are
+          # the source of truth. Applying the label can still fail (the label not
+          # existing, a transient API error) — none of which should fail this check.
+          # Warn (surfacing gh's own message) instead of exiting, so an out-of-band PR
+          # is never blocked on a cosmetic label.
+          def label_warn_detail(result):
+              tail = (result.stderr or result.stdout or '').strip().splitlines()
+              return tail[-1].strip() if tail else 'no error detail from gh'
+
           if has_oob_reason and not has_label:
-              gh('pr', 'edit', pr_number, '--repo', repo, '--add-label', 'out-of-band')
-              print('Added out-of-band label because the PR declares an Out-of-band reason.')
+              r = gh('issue', 'edit', pr_number, '--repo', repo, '--add-label', 'out-of-band', check=False)
+              if r.returncode == 0:
+                  print('Added out-of-band label because the PR declares an Out-of-band reason.')
+              else:
+                  print(f'::warning::Could not apply the out-of-band label (non-fatal): {label_warn_detail(r)}. '
+                        'The Out-of-band reason in the PR body is authoritative; apply the label manually if you want the visual cue.')
           elif has_packet and has_label:
-              gh('pr', 'edit', pr_number, '--repo', repo, '--remove-label', 'out-of-band')
-              print('Removed out-of-band label because Packet metadata is present.')
+              r = gh('issue', 'edit', pr_number, '--repo', repo, '--remove-label', 'out-of-band', check=False)
+              if r.returncode == 0:
+                  print('Removed out-of-band label because Packet metadata is present.')
+              else:
+                  print(f'::warning::Could not remove the stale out-of-band label (non-fatal): {label_warn_detail(r)}. Remove it manually if needed.')
           elif has_oob_reason:
               print('Out-of-band reason present and label already applied.')
           elif has_packet:
