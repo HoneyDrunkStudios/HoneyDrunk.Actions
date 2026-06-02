@@ -56,12 +56,23 @@ runs:
         set -euo pipefail
         APP_NAME="${{ inputs.app-name }}"
         SLOT="${{ inputs.slot-name }}"
+        RG="${{ inputs.resource-group }}"
 
+        # Resolve the real hostname from Azure rather than assuming the bare
+        # "<name>.azurewebsites.net" form. Flex Consumption function apps answer
+        # ONLY on a regional hostname ("<name>-<hash>.<region>-01.azurewebsites.net"),
+        # so the bare form returns no response (HTTP 000) and fails the health
+        # check even when the deploy succeeded. defaultHostName is correct for both
+        # Flex and classic plans; fall back to the constructed form if the lookup
+        # fails (e.g. az not logged in for a no-health-check caller).
         if [ "$SLOT" == "production" ] || [ -z "$SLOT" ]; then
-          echo "url=https://${APP_NAME}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+          HOST=$(az functionapp show --resource-group "$RG" --name "$APP_NAME" --query defaultHostName -o tsv 2>/dev/null || true)
+          [ -z "$HOST" ] && HOST="${APP_NAME}.azurewebsites.net"
         else
-          echo "url=https://${APP_NAME}-${SLOT}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+          HOST=$(az functionapp show --resource-group "$RG" --name "$APP_NAME" --slot "$SLOT" --query defaultHostName -o tsv 2>/dev/null || true)
+          [ -z "$HOST" ] && HOST="${APP_NAME}-${SLOT}.azurewebsites.net"
         fi
+        echo "url=https://${HOST}" >> "$GITHUB_OUTPUT"
 
     - name: Wait for function app startup
       if: ${{ inputs.health-check-url != '' }}
@@ -128,7 +139,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        echo "url=https://${{ inputs.app-name }}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+        # Resolve the production hostname from Azure (see "Resolve deployed URL").
+        HOST=$(az functionapp show --resource-group "${{ inputs.resource-group }}" --name "${{ inputs.app-name }}" --query defaultHostName -o tsv 2>/dev/null || true)
+        [ -z "$HOST" ] && HOST="${{ inputs.app-name }}.azurewebsites.net"
+        echo "url=https://${HOST}" >> "$GITHUB_OUTPUT"
 
     - name: Final status
       id: final-status
