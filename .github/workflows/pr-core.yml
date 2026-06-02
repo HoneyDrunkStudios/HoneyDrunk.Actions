@@ -442,12 +442,22 @@ jobs:
           labels = {line.strip() for line in labels_stdout.splitlines() if line.strip()}
           has_label = 'out-of-band' in labels
 
+          # Labeling is best-effort: the Authorship + Packet/Out-of-band fields in
+          # the body (validated and gated above) are the source of truth. Applying
+          # the label needs pull-requests:write, which the default token may lack
+          # (GraphQL "Resource not accessible by integration") — warn instead of
+          # failing the check, so out-of-band PRs aren't blocked on a cosmetic label.
           if has_oob_reason and not has_label:
-              gh('pr', 'edit', pr_number, '--repo', repo, '--add-label', 'out-of-band')
-              print('Added out-of-band label because the PR declares an Out-of-band reason.')
+              if gh('pr', 'edit', pr_number, '--repo', repo, '--add-label', 'out-of-band', check=False).returncode == 0:
+                  print('Added out-of-band label because the PR declares an Out-of-band reason.')
+              else:
+                  print('::warning::Could not apply the out-of-band label (token lacks label write). '
+                        'The Out-of-band reason in the PR body is authoritative; apply the label manually for the visual cue.')
           elif has_packet and has_label:
-              gh('pr', 'edit', pr_number, '--repo', repo, '--remove-label', 'out-of-band')
-              print('Removed out-of-band label because Packet metadata is present.')
+              if gh('pr', 'edit', pr_number, '--repo', repo, '--remove-label', 'out-of-band', check=False).returncode == 0:
+                  print('Removed out-of-band label because Packet metadata is present.')
+              else:
+                  print('::warning::Could not remove the stale out-of-band label (token lacks label write); remove it manually.')
           elif has_oob_reason:
               print('Out-of-band reason present and label already applied.')
           elif has_packet:
