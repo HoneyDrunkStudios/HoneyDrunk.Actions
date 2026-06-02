@@ -445,8 +445,10 @@ jobs:
           # Label mutation uses `gh issue edit` (the issue-level labels API), which
           # matches this job's `issues: write` permission — `gh pr edit --add-label`
           # goes through the PR GraphQL mutation and would need `pull-requests: write`,
-          # so under our least-privilege grant it would only ever warn. (PRs are
-          # issues for labeling purposes; the large-pr labeling below uses the same
+          # so under our least-privilege grant it fails outright ("Resource not
+          # accessible by integration"); the best-effort handler below only downgrades
+          # that to a warning, so the label is never actually applied. (PRs are issues
+          # for labeling purposes; the large-pr labeling below uses the same
           # `gh issue edit` path.) Even so, labeling stays best-effort: the Authorship
           # + Packet/Out-of-band fields in the body (validated and gated above) are
           # the source of truth. Applying the label can still fail (the label not
