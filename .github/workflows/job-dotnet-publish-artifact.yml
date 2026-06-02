@@ -173,6 +173,11 @@ jobs:
           path: ${{ steps.artifact-path.outputs.path }}
           retention-days: 90
           if-no-files-found: error
+          # upload-artifact@v4+ ignores dotfiles/dotfolders by default. .NET
+          # isolated Functions publish output includes a required `.azurefunctions`
+          # directory; without this it is stripped and Flex Consumption deploy
+          # fails with "Cannot find required .azurefunctions directory".
+          include-hidden-files: true
 
       - name: Emit publish outputs
         id: publish-outputs

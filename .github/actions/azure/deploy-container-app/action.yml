@@ -63,18 +63,20 @@ runs:
         fi
 
         echo "Creating Container App revision for $APP_NAME with suffix $SAFE_SUFFIX"
-        REVISION_NAME=$(az containerapp revision copy \
+        # NOTE: `az containerapp revision copy` returns the Container *App*
+        # object (its .name is the app name), NOT the new revision — so we must
+        # not read the revision name from its output. With --revision-suffix the
+        # new revision is deterministically named "<app>--<suffix>".
+        az containerapp revision copy \
           --name "$APP_NAME" \
           --resource-group "$RESOURCE_GROUP" \
           --image "$IMAGE" \
           --revision-suffix "$SAFE_SUFFIX" \
-          --query "name" \
-          --output tsv)
+          --output none
 
-        if [ -z "$REVISION_NAME" ]; then
-          echo "::error::Container App revision copy did not return a revision name"
-          exit 1
-        fi
+        # SAFE_SUFFIX is already validated non-empty above and APP_NAME is a
+        # required input, so REVISION_NAME is guaranteed non-empty here.
+        REVISION_NAME="${APP_NAME}--${SAFE_SUFFIX}"
 
         echo "Created revision: $REVISION_NAME"
 
