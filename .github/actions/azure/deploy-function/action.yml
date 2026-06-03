@@ -73,7 +73,7 @@ runs:
           HOST=$(az resource show --resource-group "$RG" --name "$APP_NAME" --resource-type Microsoft.Web/sites --query properties.defaultHostName -o tsv 2>/dev/null || true)
           FALLBACK="${APP_NAME}.azurewebsites.net"
         else
-          HOST=$(az resource show --resource-group "$RG" --name "${APP_NAME}/${SLOT}" --resource-type Microsoft.Web/sites/slots --query properties.defaultHostName -o tsv 2>/dev/null || true)
+          HOST=$(az resource show --resource-group "$RG" --namespace Microsoft.Web --parent "sites/$APP_NAME" --resource-type slots --name "$SLOT" --query properties.defaultHostName -o tsv 2>/dev/null || true)
           FALLBACK="${APP_NAME}-${SLOT}.azurewebsites.net"
         fi
 
