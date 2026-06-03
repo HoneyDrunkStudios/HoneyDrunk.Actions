@@ -56,12 +56,32 @@ runs:
         set -euo pipefail
         APP_NAME="${{ inputs.app-name }}"
         SLOT="${{ inputs.slot-name }}"
+        RG="${{ inputs.resource-group }}"
 
+        # Resolve the real hostname from Azure rather than assuming the bare
+        # "<name>.azurewebsites.net" form. Flex Consumption function apps answer
+        # ONLY on a regional hostname ("<name>-<hash>.<region>-01.azurewebsites.net"),
+        # so the bare form returns no response (HTTP 000) and fails the health
+        # check even when the deploy succeeded. defaultHostName is correct for both
+        # Flex and classic plans.
         if [ "$SLOT" == "production" ] || [ -z "$SLOT" ]; then
-          echo "url=https://${APP_NAME}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+          HOST=$(az functionapp show --resource-group "$RG" --name "$APP_NAME" --query defaultHostName -o tsv 2>/dev/null || true)
+          FALLBACK="${APP_NAME}.azurewebsites.net"
         else
-          echo "url=https://${APP_NAME}-${SLOT}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+          HOST=$(az functionapp show --resource-group "$RG" --name "$APP_NAME" --slot "$SLOT" --query defaultHostName -o tsv 2>/dev/null || true)
+          FALLBACK="${APP_NAME}-${SLOT}.azurewebsites.net"
         fi
+
+        if [ -z "$HOST" ]; then
+          # Lookup failed (most likely the Azure CLI isn't authenticated). Fall
+          # back to the constructed hostname so a no-health-check caller still
+          # gets a best-effort deployed-url, but warn loudly: for Flex Consumption
+          # that fallback is NOT a configured hostname, so a health check against
+          # it will false-negative. Accurate resolution requires Azure CLI auth.
+          HOST="$FALLBACK"
+          echo "::warning::Could not resolve defaultHostName for ${APP_NAME} via 'az functionapp show' (is the Azure CLI authenticated?). Falling back to ${HOST} — this is NOT a configured hostname for Flex Consumption apps, so a health check against it may false-negative."
+        fi
+        echo "url=https://${HOST}" >> "$GITHUB_OUTPUT"
 
     - name: Wait for function app startup
       if: ${{ inputs.health-check-url != '' }}
@@ -128,7 +148,13 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        echo "url=https://${{ inputs.app-name }}.azurewebsites.net" >> "$GITHUB_OUTPUT"
+        # Resolve the production hostname from Azure (see "Resolve deployed URL").
+        HOST=$(az functionapp show --resource-group "${{ inputs.resource-group }}" --name "${{ inputs.app-name }}" --query defaultHostName -o tsv 2>/dev/null || true)
+        if [ -z "$HOST" ]; then
+          HOST="${{ inputs.app-name }}.azurewebsites.net"
+          echo "::warning::Could not resolve defaultHostName for ${{ inputs.app-name }} via 'az functionapp show'; falling back to ${HOST}, which may not route for Flex Consumption apps."
+        fi
+        echo "url=https://${HOST}" >> "$GITHUB_OUTPUT"
 
     - name: Final status
       id: final-status
