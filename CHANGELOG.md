@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- `actions/azure/deploy-function`: the post-deploy health check now probes the function app's real `defaultHostName` (resolved via `az functionapp show`) instead of the assumed `<name>.azurewebsites.net`. Flex Consumption apps answer only on a regional hostname (`<name>-<hash>.<region>-01.azurewebsites.net`), so the bare form returned HTTP 000 and failed the health check even when the deploy itself succeeded. Falls back to the constructed form when the lookup is unavailable. Applies to both the production-URL and post-swap-URL resolution.
+- `actions/azure/deploy-function`: the post-deploy health check now probes the function app's real `defaultHostName` (resolved via `az resource show --resource-type Microsoft.Web/sites`) instead of the assumed `<name>.azurewebsites.net`. Flex Consumption apps answer only on a regional hostname (`<name>-<hash>.<region>-01.azurewebsites.net`), so the bare form returned HTTP 000 and failed the health check even when the deploy itself succeeded. `az functionapp show` is deliberately avoided here — it returns null for `defaultHostName`/`state`/`hostNames` on Flex Consumption apps (a CLI quirk); `az resource show` reads the property straight from ARM and is correct for both Flex and classic plans. Falls back to the constructed form (with a warning) when the lookup is unavailable. Applies to both the production-URL and post-swap-URL resolution.
 
 ### Removed
 

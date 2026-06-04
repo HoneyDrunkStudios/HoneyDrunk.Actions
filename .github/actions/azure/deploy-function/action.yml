@@ -62,13 +62,18 @@ runs:
         # "<name>.azurewebsites.net" form. Flex Consumption function apps answer
         # ONLY on a regional hostname ("<name>-<hash>.<region>-01.azurewebsites.net"),
         # so the bare form returns no response (HTTP 000) and fails the health
-        # check even when the deploy succeeded. defaultHostName is correct for both
-        # Flex and classic plans.
+        # check even when the deploy succeeded.
+        #
+        # NOTE: use `az resource show` (generic ARM), NOT `az functionapp show` —
+        # the latter returns null for defaultHostName/state/hostNames on Flex
+        # Consumption apps (a CLI quirk), which would silently trigger the fallback.
+        # `az resource show` reads the property straight from ARM and is correct for
+        # both Flex and classic plans.
         if [ "$SLOT" == "production" ] || [ -z "$SLOT" ]; then
-          HOST=$(az functionapp show --resource-group "$RG" --name "$APP_NAME" --query defaultHostName -o tsv 2>/dev/null || true)
+          HOST=$(az resource show --resource-group "$RG" --name "$APP_NAME" --resource-type Microsoft.Web/sites --query properties.defaultHostName -o tsv 2>/dev/null || true)
           FALLBACK="${APP_NAME}.azurewebsites.net"
         else
-          HOST=$(az functionapp show --resource-group "$RG" --name "$APP_NAME" --slot "$SLOT" --query defaultHostName -o tsv 2>/dev/null || true)
+          HOST=$(az resource show --resource-group "$RG" --namespace Microsoft.Web --parent "sites/$APP_NAME" --resource-type slots --name "$SLOT" --query properties.defaultHostName -o tsv 2>/dev/null || true)
           FALLBACK="${APP_NAME}-${SLOT}.azurewebsites.net"
         fi
 
@@ -79,7 +84,7 @@ runs:
           # that fallback is NOT a configured hostname, so a health check against
           # it will false-negative. Accurate resolution requires Azure CLI auth.
           HOST="$FALLBACK"
-          echo "::warning::Could not resolve defaultHostName for ${APP_NAME} via 'az functionapp show' (is the Azure CLI authenticated?). Falling back to ${HOST} — this is NOT a configured hostname for Flex Consumption apps, so a health check against it may false-negative."
+          echo "::warning::Could not resolve defaultHostName for ${APP_NAME} via 'az resource show' (is the Azure CLI authenticated?). Falling back to ${HOST} — this is NOT a configured hostname for Flex Consumption apps, so a health check against it may false-negative."
         fi
         echo "url=https://${HOST}" >> "$GITHUB_OUTPUT"
 
@@ -148,11 +153,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Resolve the production hostname from Azure (see "Resolve deployed URL").
-        HOST=$(az functionapp show --resource-group "${{ inputs.resource-group }}" --name "${{ inputs.app-name }}" --query defaultHostName -o tsv 2>/dev/null || true)
+        # Resolve the production hostname from Azure (see "Resolve deployed URL"):
+        # `az resource show`, not `az functionapp show` (null on Flex Consumption).
+        HOST=$(az resource show --resource-group "${{ inputs.resource-group }}" --name "${{ inputs.app-name }}" --resource-type Microsoft.Web/sites --query properties.defaultHostName -o tsv 2>/dev/null || true)
         if [ -z "$HOST" ]; then
           HOST="${{ inputs.app-name }}.azurewebsites.net"
-          echo "::warning::Could not resolve defaultHostName for ${{ inputs.app-name }} via 'az functionapp show'; falling back to ${HOST}, which may not route for Flex Consumption apps."
+          echo "::warning::Could not resolve defaultHostName for ${{ inputs.app-name }} via 'az resource show'; falling back to ${HOST}, which may not route for Flex Consumption apps."
         fi
         echo "url=https://${HOST}" >> "$GITHUB_OUTPUT"
 
