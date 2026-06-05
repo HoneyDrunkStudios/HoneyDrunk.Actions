@@ -251,7 +251,7 @@ jobs:
           attempt=1
           max=2
           while true; do
-            if az functionapp deployment source config-zip \
+            if timeout 600 az functionapp deployment source config-zip \
                  --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" "${SLOT_ARGS[@]}" \
                  --src "$PKG" --output none; then
               echo "Deployed '$PKG' to '$APP_NAME' ${SLOT_ARGS[*]:-(production)}"
