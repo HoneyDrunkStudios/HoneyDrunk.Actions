@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Deploy to Azure Function App'
-description: 'Deploy a published .NET project to Azure Function App with optional slot swap support'
+description: 'Deploy a published .NET project to Azure Function App with optional slot swap support. Requires a Linux runner (uses zip + coreutils timeout + az CLI).'
 inputs:
   app-name:
     description: 'Azure Function App name'
@@ -41,13 +41,66 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Deploy function app to slot
+    - name: Deploy function app
       id: deploy
-      uses: azure/functions-action@v1
-      with:
-        app-name: ${{ inputs.app-name }}
-        slot-name: ${{ inputs.slot-name == 'production' && '' || inputs.slot-name }}
-        package: ${{ inputs.package-path }}
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app-name }}
+        RESOURCE_GROUP: ${{ inputs.resource-group }}
+        SLOT: ${{ inputs.slot-name }}
+        PACKAGE_PATH: ${{ inputs.package-path }}
+      run: |
+        set -euo pipefail
+
+        # This step requires a Linux runner (`zip` + coreutils `timeout`). Function App
+        # targets (Flex Consumption / classic Linux) are Linux and the Grid deploys on
+        # ubuntu runners; fail fast with a clear message rather than breaking opaquely if
+        # pointed at a Windows/macOS runner via the caller's `runs-on`.
+        if ! command -v zip >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+          echo "::error::deploy-function requires a Linux runner with 'zip' and coreutils 'timeout'. Set runs-on to a ubuntu-* runner."
+          exit 1
+        fi
+
+        # Deploy with the Azure CLI directly rather than a marketplace action
+        # (invariant 38: reusable workflows invoke tool CLIs directly when a stable CLI
+        # exists; azure/functions-action wraps `az functionapp ... config-zip`). This also
+        # removes the external dependency that broke all Function deploys when GitHub
+        # ToS-blocked the Azure/functions-action repo (2026-06-05).
+        #
+        # `config-zip` is the one-deploy path for Flex Consumption and zip-deploy for
+        # classic plans. package-path is the downloaded publish directory; zip it
+        # (including hidden dirs like .azurefunctions, required for Flex) into a .zip.
+        PKG="$PACKAGE_PATH"
+        if [ -d "$PKG" ]; then
+          ZIP="${RUNNER_TEMP:-/tmp}/functionapp-deploy.zip"
+          rm -f "$ZIP"
+          ( cd "$PKG" && zip -r -q "$ZIP" . )
+          PKG="$ZIP"
+        fi
+
+        SLOT_ARGS=()
+        if [ "$SLOT" != "production" ] && [ -n "$SLOT" ]; then
+          SLOT_ARGS=(--slot "$SLOT")
+        fi
+
+        # Retry once for transient post-upload status-poll blips.
+        attempt=1
+        max=2
+        while true; do
+          if timeout 600 az functionapp deployment source config-zip \
+               --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" "${SLOT_ARGS[@]}" \
+               --src "$PKG" --output none; then
+            echo "Deployed '$PKG' to '$APP_NAME' ${SLOT_ARGS[*]:-(production)}"
+            break
+          fi
+          if [ "$attempt" -ge "$max" ]; then
+            echo "::error::az functionapp deployment source config-zip failed after ${attempt} attempt(s)"
+            exit 1
+          fi
+          echo "::warning::Deploy attempt ${attempt} failed; retrying in 15s..."
+          attempt=$((attempt + 1))
+          sleep 15
+        done
 
     - name: Resolve deployed URL
       id: resolve-url
