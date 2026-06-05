@@ -18,7 +18,6 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | actions/setup-python | v5 | none | Current | none | Pins Python 3.12 for `job-discord-notify.yml`'s redaction helper and the `discord_notify` unit tests in `actions-ci.yml` (ADR-0084 D9). |
 | actions/upload-artifact | v6 | none | Current | none | Bumped to default Node 24 successor for ADR-0012 packet 09. |
 | anthropics/claude-code-action | v1 | unknown | Current | none | none |
-| azure/functions-action | v1 | none | Current | none | Valid Node 24 action pin; removed invalid v2 inventory entry. |
 | azure/login | v3 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | azure/webapps-deploy | v3 | unknown | Current | none | none |
 | docker/login-action | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
