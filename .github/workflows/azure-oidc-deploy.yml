@@ -85,7 +85,7 @@ on:
         type: string
         default: ''
       runs-on:
-        description: 'GitHub runner to use'
+        description: 'GitHub runner to use. Function App (app-kind=functionapp) deploys require a Linux runner (zip + coreutils timeout).'
         required: false
         type: string
         default: 'ubuntu-latest'
@@ -230,6 +230,13 @@ jobs:
           PACKAGE_PATH: ${{ inputs.artifact-path }}
         run: |
           set -euo pipefail
+
+          # Function App deploy requires a Linux runner (`zip` + coreutils `timeout`).
+          # Fail fast with a clear message if a caller points `runs-on` at Windows/macOS.
+          if ! command -v zip >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+            echo "::error::Function App deploy requires a Linux runner with 'zip' and coreutils 'timeout'. Set runs-on to a ubuntu-* runner."
+            exit 1
+          fi
 
           # Deploy via the Azure CLI directly (invariant 38; avoids the ToS-blocked
           # azure/functions-action). config-zip is one-deploy for Flex Consumption and

@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Deploy to Azure Function App'
-description: 'Deploy a published .NET project to Azure Function App with optional slot swap support'
+description: 'Deploy a published .NET project to Azure Function App with optional slot swap support. Requires a Linux runner (uses zip + coreutils timeout + az CLI).'
 inputs:
   app-name:
     description: 'Azure Function App name'
@@ -51,6 +51,15 @@ runs:
         PACKAGE_PATH: ${{ inputs.package-path }}
       run: |
         set -euo pipefail
+
+        # This step requires a Linux runner (`zip` + coreutils `timeout`). Function App
+        # targets (Flex Consumption / classic Linux) are Linux and the Grid deploys on
+        # ubuntu runners; fail fast with a clear message rather than breaking opaquely if
+        # pointed at a Windows/macOS runner via the caller's `runs-on`.
+        if ! command -v zip >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+          echo "::error::deploy-function requires a Linux runner with 'zip' and coreutils 'timeout'. Set runs-on to a ubuntu-* runner."
+          exit 1
+        fi
 
         # Deploy with the Azure CLI directly rather than a marketplace action
         # (invariant 38: reusable workflows invoke tool CLIs directly when a stable CLI
