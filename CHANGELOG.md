@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- `job-deploy-bicep.yml`: new reusable (`workflow_call`) deploy workflow for the ADR-0077 Bicep pipeline (supersedes the never-shipped packet 06 design). Applies a template from `HoneyDrunk.Infrastructure` via `az deployment {group|sub} create` with OIDC federation (`azure/login@v3`, `id-token: write`; no `AZURE_CREDENTIALS` secret). Inputs: `env`, `template-path`, `parameters-path`, `deployment-scope` (resourceGroup|subscription), `resource-group`, `location`, plus the three `azure-*` OIDC ids. Runs `bicep build` + `bicep lint` + `az deployment ... what-if` as preflight before apply. Modules resolve by **local relative path** — no `az acr login`, no `br:` refs, no `acrhdbicep` (registry dropped by the 2026-06-02 amendment). `.bicepparam` files deploy via `--parameters` alone (no `--template-file`, which the CLI rejects alongside a `.bicepparam`). Scope-pure: the caller declares the ADR-0033 `environment:` gate and the invariant-39 `permissions:` superset.
+- `job-bicep-lint.yml`: new reusable (`workflow_call`) workflow implementing the ADR-0077 D3 Bicep linter gate. Diff-scopes changed `.bicep` / `.bicepparam` files (base resolved from `base-ref` → `pull_request.base.sha` → `merge_group.base_sha`), runs `az bicep lint --diagnostics-format sarif` on templates and `az bicep build-params` on parameter files, and fails the PR on any error-severity finding or build-params failure (warnings opt-in via `fail-on-warnings`). Fast-skips with exit 0 when a PR touches no Bicep. `permissions: contents: read` only — no Azure auth. Opt-in by inclusion; the canonical consumer is `HoneyDrunk.Infrastructure`'s `pr.yml`. See `docs/consumer-usage.md` → "Bicep Lint Workflow". (ADR-0077 packet 07; not wired into the shared `pr-core.yml` because, post the 2026-06-02 consolidation amendment, all Bicep content lives in `HoneyDrunk.Infrastructure`, not Actions.)
+
 ### Changed
 
 - Recorded the ADR-0086 local-worker Grid review rollout and aligned the Grid review caller permissions with the reusable workflow contract.

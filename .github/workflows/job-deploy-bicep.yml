@@ -1,0 +1,261 @@
+# ==============================================================================
+# Deploy Bicep Job
+# ==============================================================================
+# Purpose:
+#   Apply a Bicep template from HoneyDrunk.Infrastructure to Azure, per ADR-0077
+#   D4 (as amended 2026-06-02). Runs a bicep build + lint + what-if preflight,
+#   then `az deployment {group|sub} create`. The deploy *pipeline* lives in
+#   HoneyDrunk.Actions per ADR-0012; the Bicep *content* lives in
+#   HoneyDrunk.Infrastructure and is checked out by the caller.
+#
+# Single Responsibility:
+#   Deploy one Bicep template for one environment. Scope-pure.
+#
+# Module resolution:
+#   LOCAL RELATIVE PATH ONLY. Modules (modules/{concern}/{name}.bicep) are
+#   co-located with their consumers in the HoneyDrunk.Infrastructure checkout,
+#   so `bicep build` resolves them from the filesystem. There is NO Bicep
+#   registry, NO `az acr login`, NO `br:acrhdbicep.azurecr.io/...` resolution —
+#   the cross-repo module registry was dropped by the ADR-0077 amendment.
+#
+# Parameter files:
+#   `parameters-path` is a .bicepparam file whose `using` directive points at
+#   the template. Azure CLI deploys it with `--parameters <file>.bicepparam`
+#   and NO `--template-file` (passing both errors with "Only a .bicep file is
+#   allowed with a .bicepparam file"). `template-path` is used for the
+#   build/lint preflight only.
+#
+# Caller responsibilities (NOT handled here — this workflow is scope-pure):
+#   - Declare the `environment:` approval gate (ADR-0033) on the calling job.
+#   - Declare a `permissions:` superset of this workflow's needs (invariant 39):
+#       id-token: write   (OIDC federation)
+#       contents: read    (checkout)
+#   - Provide the OIDC federated identity inputs (azure-client-id / -tenant-id /
+#     -subscription-id). The deploy identity provisions resources; it does NOT
+#     read secret values (invariant 8 / ADR-0077 D7).
+# ==============================================================================
+
+name: Deploy Bicep (Job)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: 'Target environment (dev, staging, prod). Used for the deployment name and logging.'
+        required: true
+        type: string
+
+      template-path:
+        description: 'Path to the Bicep template (relative to the caller checkout), e.g. nodes/identity/main.bicep. Used for the build/lint preflight.'
+        required: true
+        type: string
+
+      parameters-path:
+        description: 'Path to the .bicepparam file (relative to the caller checkout), e.g. nodes/identity/parameters.dev.bicepparam. Drives what-if + apply via its `using` directive.'
+        required: true
+        type: string
+
+      deployment-scope:
+        description: 'Deployment scope: resourceGroup or subscription.'
+        required: false
+        type: string
+        default: 'resourceGroup'
+
+      resource-group:
+        description: 'Target resource group. Required when deployment-scope is resourceGroup.'
+        required: false
+        type: string
+        default: ''
+
+      location:
+        description: 'Azure region for deployment metadata. Required when deployment-scope is subscription.'
+        required: false
+        type: string
+        default: ''
+
+      azure-client-id:
+        description: 'Azure AD application (client) ID for OIDC federation.'
+        required: true
+        type: string
+
+      azure-tenant-id:
+        description: 'Azure AD tenant ID for OIDC federation.'
+        required: true
+        type: string
+
+      azure-subscription-id:
+        description: 'Azure subscription ID for OIDC federation.'
+        required: true
+        type: string
+
+    outputs:
+      deployment-name:
+        description: 'The name of the deployment that was created.'
+        value: ${{ jobs.deploy-bicep.outputs.deployment-name }}
+      outputs-json:
+        description: 'The deployment outputs as a JSON object.'
+        value: ${{ jobs.deploy-bicep.outputs.outputs-json }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-bicep:
+    name: Deploy Bicep
+    runs-on: ubuntu-latest
+    outputs:
+      deployment-name: ${{ steps.apply.outputs.deployment-name }}
+      outputs-json: ${{ steps.apply.outputs.outputs-json }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate inputs
+        id: validate
+        shell: bash
+        env:
+          SCOPE: ${{ inputs.deployment-scope }}
+          RG: ${{ inputs.resource-group }}
+          LOCATION: ${{ inputs.location }}
+          TEMPLATE: ${{ inputs.template-path }}
+          PARAMS: ${{ inputs.parameters-path }}
+        run: |
+          set -euo pipefail
+
+          case "$SCOPE" in
+            resourceGroup)
+              if [ -z "$RG" ]; then
+                echo "::error::deployment-scope is 'resourceGroup' but 'resource-group' input is empty."
+                exit 1
+              fi
+              ;;
+            subscription)
+              if [ -z "$LOCATION" ]; then
+                echo "::error::deployment-scope is 'subscription' but 'location' input is empty."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::deployment-scope must be 'resourceGroup' or 'subscription' (got '$SCOPE')."
+              exit 1
+              ;;
+          esac
+
+          if [ ! -f "$TEMPLATE" ]; then
+            echo "::error::Template not found at '$TEMPLATE' (relative to the caller checkout)."
+            exit 1
+          fi
+          if [ ! -f "$PARAMS" ]; then
+            echo "::error::Parameters file not found at '$PARAMS' (relative to the caller checkout)."
+            exit 1
+          fi
+          echo "Template:   $TEMPLATE"
+          echo "Parameters: $PARAMS"
+          echo "Scope:      $SCOPE"
+
+      - name: Install Bicep CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          az bicep install
+          az bicep version
+
+      - name: Preflight - bicep build + lint
+        shell: bash
+        env:
+          TEMPLATE: ${{ inputs.template-path }}
+        run: |
+          set -euo pipefail
+          # build compiles the template and resolves local-path modules from the
+          # checkout — a hard gate on compile errors. No registry restore needed.
+          echo "::group::bicep build (compile + local-module resolution)"
+          az bicep build --file "$TEMPLATE" --stdout > /dev/null
+          echo "::endgroup::"
+          # lint surfaces D3 naming/tagging + secret-hygiene findings from the
+          # infra repo's root bicepconfig.json. Informational here; the hard
+          # lint gate is the PR-time job-bicep-lint.yml.
+          echo "::group::bicep lint"
+          az bicep lint --file "$TEMPLATE" || true
+          echo "::endgroup::"
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
+      - name: What-if preflight
+        shell: bash
+        env:
+          SCOPE: ${{ inputs.deployment-scope }}
+          RG: ${{ inputs.resource-group }}
+          LOCATION: ${{ inputs.location }}
+          PARAMS: ${{ inputs.parameters-path }}
+          ENV: ${{ inputs.env }}
+        run: |
+          set -euo pipefail
+          # NOTE: with a .bicepparam file, pass ONLY --parameters (the `using`
+          # directive resolves the template). Adding --template-file errors with
+          # "Only a .bicep file is allowed with a .bicepparam file."
+          echo "::group::az deployment what-if"
+          if [ "$SCOPE" = "resourceGroup" ]; then
+            az deployment group what-if \
+              --resource-group "$RG" \
+              --parameters "$PARAMS"
+          else
+            az deployment sub what-if \
+              --location "$LOCATION" \
+              --parameters "$PARAMS"
+          fi
+          echo "::endgroup::"
+
+      - name: Apply deployment
+        id: apply
+        shell: bash
+        env:
+          SCOPE: ${{ inputs.deployment-scope }}
+          RG: ${{ inputs.resource-group }}
+          LOCATION: ${{ inputs.location }}
+          PARAMS: ${{ inputs.parameters-path }}
+          ENV: ${{ inputs.env }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          DEPLOY_NAME="hd-infra-${ENV}-${RUN_ID}-${RUN_ATTEMPT}"
+          echo "Deployment name: $DEPLOY_NAME"
+
+          if [ "$SCOPE" = "resourceGroup" ]; then
+            OUTPUTS=$(az deployment group create \
+              --name "$DEPLOY_NAME" \
+              --resource-group "$RG" \
+              --parameters "$PARAMS" \
+              --query 'properties.outputs' -o json)
+          else
+            OUTPUTS=$(az deployment sub create \
+              --name "$DEPLOY_NAME" \
+              --location "$LOCATION" \
+              --parameters "$PARAMS" \
+              --query 'properties.outputs' -o json)
+          fi
+
+          echo "deployment-name=$DEPLOY_NAME" >> "$GITHUB_OUTPUT"
+          # Emit outputs as a compact single-line JSON for the workflow output.
+          COMPACT=$(printf '%s' "$OUTPUTS" | tr -d '\n' | tr -s ' ')
+          echo "outputs-json=$COMPACT" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Bicep Deployment"
+            echo ""
+            echo "- Environment: \`${ENV}\`"
+            echo "- Scope: \`${SCOPE}\`"
+            echo "- Deployment: \`${DEPLOY_NAME}\`"
+            echo ""
+            echo "Outputs:"
+            echo '```json'
+            printf '%s\n' "$OUTPUTS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

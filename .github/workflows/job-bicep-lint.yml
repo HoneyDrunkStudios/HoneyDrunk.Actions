@@ -1,0 +1,276 @@
+# ==============================================================================
+# Bicep Lint Job
+# ==============================================================================
+# Purpose:
+#   Enforce ADR-0077 D3's Bicep linter gate at PR time. Runs `az bicep lint`
+#   against every changed .bicep file and `az bicep build-params` against every
+#   changed .bicepparam file, then fails the PR on any error-severity linter
+#   finding or any build-params validation error.
+#
+# Single Responsibility:
+#   Bicep validation only — diff-scoped lint + parameter-file build. The naming
+#   and tagging rules themselves live in the consuming repo's bicepconfig.json
+#   (resolved by Bicep's filesystem search); this job just runs the CLI and
+#   adjudicates pass/fail from the SARIF output.
+#
+# Non-goals:
+#   - Deploying Bicep (see job-deploy-bicep.yml).
+#   - Azure authentication — lint runs on source files only, no cloud access.
+#
+# Consumed by:
+#   HoneyDrunk.Infrastructure's pr.yml (where all Bicep content lives per the
+#   ADR-0077 2026-06-02 amendment). Any other repo with Bicep templates can opt
+#   in via the same one-job block — see docs/consumer-usage.md.
+#
+# Behavior:
+#   - Fast skip (exit 0) when the PR touches no .bicep / .bicepparam files.
+#   - `bicep lint` runs on .bicep ONLY (the CLI rejects .bicepparam); .bicepparam
+#     files are validated with `bicep build-params`.
+#   - Fail on error-severity findings; warnings fail only when fail-on-warnings.
+# ==============================================================================
+
+name: Bicep Lint (Job)
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: 'Comma-separated glob patterns to consider. Defaults to all Bicep files in the repo.'
+        required: false
+        type: string
+        default: '**/*.bicep,**/*.bicepparam'
+
+      fail-on-warnings:
+        description: 'Treat warning-severity findings as failures. Default false; tighten per-repo later.'
+        required: false
+        type: boolean
+        default: false
+
+      base-ref:
+        description: >-
+          Optional explicit diff base ref/SHA. When unset, falls back to
+          github.event.pull_request.base.sha then github.event.merge_group.base_sha.
+          Required when the calling workflow_call context does not expose a PR base
+          (e.g. manual dispatch, non-PR triggers).
+        required: false
+        type: string
+        default: ''
+
+      # Accepted but unused — callers that pass actions-ref / runs-on to their
+      # other jobs can include them here without a validation error.
+      actions-ref:
+        description: 'Unused. Accepted for caller compatibility.'
+        required: false
+        type: string
+        default: ''
+      runs-on:
+        description: 'Unused. Bicep lint always runs on ubuntu-latest.'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+    outputs:
+      has-warnings:
+        description: 'Whether any warning-severity findings were detected'
+        value: ${{ jobs.bicep-lint.outputs.has-warnings }}
+      warning-messages:
+        description: 'Short summary of findings'
+        value: ${{ jobs.bicep-lint.outputs.warning-messages }}
+
+permissions:
+  contents: read
+
+jobs:
+  bicep-lint:
+    name: Bicep Lint
+    runs-on: ubuntu-latest
+    outputs:
+      has-warnings: ${{ steps.lint.outputs.has-warnings }}
+      warning-messages: ${{ steps.lint.outputs.warning-messages }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve changed Bicep files
+        id: changed
+        shell: bash
+        env:
+          INPUT_BASE_REF: ${{ inputs.base-ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PATHS: ${{ inputs.paths }}
+        run: |
+          set -euo pipefail
+
+          # --- Resolve the diff base (ADR-0077 packet 07 resolution order) ---
+          if [ -n "$INPUT_BASE_REF" ]; then
+            BASE="$INPUT_BASE_REF"
+          elif [ -n "$PR_BASE_SHA" ]; then
+            BASE="$PR_BASE_SHA"
+          elif [ -n "$MERGE_BASE_SHA" ]; then
+            BASE="$MERGE_BASE_SHA"
+          else
+            echo "::error::Could not resolve a diff base. Pass 'base-ref' explicitly when calling this workflow from a non-PR trigger (manual dispatch, scheduled run, release tag)."
+            exit 1
+          fi
+          echo "Diff base: $BASE"
+          echo "Diff head: $HEAD_SHA"
+
+          # Defensively fetch base + head so the diff is reachable even on a
+          # shallow / merge-ref checkout (mirrors pr-core.yml's pattern).
+          git fetch --no-tags --quiet origin "$BASE" "$HEAD_SHA" 2>/dev/null || true
+
+          # --- Translate the comma-separated glob list into git pathspecs ---
+          # Git pathspecs already match across directories, so `**/` is stripped:
+          #   '**/*.bicep' -> '*.bicep' (matches at any depth).
+          PATHSPECS=()
+          IFS=',' read -ra PATTERNS <<< "$PATHS"
+          for p in "${PATTERNS[@]}"; do
+            p="$(echo "$p" | xargs)"            # trim whitespace
+            [ -z "$p" ] && continue
+            PATHSPECS+=("${p//\*\*\//}")
+          done
+          [ ${#PATHSPECS[@]} -eq 0 ] && PATHSPECS=('*.bicep' '*.bicepparam')
+
+          # --- Compute changed files (three-dot: changes introduced by the PR) ---
+          CHANGED="$(git diff --name-only "${BASE}...${HEAD_SHA}" -- "${PATHSPECS[@]}" || true)"
+
+          : > bicep_files.txt
+          : > bicepparam_files.txt
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ -f "$f" ] || continue            # skip deletions
+            case "$f" in
+              *.bicep)      echo "$f" >> bicep_files.txt ;;
+              *.bicepparam) echo "$f" >> bicepparam_files.txt ;;
+            esac
+          done <<< "$CHANGED"
+
+          N_BICEP=$(grep -c . bicep_files.txt || true)
+          N_PARAM=$(grep -c . bicepparam_files.txt || true)
+          echo "Changed .bicep files: $N_BICEP"
+          echo "Changed .bicepparam files: $N_PARAM"
+
+          if [ "$N_BICEP" -eq 0 ] && [ "$N_PARAM" -eq 0 ]; then
+            echo "no Bicep files changed"
+            echo "has-bicep=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-bicep=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Bicep CLI
+        if: steps.changed.outputs.has-bicep == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # az bicep install is idempotent; ensures the latest Bicep on the runner.
+          az bicep install
+          az bicep version
+
+      - name: Lint and validate
+        id: lint
+        if: steps.changed.outputs.has-bicep == 'true'
+        shell: bash
+        env:
+          FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        run: |
+          set -euo pipefail
+          mkdir -p .bicep-lint
+          python3 <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          fail_on_warnings = os.environ.get('FAIL_ON_WARNINGS', 'false') == 'true'
+
+          def read_list(name):
+              p = Path(name)
+              if not p.exists():
+                  return []
+              return [ln for ln in p.read_text(encoding='utf-8').splitlines() if ln.strip()]
+
+          bicep_files = read_list('bicep_files.txt')
+          param_files = read_list('bicepparam_files.txt')
+
+          findings = []   # (file, source, level, rule, message)
+          errors = 0
+          warnings = 0
+
+          def run(cmd):
+              return subprocess.run(cmd, capture_output=True, text=True)
+
+          # --- Lint each .bicep file (SARIF), adjudicate from the SARIF, not the
+          #     exit code (bicep lint can exit 0 while reporting findings). ---
+          for i, f in enumerate(bicep_files):
+              sarif_path = Path('.bicep-lint') / f'lint-{i}.sarif'
+              proc = run(['az', 'bicep', 'lint', '--file', f, '--diagnostics-format', 'sarif'])
+              sarif_path.write_text(proc.stdout or '', encoding='utf-8')
+              parsed = None
+              try:
+                  parsed = json.loads(proc.stdout) if proc.stdout.strip() else {}
+              except json.JSONDecodeError:
+                  parsed = None
+              if parsed is None:
+                  # No parseable SARIF. If the CLI itself failed, surface it as an error.
+                  if proc.returncode != 0:
+                      msg = (proc.stderr or 'bicep lint failed').strip().splitlines()
+                      findings.append((f, 'lint', 'error', 'cli', msg[-1] if msg else 'bicep lint failed'))
+                      errors += 1
+                  continue
+              for run_obj in parsed.get('runs', []):
+                  for res in run_obj.get('results', []):
+                      level = (res.get('level') or 'warning').lower()
+                      rule = res.get('ruleId') or res.get('rule', {}).get('id') or '(rule)'
+                      message = (res.get('message', {}) or {}).get('text', '').strip()
+                      if level == 'error':
+                          errors += 1
+                      elif level == 'warning':
+                          warnings += 1
+                      findings.append((f, 'lint', level, rule, message))
+
+          # --- Build-params each .bicepparam file; non-zero exit == failure. ---
+          for f in param_files:
+              proc = run(['az', 'bicep', 'build-params', '--file', f, '--stdout'])
+              if proc.returncode != 0:
+                  msg = (proc.stderr or proc.stdout or 'build-params failed').strip().splitlines()
+                  findings.append((f, 'build-params', 'error', 'build-params', msg[-1] if msg else 'build-params failed'))
+                  errors += 1
+
+          # --- Step summary table ---
+          summary = Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a', encoding='utf-8') as s:
+              s.write('## Bicep Lint\n\n')
+              s.write(f'- `.bicep` files linted: **{len(bicep_files)}**\n')
+              s.write(f'- `.bicepparam` files validated: **{len(param_files)}**\n')
+              s.write(f'- Errors: **{errors}** · Warnings: **{warnings}**\n\n')
+              if findings:
+                  s.write('| File | Source | Severity | Rule | Message |\n')
+                  s.write('|------|--------|----------|------|---------|\n')
+                  for f, src, level, rule, message in findings:
+                      msg = message.replace('|', '\\|')
+                      s.write(f'| `{f}` | {src} | {level} | `{rule}` | {msg} |\n')
+              else:
+                  s.write('No findings. ✅\n')
+
+          out = Path(os.environ['GITHUB_OUTPUT'])
+          with out.open('a', encoding='utf-8') as o:
+              o.write(f'has-warnings={"true" if warnings else "false"}\n')
+              o.write(f'warning-messages={warnings} Bicep warning(s), {errors} error(s)\n')
+
+          # --- Verdict ---
+          if errors:
+              print(f'::error::Bicep validation failed: {errors} error-severity finding(s).')
+              raise SystemExit(1)
+          if fail_on_warnings and warnings:
+              print(f'::error::Bicep validation failed: {warnings} warning(s) with fail-on-warnings=true.')
+              raise SystemExit(1)
+          print(f'Bicep validation passed ({warnings} warning(s), 0 blocking).')
+          PY
+
+      - name: No Bicep files changed
+        if: steps.changed.outputs.has-bicep != 'true'
+        shell: bash
+        run: echo "✅ No .bicep / .bicepparam files changed in this PR — Bicep lint skipped."
