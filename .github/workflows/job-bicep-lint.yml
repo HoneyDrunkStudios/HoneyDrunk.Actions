@@ -56,6 +56,12 @@ on:
         type: string
         default: ''
 
+      bicep-version:
+        description: 'Bicep CLI version to install (e.g. v0.37.4). Defaults to latest. Pin for deterministic CI.'
+        required: false
+        type: string
+        default: 'latest'
+
       # Accepted but unused — callers that pass actions-ref / runs-on to their
       # other jobs can include them here without a validation error.
       actions-ref:
@@ -93,6 +99,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve changed Bicep files
         id: changed
@@ -137,7 +144,12 @@ jobs:
           [ ${#PATHSPECS[@]} -eq 0 ] && PATHSPECS=('*.bicep' '*.bicepparam')
 
           # --- Compute changed files (three-dot: changes introduced by the PR) ---
-          CHANGED="$(git diff --name-only "${BASE}...${HEAD_SHA}" -- "${PATHSPECS[@]}" || true)"
+          # Fail closed: a diff-resolution failure must NOT masquerade as
+          # "no Bicep files changed" and silently skip the gate.
+          if ! CHANGED="$(git diff --name-only "${BASE}...${HEAD_SHA}" -- "${PATHSPECS[@]}")"; then
+            echo "::error::git diff failed for '${BASE}...${HEAD_SHA}'. Cannot determine changed Bicep files; failing closed. On a non-PR trigger, pass an explicit, fetchable 'base-ref'."
+            exit 1
+          fi
 
           : > bicep_files.txt
           : > bicepparam_files.txt
@@ -165,10 +177,16 @@ jobs:
       - name: Install Bicep CLI
         if: steps.changed.outputs.has-bicep == 'true'
         shell: bash
+        env:
+          BICEP_VERSION: ${{ inputs.bicep-version }}
         run: |
           set -euo pipefail
-          # az bicep install is idempotent; ensures the latest Bicep on the runner.
-          az bicep install
+          # Pin when a version is supplied (deterministic CI); else install latest.
+          if [ -n "$BICEP_VERSION" ] && [ "$BICEP_VERSION" != "latest" ]; then
+            az bicep install --version "$BICEP_VERSION"
+          else
+            az bicep install
+          fi
           az bicep version
 
       - name: Lint and validate

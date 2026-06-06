@@ -88,6 +88,12 @@ on:
         required: true
         type: string
 
+      bicep-version:
+        description: 'Bicep CLI version to install (e.g. v0.37.4). Defaults to latest. Pin for deterministic CI.'
+        required: false
+        type: string
+        default: 'latest'
+
     outputs:
       deployment-name:
         description: 'The name of the deployment that was created.'
@@ -111,6 +117,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Validate inputs
         id: validate
@@ -157,9 +165,16 @@ jobs:
 
       - name: Install Bicep CLI
         shell: bash
+        env:
+          BICEP_VERSION: ${{ inputs.bicep-version }}
         run: |
           set -euo pipefail
-          az bicep install
+          # Pin when a version is supplied (deterministic CI); else install latest.
+          if [ -n "$BICEP_VERSION" ] && [ "$BICEP_VERSION" != "latest" ]; then
+            az bicep install --version "$BICEP_VERSION"
+          else
+            az bicep install
+          fi
           az bicep version
 
       - name: Preflight - bicep build + lint
@@ -243,8 +258,10 @@ jobs:
           fi
 
           echo "deployment-name=$DEPLOY_NAME" >> "$GITHUB_OUTPUT"
-          # Emit outputs as a compact single-line JSON for the workflow output.
-          COMPACT=$(printf '%s' "$OUTPUTS" | tr -d '\n' | tr -s ' ')
+          # Emit outputs as compact single-line JSON. Use jq (JSON-aware): a
+          # naive `tr -s ' '` would collapse spaces inside string values and
+          # corrupt the payload.
+          COMPACT=$(printf '%s' "$OUTPUTS" | jq -c .)
           echo "outputs-json=$COMPACT" >> "$GITHUB_OUTPUT"
 
           {

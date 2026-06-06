@@ -327,7 +327,8 @@ That single block is the whole opt-in. On a `pull_request` event the workflow re
 |-------|---------|-------------|
 | `paths` | `**/*.bicep,**/*.bicepparam` | Comma-separated glob patterns to consider. |
 | `fail-on-warnings` | `false` | Treat warning-severity findings as failures. Tighten per-repo once the template set is clean. |
-| `base-ref` | `''` | Explicit diff base. **Required** when the calling workflow runs on a non-PR trigger (manual dispatch, scheduled run, release tag), because `github.event.pull_request.base.sha` is absent there. Pass e.g. `base-ref: ${{ github.event.pull_request.base.sha }}` or any ref appropriate to the flow. |
+| `bicep-version` | `latest` | Bicep CLI version to install (e.g. `v0.37.4`). Pin for deterministic CI. |
+| `base-ref` | `''` | Explicit diff base. PR runs can omit it (auto-resolved from `pull_request.base.sha`). **Required** on non-PR triggers (manual dispatch, scheduled run, release tag), where the PR base is absent — pass a branch like `main` or an explicit commit SHA. |
 
 ### Behavior
 
@@ -380,6 +381,7 @@ jobs:
 | `resource-group` | when scope=`resourceGroup` | Target resource group. |
 | `location` | when scope=`subscription` | Region for deployment metadata. |
 | `azure-client-id` / `azure-tenant-id` / `azure-subscription-id` | yes | OIDC federated identity. The deploy identity provisions resources; it does **not** read secret values (invariant 8 / ADR-0077 D7). |
+| `bicep-version` | no (`latest`) | Bicep CLI version to install (e.g. `v0.37.4`). Pin for deterministic CI. |
 
 ### Behavior and contract
 
