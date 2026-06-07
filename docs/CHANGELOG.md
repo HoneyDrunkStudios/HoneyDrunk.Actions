@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `job-review-request.yml`: restored the Grid review request permission contract to `pull-requests: write` plus `issues: write`. The earlier read-only PR scope regressed HoneyHub queueing: the reusable job received `pull-requests: read` and failed with `Resource not accessible by integration` while normalizing labels/comments. Consumer docs now match the known-good Architecture/HoneyHub behavior.
+
 - `job-sonarcloud.yml`: exclude consumer `.github/workflows/**` wrapper YAML from SonarQube Cloud source analysis by default. The wrapper workflows intentionally call first-party reusable workflows from `HoneyDrunk.Actions@main` so repos receive centralized workflow fixes; SonarCloud reports those new wrapper calls as Security Hotspots even though the executable workflow logic is governed in this repo. Consumers can override the new `sonar-exclusions` input when they intentionally want Sonar to scan workflow YAML.
 
 - `actions/dotnet/test`: repaired the coverage-runsettings heredoc emitted by the composite action and added the supported `no-restore` input that `job-dotnet-publish-artifact.yml` already passes. The heredoc terminator now reaches Bash at column 1, so test jobs no longer exit before `dotnet test` can produce results and coverage.
@@ -34,10 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `job-node-workspace.yml`, `job-rust-workspace.yml`, `job-node-dependency-report.yml`, `job-rust-dependency-report.yml`, `job-node-security-audit.yml`, and `job-rust-security-audit.yml`: added first-class reusable TypeScript/JavaScript and Rust workflow lanes. The workspace jobs cover fast PR validation (`npm ci`/build/test/lint and Cargo fmt/build/test/clippy). The dependency and security jobs cover focused scheduled report/audit workflows for non-.NET repos without forcing them through the .NET-oriented nightly workflows.
-
-### Fixed
-
-- `job-review-request.yml`: restored the Grid review request permission contract to `pull-requests: write` plus `issues: write`. The earlier read-only PR scope regressed HoneyHub queueing: the reusable job received `pull-requests: read` and failed with `Resource not accessible by integration` while normalizing labels/comments. Consumer docs now match the known-good Architecture/HoneyHub behavior.
 
 - `external-credentials-check.yml`: wired the ADR-0083 credential-rotation escalation to Discord via `job-discord-notify.yml` (ADR-0084 D6 / Phase 1 — the forcing function for ADR-0084). The daily drift check summarizes the credential **names** that crossed each threshold into job outputs and routes them through the canonical seam: T-30 → `#ops-alerts` (medium); T-7 → `#ops-alerts` + `#security-alerts` (high, multi-channel); T+0 → `#security-alerts` (critical). Only names + the timeframe are posted — never values or dates (ADR-0084 D8 / Invariant 8; the redaction pre-check is the backstop). T+0's `#audit-sensitive` mirror from D6 is intentionally **not** emitted here because `DISCORD_WEBHOOK_AUDIT_SENSITIVE` is restricted to Architecture/Vault/Vault.Rotation/Audit and not exposed to this public repo (ADR-0084 D4); the filed SEV-2 incident PR is the durable audit trail. A failure of the scheduled check itself also notifies `#ops-alerts` (scheduled-workflow-failure row, ADR-0084 D6). No ad-hoc `curl` (ADR-0084 D11).
 
