@@ -102,10 +102,10 @@ on:
 
     outputs:
       deployment-name:
-        description: 'The name of the deployment that was created.'
+        description: 'The name of the deployment that was created. Empty string in what-if-only (plan) mode — nothing is deployed.'
         value: ${{ jobs.deploy-bicep.outputs.deployment-name }}
       outputs-json:
-        description: 'The deployment outputs as a JSON object.'
+        description: 'The deployment outputs as a JSON object. `{}` in what-if-only (plan) mode — nothing is deployed.'
         value: ${{ jobs.deploy-bicep.outputs.outputs-json }}
 
 permissions:
@@ -117,8 +117,11 @@ jobs:
     name: Deploy Bicep
     runs-on: ubuntu-latest
     outputs:
-      deployment-name: ${{ steps.apply.outputs.deployment-name }}
-      outputs-json: ${{ steps.apply.outputs.outputs-json }}
+      # In what-if-only (plan) mode the apply step is skipped, so these are unset.
+      # Fall back to stable plan-mode defaults: empty deployment name and `{}`
+      # (valid empty JSON, so a consumer's fromJson() never chokes on "").
+      deployment-name: ${{ steps.apply.outputs.deployment-name || '' }}
+      outputs-json: ${{ steps.apply.outputs.outputs-json || '{}' }}
 
     steps:
       - name: Checkout repository
