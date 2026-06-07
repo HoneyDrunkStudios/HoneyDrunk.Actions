@@ -294,6 +294,6 @@ jobs:
             echo "This was a \`what-if\` dry run. Review the diff in the **What-if preflight** step above —"
             echo "confirm existing resources show as **no change** (not Modify/Delete) before applying."
             echo ""
-            echo "To apply, re-run with the apply mode."
+            echo "To apply, re-run with \`what-if-only: false\` (in HoneyDrunk.Infrastructure's deploy, set **mode = apply**)."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice::Plan-only run complete — no changes applied. Review the what-if, then re-run in apply mode."
+          echo "::notice::Plan-only run complete — no changes applied. Review the what-if, then re-run with what-if-only=false (mode=apply) to deploy."
