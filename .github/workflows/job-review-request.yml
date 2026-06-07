@@ -68,7 +68,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
   issues: write
 
 jobs:
@@ -213,8 +213,34 @@ jobs:
               authorship_class = 'unknown'
               authorship_source = 'missing'
 
-          packet_url_match = re.search(r'https://github\.com/HoneyDrunkStudios/[^\s)]+/issues/\d+', body)
-          packet_path_match = re.search(r'generated/issue-packets/[^\s)`]+\.md', body)
+          def meaningful(value: str) -> bool:
+              value = (value or '').strip()
+              if not value:
+                  return False
+              normalized = re.sub(r'[*_`\s]+', ' ', value).strip().lower()
+              placeholders = {
+                  '-', 'n/a', 'na', 'none', 'todo', 'tbd', 'not applicable',
+                  'n/a (required for agent/mixed prs unless out-of-band reason is set)',
+              }
+              return normalized not in placeholders and not normalized.startswith('n/a (')
+
+          packet_field_match = re.search(
+              r'(?im)^\s*(?:Issue\s+)?Packet\s*:\s*([^\r\n]+)$',
+              body,
+          )
+          packet_field_value = (
+              packet_field_match.group(1).strip()
+              if packet_field_match and meaningful(packet_field_match.group(1))
+              else ''
+          )
+          packet_url_match = (
+              re.search(r'https://github\.com/HoneyDrunkStudios/[^\s)]+/issues/\d+', packet_field_value)
+              if packet_field_value else None
+          )
+          packet_path_match = (
+              re.search(r'generated/issue-packets/[^\s)`]+\.md', packet_field_value, re.IGNORECASE)
+              if packet_field_value else None
+          )
           adr_matches = sorted(set(re.findall(r'ADR-\d{4}', body + '\n' + config_text)))
 
           owner, name = repo['full_name'].split('/', 1)
@@ -322,10 +348,12 @@ jobs:
           }
 
           pr = event['pull_request']
+          repo = event['repository']
           title = pr.get('title') or ''
           body = pr.get('body') or ''
+          repo_name = repo.get('name', '')
           paths = [item['filename'] for item in files]
-          text = '\n'.join([title, body, *paths]).lower()
+          text = '\n'.join([repo_name, title, body, *paths]).lower()
           candidates = []
 
           def add(label):
@@ -338,6 +366,10 @@ jobs:
           adr_numbers = sorted(set(re.findall(r'adr[-_/ ]?0*(\d{1,4})', text)))
           for number in adr_numbers:
               add(f"adr-{int(number):04d}")
+
+          has_out_of_band_reason = bool(re.search(r'(?im)^\s*Out[- ]of[- ]band reason\s*:\s*\S', body))
+          if has_out_of_band_reason:
+              add('out-of-band')
 
           markdown_paths = [path for path in paths if path.lower().endswith('.md')]
           if markdown_paths and len(markdown_paths) == len(paths):
@@ -360,7 +392,16 @@ jobs:
               add('security')
               add('secrets')
 
-          if re.search(r'\bbugs?\b', text) or re.search(r'\bfix(?:e[sd])?\b', title.lower()):
+          title_lower = title.lower()
+          title_type_match = re.match(r'^\s*([a-z0-9-]+)(?:\([^)]+\))?\s*!?\s*:', title_lower)
+          title_type = title_type_match.group(1) if title_type_match else ''
+
+          if title_type == 'chore':
+              add('chore')
+          elif title_type == 'feat':
+              add('feature')
+              add('enhancement')
+          elif re.search(r'\bbugs?\b', text) or title_type == 'fix' or re.search(r'\bfix(?:e[sd])?\b', title_lower):
               add('bug')
           elif any(word in text for word in ('add ', 'create ', 'introduce ', 'standup', 'stand up', 'enable ', 'accept adr')):
               add('enhancement')
@@ -373,6 +414,7 @@ jobs:
               'cache': ('honeydrunk.cache', 'redis'),
               'core': ('honeydrunk.core',),
               'files': ('honeydrunk.files',),
+              'honeyhub': ('honeydrunk.honeyhub', 'honeyhub'),
               'identity': ('honeydrunk.identity', 'entra'),
               'web-ui': ('honeydrunk.web.ui', 'web.ui'),
           }
