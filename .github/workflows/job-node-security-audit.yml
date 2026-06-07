@@ -54,11 +54,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js from version file
         if: ${{ inputs.node-version-file != '' }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
           cache: ${{ inputs.package-manager }}
@@ -66,7 +68,7 @@ jobs:
 
       - name: Setup Node.js from version input
         if: ${{ inputs.node-version-file == '' }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
@@ -88,10 +90,22 @@ jobs:
           cat security-reports/node-audit.json
           exit "$status"
 
+      - name: Resolve security report path
+        id: report-path
+        if: always()
+        shell: bash
+        env:
+          WORKING_DIR: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          abs="$(realpath -m -- "${GITHUB_WORKSPACE}/${WORKING_DIR}/security-reports/node-audit.json")"
+          rel="$(realpath -m --relative-to="${GITHUB_WORKSPACE}" -- "${abs}")"
+          echo "path=${rel}" >> "$GITHUB_OUTPUT"
+
       - name: Upload security report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: node-security-audit
-          path: ${{ inputs.working-directory }}/security-reports/node-audit.json
+          path: ${{ steps.report-path.outputs.path }}
           retention-days: 90

@@ -79,7 +79,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - name: Validate package manifest
         shell: bash
@@ -90,7 +92,7 @@ jobs:
 
       - name: Setup Node.js from version file
         if: ${{ inputs.node-version-file != '' }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
           cache: ${{ inputs.package-manager }}
@@ -98,7 +100,7 @@ jobs:
 
       - name: Setup Node.js from version input
         if: ${{ inputs.node-version-file == '' }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
