@@ -1,0 +1,88 @@
+name: Rust Dependency Report
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: GitHub runner to use.
+        required: false
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: Working directory for Cargo operations.
+        required: false
+        type: string
+        default: .
+      rust-toolchain:
+        description: Rust toolchain to install.
+        required: false
+        type: string
+        default: stable
+
+permissions:
+  contents: read
+
+jobs:
+  rust-dependency-report:
+    name: Rust Dependency Report
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        env:
+          RUST_TOOLCHAIN: ${{ inputs.rust-toolchain }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RUST_TOOLCHAIN" =~ ^(stable|beta|nightly|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Invalid rust-toolchain input: $RUST_TOOLCHAIN"
+            exit 1
+          fi
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      - name: Cache Cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ inputs.working-directory }}/target
+          key: rust-deps-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.working-directory), format('{0}/**/Cargo.toml', inputs.working-directory)) }}
+          restore-keys: |
+            rust-deps-${{ runner.os }}-
+
+      - name: Generate dependency reports
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          mkdir -p dependency-reports
+          if [ ! -f Cargo.lock ]; then
+            cargo generate-lockfile
+          fi
+          cargo metadata --format-version 1 > dependency-reports/cargo-metadata.json
+          cargo tree --workspace > dependency-reports/cargo-tree.txt
+
+      - name: Resolve dependency report path
+        id: report-path
+        shell: bash
+        env:
+          WORKING_DIR: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          abs="$(realpath -m -- "${GITHUB_WORKSPACE}/${WORKING_DIR}/dependency-reports")"
+          rel="$(realpath -m --relative-to="${GITHUB_WORKSPACE}" -- "${abs}")"
+          echo "path=${rel}/**/*" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dependency report
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: rust-dependency-report
+          path: ${{ steps.report-path.outputs.path }}
+          retention-days: 30

@@ -1,0 +1,115 @@
+name: Rust Security Audit
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: GitHub runner to use.
+        required: false
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: Working directory for Cargo operations.
+        required: false
+        type: string
+        default: .
+      rust-toolchain:
+        description: Rust toolchain to install.
+        required: false
+        type: string
+        default: stable
+      cargo-audit-version:
+        description: cargo-audit version to install, or empty for latest.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  rust-security-audit:
+    name: Rust Security Audit
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        env:
+          RUST_TOOLCHAIN: ${{ inputs.rust-toolchain }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RUST_TOOLCHAIN" =~ ^(stable|beta|nightly|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Invalid rust-toolchain input: $RUST_TOOLCHAIN"
+            exit 1
+          fi
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      - name: Cache Cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ inputs.working-directory }}/target
+          key: rust-security-${{ runner.os }}-${{ inputs.cargo-audit-version || 'latest' }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.working-directory), format('{0}/**/Cargo.toml', inputs.working-directory)) }}
+          restore-keys: |
+            rust-security-${{ runner.os }}-
+
+      - name: Install cargo-audit
+        shell: bash
+        env:
+          CARGO_AUDIT_VERSION: ${{ inputs.cargo-audit-version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CARGO_AUDIT_VERSION" ]; then
+            if [[ ! "$CARGO_AUDIT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid cargo-audit-version input: $CARGO_AUDIT_VERSION"
+              exit 1
+            fi
+            cargo install cargo-audit --locked --force --version "$CARGO_AUDIT_VERSION"
+          elif command -v cargo-audit >/dev/null 2>&1; then
+            cargo audit --version
+          else
+            cargo install cargo-audit --locked
+          fi
+
+      - name: Run cargo audit
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set +e
+          mkdir -p security-reports
+          if [ ! -f Cargo.lock ]; then
+            cargo generate-lockfile
+          fi
+          cargo audit --json > security-reports/cargo-audit.json
+          status=$?
+          cat security-reports/cargo-audit.json
+          exit "$status"
+
+      - name: Resolve security report path
+        id: report-path
+        if: always()
+        shell: bash
+        env:
+          WORKING_DIR: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          abs="$(realpath -m -- "${GITHUB_WORKSPACE}/${WORKING_DIR}/security-reports/cargo-audit.json")"
+          rel="$(realpath -m --relative-to="${GITHUB_WORKSPACE}" -- "${abs}")"
+          echo "path=${rel}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: rust-security-audit
+          path: ${{ steps.report-path.outputs.path }}
+          retention-days: 90

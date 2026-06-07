@@ -18,6 +18,12 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 |---|---|
 | `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
+| `job-node-workspace.yml` | `contents: read` |
+| `job-rust-workspace.yml` | `contents: read` |
+| `job-node-dependency-report.yml` | `contents: read` |
+| `job-rust-dependency-report.yml` | `contents: read` |
+| `job-node-security-audit.yml` | `contents: read` |
+| `job-rust-security-audit.yml` | `contents: read` |
 | `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
 | `job-discord-notify.yml` | none required (`permissions: {}` callee; any caller block is a superset) |
 | `release.yml` | `contents: write`, `packages: write`, `id-token: write`, `security-events: write` |
@@ -38,6 +44,8 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 
 - [Caller permissions — the load-bearing rule](#caller-permissions--the-load-bearing-rule)
 - [PR Core Workflow](#pr-core-workflow)
+- [Node Workspace Job](#node-workspace-job)
+- [Rust Workspace Job](#rust-workspace-job)
 - [Bicep Lint Workflow](#bicep-lint-workflow)
 - [Deploy Bicep Workflow](#deploy-bicep-workflow)
 - [SonarQube Cloud Quality Gate](#sonarqube-cloud-quality-gate)
@@ -74,6 +82,71 @@ jobs:
   pr-validation:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
 ```
+
+## Node Workspace Job
+
+**Purpose:** Fast PR validation for TypeScript/JavaScript repos that own their build, test, and lint scripts.
+
+**When to Use:** React/Vite, Node package, and npm-workspace repos that do not need the .NET-centered `pr-core.yml` pipeline.
+
+### npm Workspace Example
+
+```yaml
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-workspace.yml@main
+    with:
+      node-version-file: .nvmrc
+      install-command: npm ci
+      build-command: npm run build
+      test-command: npm test
+      lint-command: npm run lint
+```
+
+### Permissions
+
+`job-node-workspace.yml` callers need `contents: read` for checkout. The caller owns the trigger and branch rules. Keep check names stable by naming the caller job intentionally, because GitHub branch rules bind to the caller workflow's produced checks, not to this documentation.
+
+## Rust Workspace Job
+
+**Purpose:** Fast PR validation for Cargo workspaces.
+
+**When to Use:** Rust crates and mixed repos that need Cargo build/test/lint lanes.
+
+### Cargo Workspace Example
+
+```yaml
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-rust-workspace.yml@main
+    with:
+      rust-toolchain: stable
+      build-command: cargo build --workspace
+      test-command: cargo test --workspace
+      clippy-command: cargo clippy --workspace --all-targets -- -D warnings
+```
+
+### Permissions
+
+`job-rust-workspace.yml` callers need `contents: read` for checkout. The job installs `rustfmt` and `clippy` through `rustup` and caches Cargo registry/git/target directories with `actions/cache`.
 
 ### ADR-0044 Authorship and PR-Size Discipline
 
@@ -1197,6 +1270,33 @@ permissions:
 
 `nightly-security.yml` callers need `contents: read`, `security-events: write`, and `issues: write`. `security-events: write` uploads SARIF; `issues: write` lets the workflow maintain tracking issues. Missing permissions cause scheduled runs to fail at workflow-load time, which grid-health later classifies as Stale.
 
+### Node and Rust Audit Jobs
+
+For TypeScript/Rust repos that do not need the .NET-oriented nightly security workflow, call the focused reusable audit jobs directly:
+
+```yaml
+name: Nightly Security
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-audit:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-security-audit.yml@main
+    with:
+      node-version-file: .nvmrc
+
+  rust-audit:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-rust-security-audit.yml@main
+```
+
+`job-node-security-audit.yml` and `job-rust-security-audit.yml` callers need `contents: read`. They upload JSON audit artifacts and fail when their underlying audit command reports blocking findings.
+
 
 ## Nightly Dependencies Workflow
 
@@ -1268,6 +1368,33 @@ permissions:
 ### Permissions
 
 `nightly-deps.yml` callers need `contents: write`, `pull-requests: write`, and `issues: write`. Contents and pull-request writes are required when update PR creation is enabled; issues write maintains the dependency tracking issue. Report-only callers may not need every write path at runtime, but the canonical scaffold grants the reusable workflow's full supported surface so toggling `create-update-prs` does not require a permissions edit.
+
+### Node and Rust Report Jobs
+
+For TypeScript/Rust repos that only need report artifacts and do not need update PR automation, call the focused reusable report jobs directly:
+
+```yaml
+name: Nightly Dependencies
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-deps:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-dependency-report.yml@main
+    with:
+      node-version-file: .nvmrc
+
+  rust-deps:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-rust-dependency-report.yml@main
+```
+
+`job-node-dependency-report.yml` and `job-rust-dependency-report.yml` callers need `contents: read`. These jobs upload dependency artifacts only; they do not maintain the grouped dependency issue or create update PRs.
 
 
 ## Nightly Accessibility Workflow
