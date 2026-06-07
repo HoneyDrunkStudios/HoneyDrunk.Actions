@@ -232,9 +232,22 @@ jobs:
           # directive resolves the template). Adding --template-file errors with
           # "Only a .bicep file is allowed with a .bicepparam file."
           # Optional inline overrides ($EXTRA) are appended last so they win over
-          # the file (e.g. bootstrap=true). Unquoted so space-separated pairs split.
+          # the file (e.g. bootstrap=true). Constrained to space-separated
+          # key=value pairs — reject option injection (leading '-') and globbing,
+          # and pass each as its own quoted --parameters arg. `set -f` disables
+          # pathname expansion while we word-split.
           EXTRA_ARGS=()
-          if [ -n "$EXTRA" ]; then EXTRA_ARGS=(--parameters $EXTRA); fi
+          if [ -n "$EXTRA" ]; then
+            set -f
+            for tok in $EXTRA; do
+              if ! printf '%s' "$tok" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+$'; then
+                echo "::error::additional-parameters token '$tok' is not a valid key=value pair."
+                exit 1
+              fi
+              EXTRA_ARGS+=(--parameters "$tok")
+            done
+            set +f
+          fi
           echo "::group::az deployment what-if"
           if [ "$SCOPE" = "resourceGroup" ]; then
             az deployment group what-if \
@@ -266,9 +279,21 @@ jobs:
           echo "Deployment name: $DEPLOY_NAME"
 
           # Optional inline overrides ($EXTRA), appended last so they win over the
-          # .bicepparam file. Unquoted expansion so space-separated pairs split.
+          # .bicepparam file. Constrained to space-separated key=value pairs —
+          # reject option injection (leading '-') and globbing; pass each as its
+          # own quoted --parameters arg. `set -f` disables pathname expansion.
           EXTRA_ARGS=()
-          if [ -n "$EXTRA" ]; then EXTRA_ARGS=(--parameters $EXTRA); fi
+          if [ -n "$EXTRA" ]; then
+            set -f
+            for tok in $EXTRA; do
+              if ! printf '%s' "$tok" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+$'; then
+                echo "::error::additional-parameters token '$tok' is not a valid key=value pair."
+                exit 1
+              fi
+              EXTRA_ARGS+=(--parameters "$tok")
+            done
+            set +f
+          fi
 
           if [ "$SCOPE" = "resourceGroup" ]; then
             OUTPUTS=$(az deployment group create \
