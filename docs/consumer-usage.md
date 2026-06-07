@@ -455,6 +455,8 @@ jobs:
 | `location` | when scope=`subscription` | Region for deployment metadata. |
 | `azure-client-id` / `azure-tenant-id` / `azure-subscription-id` | yes | OIDC federated identity. The deploy identity provisions resources; it does **not** read secret values (invariant 8 / ADR-0077 D7). |
 | `bicep-version` | no (`latest`) | Bicep CLI version to install (e.g. `v0.37.4`). Pin for deterministic CI. |
+| `what-if-only` | no (`false`) | Plan only — run the build/lint + what-if preflight and STOP without applying. Reviewable dry run. |
+| `additional-parameters` | no (`''`) | Inline `key=value` overrides appended after the `.bicepparam` file (space-separated). Applied last, so they win over the file. Use for one-off **non-secret** pass toggles without a second param file — e.g. `bootstrap=true` for the system-MI Container App bootstrap pass (first revision on a public placeholder image so it goes healthy before its AcrPull/Key Vault RBAC exists, then re-deploy with the real private image). **Never pass secret values here** — overrides appear in plaintext in deployment history and CI logs; secret-shaped Bicep params must flow through Key Vault references / secure parameters (D7 / invariant 91). Tokens are validated as `key=value` (no flags/spaces); a bad token fails the deploy with the value redacted. |
 
 ### Behavior and contract
 
