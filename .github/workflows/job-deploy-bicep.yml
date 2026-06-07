@@ -241,7 +241,7 @@ jobs:
             set -f
             for tok in $EXTRA; do
               if ! printf '%s' "$tok" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+$'; then
-                echo "::error::additional-parameters token '$tok' is not a valid key=value pair."
+                echo "::error::additional-parameters contains a token that is not a valid key=value pair (expected key=value, no flags/spaces). Value redacted."
                 exit 1
               fi
               EXTRA_ARGS+=(--parameters "$tok")
@@ -287,7 +287,7 @@ jobs:
             set -f
             for tok in $EXTRA; do
               if ! printf '%s' "$tok" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+$'; then
-                echo "::error::additional-parameters token '$tok' is not a valid key=value pair."
+                echo "::error::additional-parameters contains a token that is not a valid key=value pair (expected key=value, no flags/spaces). Value redacted."
                 exit 1
               fi
               EXTRA_ARGS+=(--parameters "$tok")
