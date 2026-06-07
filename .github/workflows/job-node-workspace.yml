@@ -1,0 +1,128 @@
+name: Node Workspace
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: GitHub runner to use.
+        required: false
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: Working directory for Node operations.
+        required: false
+        type: string
+        default: .
+      node-version:
+        description: Node.js version to install when node-version-file is empty.
+        required: false
+        type: string
+        default: '22'
+      node-version-file:
+        description: Optional path to a Node version file, relative to working-directory.
+        required: false
+        type: string
+        default: ''
+      package-manager:
+        description: Package manager cache mode supported by actions/setup-node.
+        required: false
+        type: string
+        default: npm
+      cache-dependency-path:
+        description: Dependency lockfile path used for setup-node cache.
+        required: false
+        type: string
+        default: package-lock.json
+      install-command:
+        description: Command used to install dependencies.
+        required: false
+        type: string
+        default: npm ci
+      build-command:
+        description: Command used to build the workspace.
+        required: false
+        type: string
+        default: npm run build
+      test-command:
+        description: Command used to test the workspace.
+        required: false
+        type: string
+        default: npm test
+      lint-command:
+        description: Command used to lint or type-check the workspace.
+        required: false
+        type: string
+        default: npm run lint
+      run-build:
+        description: Run the build command.
+        required: false
+        type: boolean
+        default: true
+      run-test:
+        description: Run the test command.
+        required: false
+        type: boolean
+        default: true
+      run-lint:
+        description: Run the lint command.
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  node-workspace:
+    name: Node Workspace
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate package manifest
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          test -f package.json
+
+      - name: Setup Node.js from version file
+        if: ${{ inputs.node-version-file != '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+
+      - name: Setup Node.js from version input
+        if: ${{ inputs.node-version-file == '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.install-command }}
+
+      - name: Build workspace
+        if: ${{ inputs.run-build }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Test workspace
+        if: ${{ inputs.run-test }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.test-command }}
+
+      - name: Lint workspace
+        if: ${{ inputs.run-lint }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.lint-command }}

@@ -1,0 +1,128 @@
+name: Rust Workspace
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: GitHub runner to use.
+        required: false
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: Working directory for Cargo operations.
+        required: false
+        type: string
+        default: .
+      rust-toolchain:
+        description: Rust toolchain to install.
+        required: false
+        type: string
+        default: stable
+      cache-key-prefix:
+        description: Prefix for the Cargo cache key.
+        required: false
+        type: string
+        default: rust
+      fmt-command:
+        description: Command used to check Rust formatting.
+        required: false
+        type: string
+        default: cargo fmt --check
+      build-command:
+        description: Command used to build the Cargo workspace.
+        required: false
+        type: string
+        default: cargo build --workspace
+      test-command:
+        description: Command used to test the Cargo workspace.
+        required: false
+        type: string
+        default: cargo test --workspace
+      clippy-command:
+        description: Command used to lint the Cargo workspace.
+        required: false
+        type: string
+        default: cargo clippy --workspace --all-targets -- -D warnings
+      run-fmt:
+        description: Run the format check command.
+        required: false
+        type: boolean
+        default: true
+      run-build:
+        description: Run the build command.
+        required: false
+        type: boolean
+        default: true
+      run-test:
+        description: Run the test command.
+        required: false
+        type: boolean
+        default: true
+      run-clippy:
+        description: Run the clippy command.
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust-workspace:
+    name: Rust Workspace
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate Cargo manifest
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          test -f Cargo.toml
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "${{ inputs.rust-toolchain }}" --profile minimal --component clippy,rustfmt
+          rustup default "${{ inputs.rust-toolchain }}"
+          rustc --version
+          cargo --version
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ inputs.working-directory }}/target
+          key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.working-directory), format('{0}/**/Cargo.toml', inputs.working-directory)) }}
+          restore-keys: |
+            ${{ inputs.cache-key-prefix }}-${{ runner.os }}-
+
+      - name: Check formatting
+        if: ${{ inputs.run-fmt }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.fmt-command }}
+
+      - name: Build workspace
+        if: ${{ inputs.run-build }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Test workspace
+        if: ${{ inputs.run-test }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.test-command }}
+
+      - name: Lint workspace
+        if: ${{ inputs.run-clippy }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.clippy-command }}

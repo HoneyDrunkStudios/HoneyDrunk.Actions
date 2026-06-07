@@ -11,6 +11,7 @@ HoneyDrunk.Communications: honeydrunk-communications
 HoneyDrunk.Actions: honeydrunk-actions
 HoneyDrunk.Architecture: honeydrunk-architecture
 HoneyDrunk.Infrastructure: honeydrunk-infrastructure
+HoneyDrunk.HoneyHub: honeydrunk-honeyhub
 HoneyDrunk.Standards: honeydrunk-standards
 HoneyDrunkStudios: honeydrunk-studios
 HoneyDrunk.Lore: honeydrunk-lore

@@ -1,0 +1,90 @@
+name: Rust Security Audit
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: GitHub runner to use.
+        required: false
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: Working directory for Cargo operations.
+        required: false
+        type: string
+        default: .
+      rust-toolchain:
+        description: Rust toolchain to install.
+        required: false
+        type: string
+        default: stable
+      cargo-audit-version:
+        description: cargo-audit version to install, or empty for latest.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  rust-security-audit:
+    name: Rust Security Audit
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "${{ inputs.rust-toolchain }}" --profile minimal
+          rustup default "${{ inputs.rust-toolchain }}"
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-audit
+            ${{ inputs.working-directory }}/target
+          key: rust-security-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.working-directory), format('{0}/**/Cargo.toml', inputs.working-directory)) }}
+          restore-keys: |
+            rust-security-${{ runner.os }}-
+
+      - name: Install cargo-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v cargo-audit >/dev/null 2>&1; then
+            cargo audit --version
+          elif [ -n "${{ inputs.cargo-audit-version }}" ]; then
+            cargo install cargo-audit --locked --version "${{ inputs.cargo-audit-version }}"
+          else
+            cargo install cargo-audit --locked
+          fi
+
+      - name: Run cargo audit
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set +e
+          mkdir -p security-reports
+          if [ ! -f Cargo.lock ]; then
+            cargo generate-lockfile
+          fi
+          cargo audit --json > security-reports/cargo-audit.json
+          status=$?
+          cat security-reports/cargo-audit.json
+          exit "$status"
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rust-security-audit
+          path: ${{ inputs.working-directory }}/security-reports/cargo-audit.json
+          retention-days: 90

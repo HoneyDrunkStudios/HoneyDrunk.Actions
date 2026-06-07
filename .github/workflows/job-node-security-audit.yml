@@ -1,0 +1,97 @@
+name: Node Security Audit
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: GitHub runner to use.
+        required: false
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: Working directory for Node operations.
+        required: false
+        type: string
+        default: .
+      node-version:
+        description: Node.js version to install when node-version-file is empty.
+        required: false
+        type: string
+        default: '22'
+      node-version-file:
+        description: Optional path to a Node version file, relative to working-directory.
+        required: false
+        type: string
+        default: ''
+      package-manager:
+        description: Package manager cache mode supported by actions/setup-node.
+        required: false
+        type: string
+        default: npm
+      cache-dependency-path:
+        description: Dependency lockfile path used for setup-node cache.
+        required: false
+        type: string
+        default: package-lock.json
+      install-command:
+        description: Command used to install dependencies before audit.
+        required: false
+        type: string
+        default: npm ci
+      audit-command:
+        description: Command used to audit dependencies.
+        required: false
+        type: string
+        default: npm audit --workspaces --audit-level=high --json
+
+permissions:
+  contents: read
+
+jobs:
+  node-security-audit:
+    name: Node Security Audit
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js from version file
+        if: ${{ inputs.node-version-file != '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+
+      - name: Setup Node.js from version input
+        if: ${{ inputs.node-version-file == '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.install-command }}
+
+      - name: Run npm audit
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set +e
+          mkdir -p security-reports
+          ${{ inputs.audit-command }} > security-reports/node-audit.json
+          status=$?
+          cat security-reports/node-audit.json
+          exit "$status"
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-security-audit
+          path: ${{ inputs.working-directory }}/security-reports/node-audit.json
+          retention-days: 90

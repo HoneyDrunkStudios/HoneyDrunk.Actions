@@ -71,6 +71,12 @@ Single-job reusable workflows for specific tasks:
 | Workflow | Path | Purpose |
 |----------|------|---------|
 | Build and Test | `.github/workflows/templates/jobs/build-and-test.yml` | Complete build + test |
+| Node Workspace | `.github/workflows/job-node-workspace.yml` | npm build/test/lint for TypeScript/JavaScript workspaces |
+| Rust Workspace | `.github/workflows/job-rust-workspace.yml` | Cargo fmt/build/test/clippy for Rust workspaces |
+| Node Dependency Report | `.github/workflows/job-node-dependency-report.yml` | npm outdated report artifact |
+| Rust Dependency Report | `.github/workflows/job-rust-dependency-report.yml` | Cargo metadata/tree report artifact |
+| Node Security Audit | `.github/workflows/job-node-security-audit.yml` | npm audit report and gate |
+| Rust Security Audit | `.github/workflows/job-rust-security-audit.yml` | cargo-audit report and gate |
 | Code Quality | `.github/workflows/templates/jobs/code-quality.yml` | Quality checks |
 | Publish NuGet | `.github/workflows/templates/jobs/publish-nuget.yml` | Package publishing |
 | Deploy Container | `.github/workflows/job-deploy-container.yml` | Deploy container to Azure App Service |
@@ -85,6 +91,17 @@ jobs:
     uses: ./.github/workflows/templates/jobs/build-and-test.yml
     with:
       dotnet-version: '10.0.x'
+```
+
+```yaml
+jobs:
+  node:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-workspace.yml@main
+    with:
+      node-version-file: .nvmrc
+
+  rust:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-rust-workspace.yml@main
 ```
 
 ---
