@@ -100,6 +100,12 @@ on:
         type: boolean
         default: false
 
+      additional-parameters:
+        description: 'Optional inline parameter overrides appended after the .bicepparam file, space-separated `key=value` pairs (e.g. `bootstrap=true`). Azure CLI applies later --parameters last, so these override the file. Used for one-off pass toggles (e.g. the system-MI bootstrap pass) without a separate param file. Empty = none.'
+        required: false
+        type: string
+        default: ''
+
     outputs:
       deployment-name:
         description: 'The name of the deployment that was created. Empty string in what-if-only (plan) mode — nothing is deployed.'
@@ -219,20 +225,25 @@ jobs:
           LOCATION: ${{ inputs.location }}
           PARAMS: ${{ inputs.parameters-path }}
           ENV: ${{ inputs.env }}
+          EXTRA: ${{ inputs.additional-parameters }}
         run: |
           set -euo pipefail
           # NOTE: with a .bicepparam file, pass ONLY --parameters (the `using`
           # directive resolves the template). Adding --template-file errors with
           # "Only a .bicep file is allowed with a .bicepparam file."
+          # Optional inline overrides ($EXTRA) are appended last so they win over
+          # the file (e.g. bootstrap=true). Unquoted so space-separated pairs split.
+          EXTRA_ARGS=()
+          if [ -n "$EXTRA" ]; then EXTRA_ARGS=(--parameters $EXTRA); fi
           echo "::group::az deployment what-if"
           if [ "$SCOPE" = "resourceGroup" ]; then
             az deployment group what-if \
               --resource-group "$RG" \
-              --parameters "$PARAMS"
+              --parameters "$PARAMS" "${EXTRA_ARGS[@]}"
           else
             az deployment sub what-if \
               --location "$LOCATION" \
-              --parameters "$PARAMS"
+              --parameters "$PARAMS" "${EXTRA_ARGS[@]}"
           fi
           echo "::endgroup::"
 
@@ -246,6 +257,7 @@ jobs:
           LOCATION: ${{ inputs.location }}
           PARAMS: ${{ inputs.parameters-path }}
           ENV: ${{ inputs.env }}
+          EXTRA: ${{ inputs.additional-parameters }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -253,17 +265,22 @@ jobs:
           DEPLOY_NAME="hd-infra-${ENV}-${RUN_ID}-${RUN_ATTEMPT}"
           echo "Deployment name: $DEPLOY_NAME"
 
+          # Optional inline overrides ($EXTRA), appended last so they win over the
+          # .bicepparam file. Unquoted expansion so space-separated pairs split.
+          EXTRA_ARGS=()
+          if [ -n "$EXTRA" ]; then EXTRA_ARGS=(--parameters $EXTRA); fi
+
           if [ "$SCOPE" = "resourceGroup" ]; then
             OUTPUTS=$(az deployment group create \
               --name "$DEPLOY_NAME" \
               --resource-group "$RG" \
-              --parameters "$PARAMS" \
+              --parameters "$PARAMS" "${EXTRA_ARGS[@]}" \
               --query 'properties.outputs' -o json)
           else
             OUTPUTS=$(az deployment sub create \
               --name "$DEPLOY_NAME" \
               --location "$LOCATION" \
-              --parameters "$PARAMS" \
+              --parameters "$PARAMS" "${EXTRA_ARGS[@]}" \
               --query 'properties.outputs' -o json)
           fi
 
