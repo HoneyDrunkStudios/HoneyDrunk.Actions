@@ -94,6 +94,12 @@ on:
         type: string
         default: 'latest'
 
+      what-if-only:
+        description: 'Plan only — run the bicep build/lint + what-if preflight and STOP without applying. Use for a reviewable dry run before a real apply.'
+        required: false
+        type: boolean
+        default: false
+
     outputs:
       deployment-name:
         description: 'The name of the deployment that was created.'
@@ -229,6 +235,7 @@ jobs:
 
       - name: Apply deployment
         id: apply
+        if: ${{ inputs.what-if-only != true }}
         shell: bash
         env:
           SCOPE: ${{ inputs.deployment-scope }}
@@ -276,3 +283,17 @@ jobs:
             printf '%s\n' "$OUTPUTS"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Plan-only notice
+        if: ${{ inputs.what-if-only == true }}
+        shell: bash
+        run: |
+          {
+            echo "## Plan only — nothing was applied"
+            echo ""
+            echo "This was a \`what-if\` dry run. Review the diff in the **What-if preflight** step above —"
+            echo "confirm existing resources show as **no change** (not Modify/Delete) before applying."
+            echo ""
+            echo "To apply, re-run with the apply mode."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Plan-only run complete — no changes applied. Review the what-if, then re-run in apply mode."
