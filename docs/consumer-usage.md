@@ -531,7 +531,7 @@ ADR-0088 removed the old OpenClaw webhook compatibility inputs. Callers should p
 
 ### Permissions
 
-`job-review-request.yml` callers need `contents: read`, `pull-requests: write`, and `issues: write`. The write scopes are used for PR metadata, queue labels, and the queue comment; empirical validation on HoneyHub showed `pull-requests: read` can leave the reusable job with a token that cannot normalize PR labels/comments even when `issues: write` is present. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
+`job-review-request.yml` callers need `contents: read`, `pull-requests: write`, and `issues: write`. The workflow reads PR file metadata, then uses the write scopes for queue labels and the queue comment; empirical validation on HoneyHub showed `pull-requests: read` can leave the reusable job with a token that cannot normalize PR labels/comments even when `issues: write` is present. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
 
 ---
 
