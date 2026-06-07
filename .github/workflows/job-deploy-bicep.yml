@@ -94,12 +94,18 @@ on:
         type: string
         default: 'latest'
 
+      what-if-only:
+        description: 'Plan only — run the bicep build/lint + what-if preflight and STOP without applying. Use for a reviewable dry run before a real apply.'
+        required: false
+        type: boolean
+        default: false
+
     outputs:
       deployment-name:
-        description: 'The name of the deployment that was created.'
+        description: 'The name of the deployment that was created. Empty string in what-if-only (plan) mode — nothing is deployed.'
         value: ${{ jobs.deploy-bicep.outputs.deployment-name }}
       outputs-json:
-        description: 'The deployment outputs as a JSON object.'
+        description: 'The deployment outputs as a JSON object. `{}` in what-if-only (plan) mode — nothing is deployed.'
         value: ${{ jobs.deploy-bicep.outputs.outputs-json }}
 
 permissions:
@@ -111,8 +117,11 @@ jobs:
     name: Deploy Bicep
     runs-on: ubuntu-latest
     outputs:
-      deployment-name: ${{ steps.apply.outputs.deployment-name }}
-      outputs-json: ${{ steps.apply.outputs.outputs-json }}
+      # In what-if-only (plan) mode the apply step is skipped, so these are unset.
+      # Fall back to stable plan-mode defaults: empty deployment name and `{}`
+      # (valid empty JSON, so a consumer's fromJson() never chokes on "").
+      deployment-name: ${{ steps.apply.outputs.deployment-name || '' }}
+      outputs-json: ${{ steps.apply.outputs.outputs-json || '{}' }}
 
     steps:
       - name: Checkout repository
@@ -229,6 +238,7 @@ jobs:
 
       - name: Apply deployment
         id: apply
+        if: ${{ inputs.what-if-only != true }}
         shell: bash
         env:
           SCOPE: ${{ inputs.deployment-scope }}
@@ -276,3 +286,17 @@ jobs:
             printf '%s\n' "$OUTPUTS"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Plan-only notice
+        if: ${{ inputs.what-if-only == true }}
+        shell: bash
+        run: |
+          {
+            echo "## Plan only — nothing was applied"
+            echo ""
+            echo "This was a \`what-if\` dry run. Review the diff in the **What-if preflight** step above —"
+            echo "confirm existing resources show as **no change** (not Modify/Delete) before applying."
+            echo ""
+            echo "To apply, re-run with \`what-if-only: false\` (in HoneyDrunk.Infrastructure's deploy, set **mode = apply**)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Plan-only run complete — no changes applied. Review the what-if, then re-run with what-if-only=false (mode=apply) to deploy."
