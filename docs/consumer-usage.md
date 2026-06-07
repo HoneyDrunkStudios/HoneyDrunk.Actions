@@ -24,7 +24,7 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `job-rust-dependency-report.yml` | `contents: read` |
 | `job-node-security-audit.yml` | `contents: read` |
 | `job-rust-security-audit.yml` | `contents: read` |
-| `job-review-request.yml` | `contents: read`, `pull-requests: read`, `issues: write` |
+| `job-review-request.yml` | `contents: read`, `pull-requests: write`, `issues: write` |
 | `job-discord-notify.yml` | none required (`permissions: {}` callee; any caller block is a superset) |
 | `release.yml` | `contents: write`, `packages: write`, `id-token: write`, `security-events: write` |
 | `job-solution-preflight.yml` | `contents: read` |
@@ -486,7 +486,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
   issues: write
 
 jobs:
@@ -531,7 +531,7 @@ ADR-0088 removed the old OpenClaw webhook compatibility inputs. Callers should p
 
 ### Permissions
 
-`job-review-request.yml` callers need `contents: read`, `pull-requests: read`, and `issues: write`. The issue write scope is used for queue labels and the queue comment. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
+`job-review-request.yml` callers need `contents: read`, `pull-requests: write`, and `issues: write`. The write scopes are used for PR metadata, queue labels, and the queue comment; empirical validation on HoneyHub showed `pull-requests: read` can leave the reusable job with a token that cannot normalize PR labels/comments even when `issues: write` is present. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
 
 ---
 
