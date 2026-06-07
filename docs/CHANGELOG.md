@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `job-review-request.yml`: restored the Grid review request permission contract to `pull-requests: write` plus `issues: write`. The earlier read-only PR scope regressed HoneyHub queueing: the reusable job received `pull-requests: read` and failed with `Resource not accessible by integration` while normalizing labels/comments. Consumer docs now match the known-good Architecture/HoneyHub behavior.
+
 - `job-sonarcloud.yml`: exclude consumer `.github/workflows/**` wrapper YAML from SonarQube Cloud source analysis by default. The wrapper workflows intentionally call first-party reusable workflows from `HoneyDrunk.Actions@main` so repos receive centralized workflow fixes; SonarCloud reports those new wrapper calls as Security Hotspots even though the executable workflow logic is governed in this repo. Consumers can override the new `sonar-exclusions` input when they intentionally want Sonar to scan workflow YAML.
 
 - `actions/dotnet/test`: repaired the coverage-runsettings heredoc emitted by the composite action and added the supported `no-restore` input that `job-dotnet-publish-artifact.yml` already passes. The heredoc terminator now reaches Bash at column 1, so test jobs no longer exit before `dotnet test` can produce results and coverage.
