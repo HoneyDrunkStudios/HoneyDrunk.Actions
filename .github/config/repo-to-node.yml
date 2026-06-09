@@ -23,3 +23,4 @@ HoneyDrunk.Capabilities: honeydrunk-capabilities
 HoneyDrunk.Flow: honeydrunk-flow
 HoneyDrunk.Operator: honeydrunk-operator
 HoneyDrunk.Audit: honeydrunk-audit
+HoneyDrunk.Evals: honeydrunk-evals
