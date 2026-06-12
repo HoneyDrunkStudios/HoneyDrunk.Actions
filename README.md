@@ -14,7 +14,7 @@ Central library of reusable GitHub Actions workflows and composite actions for t
 - [Additional Resources](#additional-resources)
 - [HoneyDrunk-Internal Workflows](#honeydrunk-internal-workflows)
 - [Hive Field Mirror](#hive-field-mirror)
-- [Packet Filing](#packet-filing)
+- [Work Item Filing](#work-item-filing)
 - [Discord Operator-Alerts](#discord-operator-alerts)
 - [Adapting this for your own org](#adapting-this-for-your-own-org)
 
@@ -585,7 +585,7 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 
 ## 🍯 HoneyDrunk-Internal Workflows
 
-The workflows below are reusable but **wired to HoneyDrunk-specific conventions** — a named Project v2 ("The Hive"), a `repo-to-node.yml` mapping, and a packet frontmatter schema maintained in `HoneyDrunk.Architecture`. They live in this public repo because they are called from every HoneyDrunk service repo, not because they are portable as-is. Outside consumers will want to fork the pieces they care about — see [Adapting this for your own org](#adapting-this-for-your-own-org) at the end of this section.
+The workflows below are reusable but **wired to HoneyDrunk-specific conventions** — a named Project v2 ("The Hive"), a `repo-to-node.yml` mapping, and a work item frontmatter schema maintained in `HoneyDrunk.Architecture`. They live in this public repo because they are called from every HoneyDrunk service repo, not because they are portable as-is. Outside consumers will want to fork the pieces they care about — see [Adapting this for your own org](#adapting-this-for-your-own-org) at the end of this section.
 
 ## 🐝 Hive Field Mirror
 
@@ -663,29 +663,29 @@ Use `scripts/hive-backfill-issue.sh` to mirror one issue manually:
 HIVE_FIELD_MIRROR_TOKEN=*** ./scripts/hive-backfill-issue.sh --url https://github.com/HoneyDrunkStudios/HoneyDrunk.Actions/issues/123
 ```
 
-## 📬 Packet Filing
+## 📬 Work Item Filing
 
-`file-packets.yml` is a reusable workflow that reads issue packets from `HoneyDrunk.Architecture/generated/issue-packets/active/`, files them as GitHub Issues in their target repos, adds each one to **The Hive** (GitHub Project v2 #4), mirrors custom fields inline, and links declared `dependencies` across issues as `Blocked by` comments.
+`file-work-items.yml` is a reusable workflow that reads work items from `HoneyDrunk.Architecture/generated/work-items/active/`, files them as GitHub Issues in their target repos, adds each one to **The Hive** (GitHub Project v2 #4), mirrors custom fields inline, and links declared `dependencies` across issues as `Blocked by` comments.
 
 ### Behavior
 
-- Idempotent: `generated/issue-packets/filed-packets.json` in the Architecture repo records which packets have been filed. Re-running skips any packet already in the manifest.
+- Idempotent: `generated/work-items/filed-work-items.json` in the Architecture repo records which work items have been filed. Re-running skips any work item already in the manifest.
 - Labels: frontmatter `labels` plus a synthesized `initiative-<slug>` (derived from the `initiative:` field) are applied at creation so the field mirror picks them up.
-- Actor: `actor: Agent` or `actor: Human` in the packet frontmatter is passed to `hive-project-mirror.sh` via `--actor`.
-- Dependencies: after all packets are filed, a second pass posts `Blocked by <url>` comments on each dependent issue. Dependencies are matched by basename against the manifest — dependencies not yet filed log a warning and do not fail the run.
-- Manifest: `filed-packets.json` is committed back to the Architecture repo with `[skip ci]` so the caller does not re-trigger.
+- Actor: `actor: Agent` or `actor: Human` in the work item frontmatter is passed to `hive-project-mirror.sh` via `--actor`.
+- Dependencies: after all work items are filed, a second pass posts `Blocked by <url>` comments on each dependent issue. Dependencies are matched by basename against the manifest — dependencies not yet filed log a warning and do not fail the run.
+- Manifest: `filed-work-items.json` is committed back to the Architecture repo with `[skip ci]` so the caller does not re-trigger.
 
 ### Reusable workflow contract
 
-Workflow: `.github/workflows/file-packets.yml`
+Workflow: `.github/workflows/file-work-items.yml`
 
 Inputs (all optional):
 
 | Input | Default | Purpose |
 | --- | --- | --- |
 | `architecture-ref` | caller's `github.ref_name` | Branch of the Architecture repo to check out. Must be a branch (not a SHA) so the manifest commit can be pushed back. |
-| `packets-dir` | `generated/issue-packets/active` | Path under the Architecture repo to scan for `.md` packets. |
-| `manifest-path` | `generated/issue-packets/filed-packets.json` | Path under the Architecture repo where the manifest lives. |
+| `work-items-dir` | `generated/work-items/active` | Path under the Architecture repo to scan for `.md` work items. |
+| `manifest-path` | `generated/work-items/filed-work-items.json` | Path under the Architecture repo where the manifest lives. |
 | `project-owner` | `HoneyDrunkStudios` | Project v2 owner. |
 | `project-number` | `4` | Project v2 number (The Hive). |
 | `architecture-repo` | `HoneyDrunkStudios/HoneyDrunk.Architecture` | `owner/name` of the Architecture repo. |
@@ -697,41 +697,41 @@ Secret:
 
 ### Enable in the Architecture repo
 
-Add `.github/workflows/file-packets.yml`:
+Add `.github/workflows/file-work-items.yml`:
 
 ```yaml
-name: File Issue Packets
+name: File Work Items
 
 on:
   push:
     branches: [main]
     paths:
-      - 'generated/issue-packets/active/**/*.md'
+      - 'generated/work-items/active/**/*.md'
   workflow_dispatch: {}
 
 jobs:
   file:
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/file-packets.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/file-work-items.yml@main
     secrets:
       hive-field-mirror-token: ${{ secrets.HIVE_FIELD_MIRROR_TOKEN }}
 ```
 
 ### Local invocation
 
-`scripts/file-packets.sh` can run outside CI for dry-testing or recovery. It expects to run from a checkout of `HoneyDrunk.Actions` (for the mapping file and mirror script) and needs both the Architecture checkout and valid tokens:
+`scripts/file-work-items.sh` can run outside CI for dry-testing or recovery. It expects to run from a checkout of `HoneyDrunk.Actions` (for the mapping file and mirror script) and needs both the Architecture checkout and valid tokens:
 
 ```bash
 export GH_TOKEN=***                 # issues:write on target repos
 export HIVE_FIELD_MIRROR_TOKEN=***  # project + contents writes
 
-./scripts/file-packets.sh \
-  --packets-dir /path/to/HoneyDrunk.Architecture/generated/issue-packets/active \
-  --manifest   /path/to/HoneyDrunk.Architecture/generated/issue-packets/filed-packets.json
+./scripts/file-work-items.sh \
+  --work-items-dir /path/to/HoneyDrunk.Architecture/generated/work-items/active \
+  --manifest   /path/to/HoneyDrunk.Architecture/generated/work-items/filed-work-items.json
 ```
 
 Flags:
 
-- `--skip-link-deps` — file packets but skip the `Blocked by` comment pass.
+- `--skip-link-deps` — file work items but skip the `Blocked by` comment pass.
 - `--project-owner`, `--project-number` — override The Hive target.
 - `--architecture-repo` — override the `owner/name` embedded in issue body headers.
 - `--mapping-file` — override the `repo-to-node.yml` path used by the field mirror.
@@ -796,13 +796,13 @@ The two internal workflows are small enough to fork. If you want the same "label
 2. In `scripts/hive-project-mirror.sh`, change the per-field logic (`WAVE_LABEL`, `TIER_LABEL`, etc.) to read the labels you care about and write them to the field IDs on your project. The GraphQL mutations (`addProjectV2ItemById`, `updateProjectV2ItemFieldValue`) are generic and do not need changes.
 3. Replace `.github/config/repo-to-node.yml` with a mapping from your repo names to your own "node"/"team"/"area" option values.
 
-### Replace the packet convention (only if you want packet filing)
+### Replace the work item convention
 
 If you just want label mirroring, you can stop at step 1–3 above. For automatic issue creation from planning docs:
 
-4. Decide on a frontmatter schema for your planning docs. The HoneyDrunk schema is `target_repo`, `labels`, `initiative`, `actor`, `dependencies`, `adrs` — but the parser in `scripts/file-packets.sh` (the `parse_packet` function) is ~30 lines of Python and trivial to retarget.
-5. Pick a directory convention for active-vs-archived packets (HoneyDrunk uses `generated/issue-packets/active/` and `generated/issue-packets/archive/`) and a manifest path for idempotency tracking.
-6. Point the reusable workflow at your planning repo via the `architecture-repo`, `packets-dir`, and `manifest-path` inputs.
+4. Decide on a frontmatter schema for your planning docs. The HoneyDrunk schema is `target_repo`, `labels`, `initiative`, `actor`, `dependencies`, `adrs` — but the parser in `scripts/file-work-items.sh` (the `parse_work_item` function) is ~30 lines of Python and trivial to retarget.
+5. Pick a directory convention for active-vs-archived work items (HoneyDrunk uses `generated/work-items/active/` and `generated/work-items/archive/`) and a manifest path for idempotency tracking.
+6. Point the reusable workflow at your planning repo via the `architecture-repo`, `work-items-dir`, and `manifest-path` inputs.
 
 ### Token scopes
 

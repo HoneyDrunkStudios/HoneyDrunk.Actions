@@ -224,22 +224,22 @@ jobs:
               }
               return normalized not in placeholders and not normalized.startswith('n/a (')
 
-          packet_field_match = re.search(
-              r'(?im)^\s*(?:Issue\s+)?Packet\s*:\s*([^\r\n]+)$',
+          work_item_field_match = re.search(
+              r'(?im)^\s*Work\s+Item\s*:\s*([^\r\n]+)$',
               body,
           )
-          packet_field_value = (
-              packet_field_match.group(1).strip()
-              if packet_field_match and meaningful(packet_field_match.group(1))
+          work_item_field_value = (
+              work_item_field_match.group(1).strip()
+              if work_item_field_match and meaningful(work_item_field_match.group(1))
               else ''
           )
-          packet_url_match = (
-              re.search(r'https://github\.com/HoneyDrunkStudios/[^\s)]+/issues/\d+', packet_field_value)
-              if packet_field_value else None
+          work_item_url_match = (
+              re.search(r'https://github\.com/HoneyDrunkStudios/[^\s)]+/issues/\d+', work_item_field_value)
+              if work_item_field_value else None
           )
-          packet_path_match = (
-              re.search(r'generated/issue-packets/[^\s)`]+\.md', packet_field_value, re.IGNORECASE)
-              if packet_field_value else None
+          work_item_path_match = (
+              re.search(r'generated/work-items/[^\s)`]+\.md', work_item_field_value, re.IGNORECASE)
+              if work_item_field_value else None
           )
           adr_matches = sorted(set(re.findall(r'ADR-\d{4}', body + '\n' + config_text)))
 
@@ -281,8 +281,8 @@ jobs:
                   'files': file_names,
               },
               'context': {
-                  'packetUrl': packet_url_match.group(0) if packet_url_match else None,
-                  'packetPath': packet_path_match.group(0) if packet_path_match else None,
+                  'workItemUrl': work_item_url_match.group(0) if work_item_url_match else None,
+                  'workItemPath': work_item_path_match.group(0) if work_item_path_match else None,
                   'adrs': adr_matches,
                   'node': None,
               },

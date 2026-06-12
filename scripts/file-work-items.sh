@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PACKETS_DIR=""
+WORK_ITEMS_DIR=""
 MANIFEST=""
 PROJECT_OWNER="HoneyDrunkStudios"
 PROJECT_NUMBER="4"
@@ -12,14 +12,14 @@ ARCHITECTURE_REPO="HoneyDrunkStudios/HoneyDrunk.Architecture"
 
 usage() {
   cat <<'USAGE'
-Usage: file-packets.sh --packets-dir <dir> --manifest <file> [options]
+Usage: file-work-items.sh --work-items-dir <dir> --manifest <file> [options]
 
-Files issue packets from HoneyDrunk.Architecture as GitHub Issues, adds them
+Files work items from HoneyDrunk.Architecture as GitHub Issues, adds them
 to The Hive, mirrors custom fields, and links declared dependencies.
 
 Required:
-  --packets-dir <dir>         Directory containing active packet .md files.
-  --manifest <file>           Path to filed-packets.json manifest (created if absent).
+  --work-items-dir <dir>         Directory containing active work item .md files.
+  --manifest <file>           Path to filed-work-items.json manifest (created if absent).
 
 Options:
   --project-owner <owner>     The Hive project owner (default: HoneyDrunkStudios).
@@ -38,7 +38,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --packets-dir) PACKETS_DIR="$2"; shift 2 ;;
+    --work-items-dir) WORK_ITEMS_DIR="$2"; shift 2 ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --project-owner) PROJECT_OWNER="$2"; shift 2 ;;
     --project-number) PROJECT_NUMBER="$2"; shift 2 ;;
@@ -51,16 +51,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$PACKETS_DIR" ]]; then
-  echo "--packets-dir is required" >&2
+if [[ -z "$WORK_ITEMS_DIR" ]]; then
+  echo "--work-items-dir is required" >&2
   exit 1
 fi
 if [[ -z "$MANIFEST" ]]; then
   echo "--manifest is required" >&2
   exit 1
 fi
-if [[ ! -d "$PACKETS_DIR" ]]; then
-  echo "Packets directory not found: $PACKETS_DIR" >&2
+if [[ ! -d "$WORK_ITEMS_DIR" ]]; then
+  echo "Work items directory not found: $WORK_ITEMS_DIR" >&2
   exit 1
 fi
 if [[ ! -f "$MAPPING_FILE" ]]; then
@@ -79,8 +79,8 @@ for bin in gh jq python3 git; do
   fi
 done
 
-PACKETS_DIR_ABS="$(cd "$PACKETS_DIR" && pwd)"
-REPO_ROOT="$(git -C "$PACKETS_DIR_ABS" rev-parse --show-toplevel)"
+WORK_ITEMS_DIR_ABS="$(cd "$WORK_ITEMS_DIR" && pwd)"
+REPO_ROOT="$(git -C "$WORK_ITEMS_DIR_ABS" rev-parse --show-toplevel)"
 
 mkdir -p "$(dirname "$MANIFEST")"
 if [[ ! -f "$MANIFEST" ]]; then
@@ -136,9 +136,9 @@ gh_retry() {
 
 # Extract frontmatter + body + title as a tab-separated JSON blob.
 # Emits one line: <json>\n where json has: title, body, target_repo, labels[], initiative, actor, dependencies[], adrs[]
-parse_packet() {
-  local packet_file="$1"
-  python3 - "$packet_file" <<'PY'
+parse_work_item() {
+  local work_item_file="$1"
+  python3 - "$work_item_file" <<'PY'
 import json, re, sys
 try:
     import yaml
@@ -218,7 +218,7 @@ manifest_set() {
 
 # Resolve a `dependencies:` frontmatter entry to an issue URL. Two forms:
 #
-#   "packet:NN"          — another packet in the SAME initiative folder, looked
+#   "work-item:NN"          — another work item in the SAME initiative folder, looked
 #                          up via the manifest. NN is the two-digit ordinal
 #                          prefix (or NN+letter, e.g. "07a").
 #   "{owner}/{repo}#N"   — direct issue reference. Owner defaults to
@@ -230,12 +230,12 @@ manifest_set() {
 # treat an empty return as a hard failure to log.
 resolve_dep_url() {
   local dep="$1"
-  local current_packet_rel="$2"
+  local current_work_item_rel="$2"
 
-  if [[ "$dep" =~ ^packet:([0-9]+[a-zA-Z]?)$ ]]; then
+  if [[ "$dep" =~ ^work-item:([0-9]+[a-zA-Z]?)$ ]]; then
     local prefix="${BASH_REMATCH[1]}"
     local current_dir
-    current_dir="$(dirname "$current_packet_rel")"
+    current_dir="$(dirname "$current_work_item_rel")"
     jq -r --arg dir "$current_dir" --arg prefix "$prefix" '
       to_entries
       | map(select(
@@ -293,17 +293,17 @@ get_issue_node_id() {
   printf '%s' "$node_id"
 }
 
-# Collected summary rows: "packet\turl\tblockers"
+# Collected summary rows: "work-item\turl\tblockers"
 SUMMARY_ROWS=()
-# Packets filed during THIS run. The dependency-linking pass walks every
-# packet in the manifest (idempotent across runs) but only newly-filed
-# packets get their blocker list reflected back into SUMMARY_ROWS.
-declare -A NEW_PACKETS=()
+# Work items filed during THIS run. The dependency-linking pass walks every
+# work item in the manifest (idempotent across runs) but only newly-filed
+# work items get their blocker list reflected back into SUMMARY_ROWS.
+declare -A NEW_WORK_ITEMS=()
 
-# Repo-existence cache — avoids one `gh repo view` per packet for the same
+# Repo-existence cache — avoids one `gh repo view` per work item for the same
 # target repo. Values: "1" = exists, "0" = confirmed 404 / no access.
 # Transient failures (rate limit, network, 5xx) are NOT cached and propagate
-# so the run fails fast rather than silently skipping every subsequent packet.
+# so the run fails fast rather than silently skipping every subsequent work item.
 declare -A REPO_EXISTS=()
 
 repo_exists() {
@@ -334,14 +334,14 @@ repo_exists() {
     REPO_EXISTS[$repo]=0
     return 1
   fi
-  # Plain stderr, not ::error::, because $repo (packet frontmatter) and
+  # Plain stderr, not ::error::, because $repo (work item frontmatter) and
   # $stderr_content (gh output) are untrusted and could contain workflow-command
   # syntax that would otherwise inject into the runner log stream.
   echo "gh repo view failed for $repo with non-404 error: $stderr_content" >&2
   exit 1
 }
 
-# Label cache — avoids one `gh label view` call per (packet, label). First
+# Label cache — avoids one `gh label view` call per (work item, label). First
 # encounter of a target repo lists its labels once; subsequent checks are
 # in-memory. `LABELS_LISTED[repo]=1` marks a repo as fetched.
 # `LABELS_KNOWN[repo|name]=1` marks a label as present on that repo.
@@ -350,12 +350,12 @@ declare -A LABELS_KNOWN=()
 
 # GitHub caps label names at 50 characters; a longer name fails label
 # creation with HTTP 422. Labels are clamped to this length before use
-# (see the packet loop) so an over-long initiative slug degrades to a
+# (see the work item loop) so an over-long initiative slug degrades to a
 # truncated label instead of aborting the whole run.
 GITHUB_LABEL_MAX=50
 # GitHub issue bodies are capped at 65,536 characters. Leave headroom for the
-# generated packet note and truncation footer so createIssue never fails after
-# partially filing earlier packets in the run.
+# generated work item note and truncation footer so createIssue never fails after
+# partially filing earlier work items in the run.
 GITHUB_ISSUE_BODY_MAX=65000
 
 ensure_label() {
@@ -369,7 +369,7 @@ ensure_label() {
     LABELS_LISTED["$repo"]=1
   fi
   if [[ -z "${LABELS_KNOWN[$repo|$name]:-}" ]]; then
-    gh_retry label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-packets"
+    gh_retry label create "$name" --repo "$repo" --color "ededed" --description "Auto-created by file-work-items"
     LABELS_KNOWN["$repo|$name"]=1
   fi
 }
@@ -390,14 +390,14 @@ HIVE_PROJECT_METADATA_JSON="$(jq -n \
   '{project: $project, fields: $fields}')"
 export HIVE_PROJECT_METADATA_JSON
 
-echo "Scanning packets under: $PACKETS_DIR_ABS"
-for packet in "$PACKETS_DIR_ABS"/**/*.md; do
+echo "Scanning work items under: $WORK_ITEMS_DIR_ABS"
+for packet in "$WORK_ITEMS_DIR_ABS"/**/*.md; do
   [[ -f "$packet" ]] || continue
   rel="${packet#"$REPO_ROOT/"}"
 
   case "$(basename "$packet")" in
     dispatch-plan.md|handoff-*.md|README.md)
-      echo "skip  $rel -> coordination doc (not a packet)"
+      echo "skip  $rel -> coordination doc (not a work item)"
       continue
       ;;
   esac
@@ -408,36 +408,36 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
     continue
   fi
 
-  packet_json="$(parse_packet "$packet")"
-  has_frontmatter="$(jq -r '.has_frontmatter' <<<"$packet_json")"
+  work_item_json="$(parse_work_item "$packet")"
+  has_frontmatter="$(jq -r '.has_frontmatter' <<<"$work_item_json")"
 
   # Files without YAML frontmatter are coordination docs (dispatch-plan.md,
-  # READMEs, notes), not packets. Skip quietly so non-packet markdown can live
-  # alongside packets in the same directory.
+  # READMEs, notes), not work items. Skip quietly so non-work-item markdown can
+  # live alongside work items in the same directory.
   if [[ "$has_frontmatter" != "true" ]]; then
-    echo "skip  $rel -> no frontmatter (not a packet)"
+    echo "skip  $rel -> no frontmatter (not a work item)"
     continue
   fi
 
-  title="$(jq -r '.title' <<<"$packet_json")"
-  body_content="$(jq -r '.body' <<<"$packet_json")"
-  target_repo="$(jq -r '.target_repo' <<<"$packet_json")"
-  initiative="$(jq -r '.initiative' <<<"$packet_json")"
-  actor="$(jq -r '.actor' <<<"$packet_json")"
-  mapfile -t labels < <(jq -r '.labels[]?' <<<"$packet_json")
-  mapfile -t adrs < <(jq -r '.adrs[]?' <<<"$packet_json")
+  title="$(jq -r '.title' <<<"$work_item_json")"
+  body_content="$(jq -r '.body' <<<"$work_item_json")"
+  target_repo="$(jq -r '.target_repo' <<<"$work_item_json")"
+  initiative="$(jq -r '.initiative' <<<"$work_item_json")"
+  actor="$(jq -r '.actor' <<<"$work_item_json")"
+  mapfile -t labels < <(jq -r '.labels[]?' <<<"$work_item_json")
+  mapfile -t adrs < <(jq -r '.adrs[]?' <<<"$work_item_json")
 
   if [[ -z "$target_repo" ]]; then
-    echo "::error::Packet $rel is missing target_repo"
+    echo "::error::Work item $rel is missing target_repo"
     exit 1
   fi
   if [[ -z "$title" ]]; then
-    echo "::error::Packet $rel has no h1 title"
+    echo "::error::Work item $rel has no h1 title"
     exit 1
   fi
 
-  # Target repo must exist and be accessible. A packet that names a future /
-  # not-yet-created repo is a legitimate state (standup packets land before
+  # Target repo must exist and be accessible. A work item that names a future /
+  # not-yet-created repo is a legitimate state (standup work items land before
   # their repos do). Skip with a plain log line instead of erroring the whole
   # run. Plain echo (not ::warning::) matches the existing skip-log style and
   # avoids interpolating untrusted values into a workflow command.
@@ -460,7 +460,7 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   fi
 
   adr_text="$(IFS=', '; echo "${adrs[*]:-}")"
-  note_line="Packet: \`${rel}\`"
+  note_line="Work Item: \`${rel}\`"
   if [[ -n "$adr_text" ]]; then
     note_line+=" · ADRs: ${adr_text}"
   fi
@@ -471,7 +471,7 @@ for packet in "$PACKETS_DIR_ABS"/**/*.md; do
   body_file="$(mktemp)"
   {
     printf '> [!NOTE]\n'
-    printf '> Filed from issue packet in [HoneyDrunk.Architecture](https://github.com/%s).\n' "$ARCHITECTURE_REPO"
+    printf '> Filed from work item in [HoneyDrunk.Architecture](https://github.com/%s).\n' "$ARCHITECTURE_REPO"
     printf '> %s\n\n' "$note_line"
     printf '%s\n' "$body_content"
   } > "$body_file"
@@ -485,8 +485,8 @@ source, target, limit_raw, rel = sys.argv[1:5]
 limit = int(limit_raw)
 footer = (
     "\n\n---\n\n"
-    "_This issue body was truncated by the packet filing workflow because GitHub issue bodies "
-    "are limited to 65,536 characters. Read the complete packet in the Architecture repo at "
+    "_This issue body was truncated by the work item filing workflow because GitHub issue bodies "
+    "are limited to 65,536 characters. Read the complete work item in the Architecture repo at "
     f"`{rel}`._\n"
 )
 with open(source, encoding="utf-8") as f:
@@ -497,14 +497,14 @@ with open(target, "w", encoding="utf-8") as f:
     f.write(footer)
 PY
     mv "$truncated_file" "$body_file"
-    echo "warning: truncated issue body for $rel from ${body_chars} chars to <= ${GITHUB_ISSUE_BODY_MAX}; full packet remains in Architecture"
+    echo "warning: truncated issue body for $rel from ${body_chars} chars to <= ${GITHUB_ISSUE_BODY_MAX}; full work item remains in Architecture"
   fi
 
   label_args=()
   for l in "${all_labels[@]}"; do
     [[ -z "$l" ]] && continue
     if (( ${#l} > GITHUB_LABEL_MAX )); then
-      # Plain echo, not ::warning:: — interpolating packet-derived values
+      # Plain echo, not ::warning:: — interpolating work-item-derived values
       # into a workflow command is an injection vector, same reason the
       # skip-log lines above avoid workflow commands.
       echo "warning: label '${l}' (${#l} chars) exceeds GitHub's ${GITHUB_LABEL_MAX}-char limit; truncating. Shorten the initiative slug for ${rel}."
@@ -537,12 +537,12 @@ PY
   "$MIRROR_SCRIPT" "${mirror_args[@]}"
 
   manifest_set "$rel" "$issue_url"
-  NEW_PACKETS["$rel"]=1
+  NEW_WORK_ITEMS["$rel"]=1
   SUMMARY_ROWS+=("${rel}"$'\t'"${issue_url}"$'\t')
 done
 
-# Dependency-linking pass — runs over every packet in the manifest, not just
-# packets filed during the current run, so a partial-failure run can recover
+# Dependency-linking pass — runs over every work item in the manifest, not just
+# work items filed during the current run, so a partial-failure run can recover
 # its missing blocking edges on a re-run. Idempotency is enforced per-(dependent,
 # blocker): before calling `addBlockedBy`, we verify the blocker is not already
 # present in the dependent issue's `blockedBy` connection. Cache exists for
@@ -615,19 +615,19 @@ already_linked() {
 
 if [[ $LINK_DEPS -eq 1 ]]; then
   echo "Running dependency-linking pass (idempotent across runs)"
-  for packet in "$PACKETS_DIR_ABS"/**/*.md; do
+  for packet in "$WORK_ITEMS_DIR_ABS"/**/*.md; do
     [[ -f "$packet" ]] || continue
     rel="${packet#"$REPO_ROOT/"}"
 
     dependent_url="$(manifest_get "$rel")"
     if [[ -z "$dependent_url" ]]; then
-      # Packet not yet filed (no manifest entry yet, or coordination doc
+      # Work item not yet filed (no manifest entry yet, or coordination doc
       # without frontmatter). Skip silently — earlier loop logged the reason.
       continue
     fi
 
-    packet_json="$(parse_packet "$packet")"
-    mapfile -t deps < <(jq -r '.dependencies[]?' <<<"$packet_json")
+    work_item_json="$(parse_work_item "$packet")"
+    mapfile -t deps < <(jq -r '.dependencies[]?' <<<"$work_item_json")
     [[ ${#deps[@]} -eq 0 ]] && continue
 
     # Load existing blockedBy edges once per dependent up front. If the fetch
@@ -645,9 +645,9 @@ if [[ $LINK_DEPS -eq 1 ]]; then
       dep_url="$(resolve_dep_url "$dep" "$rel")"
       if [[ -z "$dep_url" ]]; then
         # Either an unrecognized format (bare integer, narrative string, etc.)
-        # or a `packet:NN` ref to a packet not yet in the manifest. Both are
+        # or a `work-item:NN` ref to a work item not yet in the manifest. Both are
         # surfaced loudly — the historical silent-skip was the original bug.
-        echo "::warning::Could not resolve dependency '$dep' in $rel (expected 'packet:NN' or '{Repo}#N')"
+        echo "::warning::Could not resolve dependency '$dep' in $rel (expected 'work-item:NN' or '{Repo}#N')"
         continue
       fi
       if already_linked "$dependent_url" "$dep_url"; then
@@ -682,7 +682,7 @@ if [[ $LINK_DEPS -eq 1 ]]; then
         -f query='mutation($a:ID!, $b:ID!){ addBlockedBy(input:{issueId:$a, blockingIssueId:$b}){ issue{ number } } }' \
         -f a="$blocked_node_id" \
         -f b="$blocker_node_id" >/dev/null; then
-        # Reflect new blocker in the cache so later packets in this run that
+        # Reflect new blocker in the cache so later work items in this run that
         # share the same dependent see it via already_linked.
         LINKED_BLOCKERS_CACHE[$dependent_url]+="${b}"$'\n'
         posted_blockers+=("$b")
@@ -694,8 +694,8 @@ if [[ $LINK_DEPS -eq 1 ]]; then
 
     echo "link  $rel -> ${posted} new blocker(s) (${#skipped_blockers[@]} already linked)"
 
-    # Update summary row only if this packet was newly filed this run.
-    if [[ -n "${NEW_PACKETS[$rel]:-}" && ${#posted_blockers[@]} -gt 0 ]]; then
+    # Update summary row only if this work item was newly filed this run.
+    if [[ -n "${NEW_WORK_ITEMS[$rel]:-}" && ${#posted_blockers[@]} -gt 0 ]]; then
       for i in "${!SUMMARY_ROWS[@]}"; do
         row="${SUMMARY_ROWS[$i]}"
         row_rel="${row%%$'\t'*}"
@@ -714,13 +714,13 @@ fi
 # Summary
 summary_out() {
   echo ""
-  echo "## Packet filing summary"
+  echo "## Work item filing summary"
   echo ""
   if [[ ${#SUMMARY_ROWS[@]} -eq 0 ]]; then
-    echo "_No new packets filed._"
+    echo "_No new work items filed._"
     return
   fi
-  echo "| Packet | Issue | Blockers |"
+  echo "| Work Item | Issue | Blockers |"
   echo "|--------|-------|----------|"
   for row in "${SUMMARY_ROWS[@]}"; do
     IFS=$'\t' read -r p u b <<<"$row"
