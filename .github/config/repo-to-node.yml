@@ -8,6 +8,7 @@ HoneyDrunk.Data: honeydrunk-data
 HoneyDrunk.Pulse: pulse
 HoneyDrunk.Notify: honeydrunk-notify
 HoneyDrunk.Communications: honeydrunk-communications
+HoneyDrunk.NovOutbox: honeydrunk-novoutbox
 HoneyDrunk.Actions: honeydrunk-actions
 HoneyDrunk.Architecture: honeydrunk-architecture
 HoneyDrunk.Infrastructure: honeydrunk-infrastructure
