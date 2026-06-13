@@ -24,7 +24,7 @@ fi
 workflow_mode() {
   case "$1" in
     weekly-*.yml|nightly-*.yml) echo "cadence" ;;
-    actions-ci.yml|azure-oidc-deploy.yml|deploy.yml|file-packets.yml|grid-health-report.yml|hive-field-mirror.yml|pr.yml|pr-core.yml|publish.yml|release.yml|release-*.yml|seed-labels.yml|seed-labels-fanout.yml) echo "event" ;;
+    actions-ci.yml|azure-oidc-deploy.yml|deploy.yml|file-work-items.yml|grid-health-report.yml|hive-field-mirror.yml|pr.yml|pr-core.yml|publish.yml|release.yml|release-*.yml|seed-labels.yml|seed-labels-fanout.yml) echo "event" ;;
     *) echo "cadence" ;;
   esac
 }

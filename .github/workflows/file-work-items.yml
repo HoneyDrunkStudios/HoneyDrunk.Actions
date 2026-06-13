@@ -1,4 +1,4 @@
-name: File Issue Packets
+name: File Work Items
 
 on:
   workflow_call:
@@ -8,16 +8,16 @@ on:
         required: false
         type: string
         default: ''
-      packets-dir:
-        description: Path (relative to Architecture repo root) to scan for active packet .md files.
+      work-items-dir:
+        description: Path (relative to Architecture repo root) to scan for active work item .md files.
         required: false
         type: string
-        default: generated/issue-packets/active
+        default: generated/work-items/active
       manifest-path:
-        description: Path (relative to Architecture repo root) of the filed-packets manifest.
+        description: Path (relative to Architecture repo root) of the filed-work-items manifest.
         required: false
         type: string
-        default: generated/issue-packets/filed-packets.json
+        default: generated/work-items/filed-work-items.json
       project-owner:
         description: GitHub org/user that owns The Hive project.
         required: false
@@ -48,7 +48,7 @@ on:
         required: false
       app-id:
         description: >-
-          GitHub App ID for the dedicated file-packets App. When provided
+          GitHub App ID for the dedicated file-work-items App. When provided
           together with app-private-key, the workflow mints an installation
           token via actions/create-github-app-token and uses it for every
           subsequent gh call. Falls back to hive-field-mirror-token when
@@ -64,7 +64,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: file-packets-${{ inputs.architecture-repo }}
+  group: file-work-items-${{ inputs.architecture-repo }}
   cancel-in-progress: false
 
 jobs:
@@ -141,19 +141,19 @@ jobs:
       - name: Install PyYAML
         run: python3 -m pip install --user pyyaml
 
-      - name: File packets
+      - name: File work items
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.hive-field-mirror-token }}
           HIVE_FIELD_MIRROR_TOKEN: ${{ steps.app-token.outputs.token || secrets.hive-field-mirror-token }}
-          PACKETS_DIR: architecture/${{ inputs.packets-dir }}
+          WORK_ITEMS_DIR: architecture/${{ inputs.work-items-dir }}
           MANIFEST: architecture/${{ inputs.manifest-path }}
           PROJECT_OWNER: ${{ inputs.project-owner }}
           PROJECT_NUMBER: ${{ inputs.project-number }}
           ARCHITECTURE_REPO: ${{ inputs.architecture-repo }}
         run: |
           set -euo pipefail
-          ./honeydrunk-actions/scripts/file-packets.sh \
-            --packets-dir "$PACKETS_DIR" \
+          ./honeydrunk-actions/scripts/file-work-items.sh \
+            --work-items-dir "$WORK_ITEMS_DIR" \
             --manifest "$MANIFEST" \
             --project-owner "$PROJECT_OWNER" \
             --project-number "$PROJECT_NUMBER" \
@@ -161,12 +161,12 @@ jobs:
             --mapping-file ./honeydrunk-actions/.github/config/repo-to-node.yml
 
       - name: Commit updated manifest
-        # Run even if `File packets` errored partway through, so any packets
-        # that WERE successfully filed get persisted to the manifest. Without
-        # this, a single bad packet mid-run loses state for every packet that
-        # filed before it — causing duplicate issues on the next run. Gated on
-        # the architecture checkout succeeding so we don't try to commit into a
-        # non-existent working directory when earlier steps fail.
+        # Run even if `File work items` errored partway through, so any work
+        # items that WERE successfully filed get persisted to the manifest.
+        # Without this, a single bad work item mid-run loses state for every
+        # work item that filed before it, causing duplicate issues on the next
+        # run. Gated on the architecture checkout succeeding so we don't try to
+        # commit into a non-existent working directory when earlier steps fail.
         if: always() && steps.checkout-architecture.outcome == 'success'
         working-directory: architecture
         env:
@@ -199,7 +199,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- "$MANIFEST_PATH"
-          git commit -m "chore(packets): update filed-packets manifest [skip ci]"
+          git commit -m "chore(work-items): update filed-work-items manifest [skip ci]"
 
           for attempt in 1 2 3; do
             if git push origin HEAD:"refs/heads/$branch"; then
