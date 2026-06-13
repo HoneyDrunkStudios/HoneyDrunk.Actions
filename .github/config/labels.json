@@ -21,6 +21,11 @@
       "description": "Manual ADR-0044 escape hatch; Grid Review Runner skips PRs carrying this label."
     },
     {
+      "name": "skip-grid-review",
+      "color": "cfd3d7",
+      "description": "Explicit operator-approved bypass for ADR-0086 Grid review queueing."
+    },
+    {
       "name": "needs-agent-review",
       "color": "1d76db",
       "description": "PR is in the Grid Review Runner queue; the pull-based local worker will pick it up on its next tick."

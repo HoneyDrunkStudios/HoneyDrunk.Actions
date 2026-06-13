@@ -51,6 +51,11 @@ on:
         required: false
         type: string
         default: 'changes-requested-by-agent'
+      bypass-labels:
+        description: 'Comma/newline-separated PR labels that intentionally bypass Grid review queueing'
+        required: false
+        type: string
+        default: 'skip-review,skip-grid-review'
       queue-comment-marker:
         description: 'Machine-readable marker used by the local worker to find the queue comment'
         required: false
@@ -113,6 +118,7 @@ jobs:
         env:
           EVENT_PATH: ${{ github.event_path }}
           REVIEW_CONFIG_PATH: ${{ inputs.review-config-path }}
+          BYPASS_LABELS: ${{ inputs.bypass-labels }}
         run: |
           python3 - <<'PY'
           import json
@@ -122,6 +128,11 @@ jobs:
 
           event = json.loads(Path(os.environ['EVENT_PATH']).read_text(encoding='utf-8'))
           labels = {label.get('name', '').lower() for label in event['pull_request'].get('labels', [])}
+          bypass_labels = {
+              label.strip().lower()
+              for label in re.split(r'[\s,]+', os.environ.get('BYPASS_LABELS', ''))
+              if label.strip()
+          }
           config_path = Path(os.environ['REVIEW_CONFIG_PATH'])
 
           skip = False
@@ -129,9 +140,10 @@ jobs:
           runner = 'local-worker'
           risk_class = 'normal'
 
-          if 'skip-review' in labels:
+          matched_bypass_labels = sorted(labels.intersection(bypass_labels))
+          if matched_bypass_labels:
               skip = True
-              reason = 'skip-review-label'
+              reason = f"bypass-label-{matched_bypass_labels[0]}"
           elif not config_path.exists():
               skip = True
               reason = 'missing-review-config'

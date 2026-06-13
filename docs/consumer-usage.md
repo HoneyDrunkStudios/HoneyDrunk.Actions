@@ -184,7 +184,7 @@ Out-of-band reason: N/A
 Size justification: N/A
 ```
 
-`large-pr`, `audit-sample`, `out-of-band`, and `skip-review` are defined in `.github/config/labels.json` and can be seeded with `seed-labels.json` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
+`large-pr`, `audit-sample`, `out-of-band`, `skip-review`, and `skip-grid-review` are defined in `.github/config/labels.json` and can be seeded with `seed-labels.json` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
 
 ### Coverage Gate and Baseline Ratchet
 
@@ -509,9 +509,11 @@ review_risk_class: normal
 Skip behavior:
 
 - draft PRs are skipped
-- PRs with the `skip-review` label are skipped
+- PRs with a configured bypass label are skipped; the default bypass labels are `skip-review` and `skip-grid-review`
 - missing `.honeydrunk-review.yaml` is skipped
 - `enabled: false` is skipped
+
+Bypass labels are an explicit operator choice, not a docs-only/content-type shortcut. Documentation changes still queue for review unless a human deliberately applies a bypass label.
 
 ### Queue Contract
 
@@ -524,6 +526,8 @@ owner/repo#pr@headSha
 It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The workflow also infers existing non-worker labels from PR title/body/files, such as ADR number, docs, meta, infra, security, secrets, and known node labels. Optional classification failures warn and do not block queueing. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
 
 Set `apply-classification-labels: false` only for a repo that wants the review queue without central PR label classification.
+
+Set `bypass-labels` only when a repo needs a different visible operator-approved escape hatch. The default is `skip-review,skip-grid-review`.
 
 ADR-0088 removed the old OpenClaw webhook compatibility inputs. Callers should pass only the local-worker queue settings and `github-token`.
 
