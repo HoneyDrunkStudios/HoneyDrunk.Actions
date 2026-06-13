@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `job-review-request.yml`: added configurable explicit bypass labels for ADR-0086 Grid review queueing. The default now honors both the existing `skip-review` label and the clearer `skip-grid-review` alias; bypass remains a visible operator decision, not a docs-only or file-type shortcut.
+
 ### Removed
 
 - `job-review-request.yml`: removed the deprecated ADR-0044/OpenClaw compatibility inputs (`openclaw-webhook-url`, `upload-fallback-artifact`, `post-fallback-comment`, `artifact-name`) and the no-op `openclaw-webhook-secret` workflow-call secret. The workflow now exposes only the ADR-0086 local-worker queue contract plus `github-token`; the org secret itself is intentionally left for operator deletion under ADR-0088.
