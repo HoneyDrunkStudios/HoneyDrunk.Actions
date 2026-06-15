@@ -134,20 +134,26 @@ jobs:
           fi
 
           if [ -z "$TARGET" ]; then
-            echo "::warning::No solution or project found; scanning via working directory."
-            TARGET=""
-          else
-            echo "Scanning $TARGET for vulnerable packages..."
+            echo "::error::No solution or project file found for dependency scanning in working directory '${{ inputs.working-directory }}'. Consider setting 'project-path' input."
+            exit 1
           fi
+
+          echo "Preparing dependency scan target $TARGET..."
 
           mkdir -p ./security-reports
           JSON_REPORT=./security-reports/vulnerable-packages.json
           ERROR_REPORT=./security-reports/vulnerable-packages.err
           EXPECTED_PROJECTS=./security-reports/dependency-scan-expected-projects.txt
+          PROJECT_REPORT_DIR=./security-reports/dependency-scan-projects
+          rm -rf "$PROJECT_REPORT_DIR"
+          mkdir -p "$PROJECT_REPORT_DIR"
+          : > "$ERROR_REPORT"
 
           # JSON output is required by downstream evaluation. If the scan fails
           # or does not produce JSON, fail the job so we do not report a false
-          # clean result. Requires .NET SDK 9+ (default 10.0.x).
+          # clean result. Solutions are expanded and scanned one project at a
+          # time so mixed solution behavior cannot mask an individual scan
+          # failure. Requires .NET SDK 9+ (default 10.0.x).
           SCAN_ARGS=(package --vulnerable --include-transitive --format json)
 
           if ! command -v python3 >/dev/null 2>&1; then
@@ -158,7 +164,7 @@ jobs:
           case "$TARGET" in
             *.sln|*.slnx)
               if ! dotnet sln "$TARGET" list \
-                | awk 'tolower($0) ~ /\.(csproj|fsproj|vbproj|sqlproj)$/ { print $0 }' \
+                | awk 'tolower($0) ~ /\.(csproj|fsproj|vbproj|sqlproj)$/ { gsub(/\\/, "/"); print $0 }' \
                 > "$EXPECTED_PROJECTS"; then
                 echo "::error::Could not enumerate projects from solution target '$TARGET'."
                 exit 1
@@ -173,33 +179,84 @@ jobs:
               ;;
           esac
 
-          set +e
-          if [ -n "$TARGET" ]; then
-            dotnet list "$TARGET" "${SCAN_ARGS[@]}" > "$JSON_REPORT" 2> "$ERROR_REPORT"
-          else
-            dotnet list "${SCAN_ARGS[@]}" > "$JSON_REPORT" 2> "$ERROR_REPORT"
-          fi
-          SCAN_EXIT_CODE=$?
-          set -e
-
-          if [ ! -s "$JSON_REPORT" ]; then
-            echo "::error::dotnet list completed without producing JSON output."
-            cat "$ERROR_REPORT" || true
+          if [ ! -s "$EXPECTED_PROJECTS" ]; then
+            echo "::error::No package project files were found for dependency scanning from target '$TARGET'."
             exit 1
           fi
 
-          if ! python3 - "$JSON_REPORT" <<'PY'
+          project_count=0
+          while IFS= read -r PROJECT; do
+            [ -n "$PROJECT" ] || continue
+            project_count=$((project_count + 1))
+            project_report="$PROJECT_REPORT_DIR/project-$project_count.json"
+            project_error="$PROJECT_REPORT_DIR/project-$project_count.err"
+
+            echo "Scanning $PROJECT for vulnerable packages..."
+            if ! dotnet list "$PROJECT" "${SCAN_ARGS[@]}" > "$project_report" 2> "$project_error"; then
+              echo "::error::dotnet list package scan failed for '$PROJECT'."
+              cat "$project_error" || true
+              exit 1
+            fi
+
+            cat "$project_error" >> "$ERROR_REPORT" || true
+
+            if [ ! -s "$project_report" ]; then
+              echo "::error::dotnet list completed without producing JSON output for '$PROJECT'."
+              cat "$project_error" || true
+              exit 1
+            fi
+
+            if ! python3 - "$project_report" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as f:
               json.load(f)
           PY
-          then
-            echo "::error::dotnet list completed without producing valid JSON output."
-            cat "$ERROR_REPORT" || true
+            then
+              echo "::error::dotnet list completed without producing valid JSON output for '$PROJECT'."
+              cat "$project_error" || true
+              exit 1
+            fi
+          done < "$EXPECTED_PROJECTS"
+
+          if [ "$project_count" -eq 0 ]; then
+            echo "::error::No package project files were found for dependency scanning from target '$TARGET'."
             exit 1
           fi
+
+          python3 - "$JSON_REPORT" "$PROJECT_REPORT_DIR" <<'PY'
+          import json
+          import os
+          import sys
+
+          output_path, report_dir = sys.argv[1:3]
+          combined = {
+              "version": 1,
+              "parameters": "--vulnerable --include-transitive",
+              "sources": [],
+              "projects": [],
+          }
+          seen_sources = set()
+
+          for name in sorted(os.listdir(report_dir)):
+              if not name.endswith(".json"):
+                  continue
+              path = os.path.join(report_dir, name)
+              with open(path, encoding="utf-8") as f:
+                  data = json.load(f)
+
+              for source in data.get("sources", []) or []:
+                  if source not in seen_sources:
+                      combined["sources"].append(source)
+                      seen_sources.add(source)
+
+              combined["projects"].extend(data.get("projects", []) or [])
+
+          with open(output_path, "w", encoding="utf-8") as f:
+              json.dump(combined, f, indent=2)
+              f.write("\n")
+          PY
 
           if ! python3 - "$JSON_REPORT" "$EXPECTED_PROJECTS" <<'PY'
           import json
@@ -244,11 +301,6 @@ jobs:
             echo "::error::dotnet list produced valid JSON, but the report did not cover every expected project."
             cat "$ERROR_REPORT" || true
             exit 1
-          fi
-
-          if [ "$SCAN_EXIT_CODE" -ne 0 ]; then
-            echo "::warning::dotnet list package scan exited with code $SCAN_EXIT_CODE after producing valid JSON that covered every expected project; evaluating report contents."
-            cat "$ERROR_REPORT" || true
           fi
 
       - name: Evaluate findings
