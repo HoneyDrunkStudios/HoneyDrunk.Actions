@@ -229,6 +229,10 @@ on:
         default: 'main'
     
     secrets:
+      github-token:
+        description: 'GitHub token used for GitHub Release creation'
+        required: false
+
       nuget-api-key:
         description: 'API key for NuGet feed'
         required: false
@@ -852,6 +856,7 @@ jobs:
           generate_release_notes: ${{ steps.notes.outputs.has-changelog == 'false' }}
           draft: ${{ inputs.github-release-draft }}
           prerelease: ${{ inputs.github-release-prerelease }}
+          token: ${{ secrets.github-token || github.token }}
   
   release-summary:
     name: Release Summary
