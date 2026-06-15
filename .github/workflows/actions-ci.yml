@@ -92,6 +92,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash tests/dependency-scan-workflow-wiring-smoke.sh
           bash tests/dependency-scan-workflow-smoke.sh
 
       - name: Unit-test scripts (discord_notify redaction)
