@@ -52,7 +52,7 @@ on:
         default: 'high'
 
       actions-ref:
-        description: 'Git ref of HoneyDrunk.Actions to use'
+        description: 'Git ref of HoneyDrunk.Actions to use (main, tag, or commit)'
         required: false
         type: string
         default: 'main'
@@ -122,53 +122,23 @@ jobs:
         id: scan
         shell: bash
         working-directory: ${{ inputs.working-directory }}
+        env:
+          DEPENDENCY_SCAN_ACTIONS_REF: ${{ inputs.actions-ref }}
+          DEPENDENCY_SCAN_PROJECT_PATH: ${{ inputs.project-path }}
+          DEPENDENCY_SCAN_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           set -euo pipefail
+          echo "Using HoneyDrunk.Actions ref: ${DEPENDENCY_SCAN_ACTIONS_REF}"
+          echo "Dependency scan working directory: ${DEPENDENCY_SCAN_WORKING_DIRECTORY}"
+          echo "Dependency scan project path: ${DEPENDENCY_SCAN_PROJECT_PATH:-<auto-detect>}"
 
-          TARGET="${{ inputs.project-path }}"
-          if [ -z "$TARGET" ]; then
-            TARGET=$(find . -maxdepth 4 \( -name '*.slnx' -o -name '*.sln' \) | sort | head -n 1 || true)
-          fi
-          if [ -z "$TARGET" ]; then
-            TARGET=$(find . -maxdepth 4 \( -name '*.csproj' -o -name '*.fsproj' -o -name '*.vbproj' \) | sort | head -n 1 || true)
-          fi
-
-          if [ -z "$TARGET" ]; then
-            echo "::warning::No solution or project found; scanning via working directory."
-            TARGET=""
-          else
-            echo "Scanning $TARGET for vulnerable packages..."
-          fi
-
-          mkdir -p ./security-reports
-          JSON_REPORT=./security-reports/vulnerable-packages.json
-          ERROR_REPORT=./security-reports/vulnerable-packages.err
-
-          # JSON output is required by downstream evaluation. If the scan fails
-          # or does not produce JSON, fail the job so we do not report a false
-          # clean result. Requires .NET SDK 9+ (default 10.0.x).
-          SCAN_ARGS=(package --vulnerable --include-transitive --format json)
-
-          set +e
-          if [ -n "$TARGET" ]; then
-            dotnet list "$TARGET" "${SCAN_ARGS[@]}" > "$JSON_REPORT" 2> "$ERROR_REPORT"
-          else
-            dotnet list "${SCAN_ARGS[@]}" > "$JSON_REPORT" 2> "$ERROR_REPORT"
-          fi
-          SCAN_EXIT_CODE=$?
-          set -e
-
-          if [ "$SCAN_EXIT_CODE" -ne 0 ]; then
-            echo "::error::dotnet list package scan failed with exit code $SCAN_EXIT_CODE."
-            cat "$ERROR_REPORT" || true
-            exit "$SCAN_EXIT_CODE"
-          fi
-
-          if [ ! -s "$JSON_REPORT" ]; then
-            echo "::error::dotnet list completed without producing JSON output."
-            cat "$ERROR_REPORT" || true
+          SCAN_SCRIPT="$GITHUB_WORKSPACE/.github/actions-repo/.github/scripts/dependency-scan.sh"
+          if [ ! -f "$SCAN_SCRIPT" ]; then
+            echo "::error::Dependency scan helper is missing at ${SCAN_SCRIPT}. Confirm the HoneyDrunk.Actions checkout path is .github/actions-repo."
             exit 1
           fi
+
+          bash "$SCAN_SCRIPT"
 
       - name: Evaluate findings
         id: evaluate

@@ -53,6 +53,11 @@ jobs:
           set -euo pipefail
           actionlint -color -shellcheck=
 
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
       - name: Check banned CI secret patterns
         shell: bash
         run: |
@@ -87,6 +92,14 @@ jobs:
         run: |
           set -euo pipefail
           tests/grid-health-aggregator-smoke.sh
+
+      - name: Smoke test dependency scan workflow helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/dependency-scan-workflow-wiring-smoke.sh
+          bash tests/dependency-scan-workflow-smoke.sh
+          bash tests/dependency-scan-real-sdk-smoke.sh
 
       - name: Unit-test scripts (discord_notify redaction)
         shell: bash
