@@ -31,9 +31,19 @@ if not checkout_pattern.search(workflow):
         "job-dependency-scan.yml must check out HoneyDrunk.Actions to .github/actions-repo at the resolved workflow ref before using shared helpers."
     )
 
-if "id: resolve-actions-ref" not in workflow or "github.workflow_ref" not in workflow:
+if "id: resolve-actions-ref" not in workflow:
     raise SystemExit(
-        "job-dependency-scan.yml must resolve HoneyDrunk.Actions ref from github.workflow_ref before checkout."
+        "job-dependency-scan.yml must resolve the HoneyDrunk.Actions ref before checkout."
+    )
+
+if "toJson(job)" not in workflow or "workflow_repository" not in workflow or "workflow_sha" not in workflow:
+    raise SystemExit(
+        "job-dependency-scan.yml must resolve HoneyDrunk.Actions checkout from the job.workflow_repository and job.workflow_sha identity values."
+    )
+
+if "github.workflow_ref" in workflow:
+    raise SystemExit(
+        "job-dependency-scan.yml must not derive reusable workflow self-checkout from caller-oriented github.workflow_ref."
     )
 
 if script_path not in workflow:

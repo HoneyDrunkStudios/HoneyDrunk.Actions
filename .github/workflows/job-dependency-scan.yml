@@ -105,21 +105,33 @@ jobs:
         shell: bash
         env:
           ACTIONS_REF_INPUT: ${{ inputs.actions-ref }}
-          WORKFLOW_REF: ${{ github.workflow_ref }}
+          JOB_CONTEXT: ${{ toJson(job) }}
         run: |
           set -euo pipefail
 
           actions_ref="${ACTIONS_REF_INPUT}"
           if [ -z "${actions_ref}" ]; then
-            case "${WORKFLOW_REF}" in
-              HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-dependency-scan.yml@*)
-                actions_ref="${WORKFLOW_REF#*@}"
-                ;;
-              *)
-                echo "::error::Unable to derive HoneyDrunk.Actions ref from github.workflow_ref='${WORKFLOW_REF}'. Pass actions-ref explicitly."
-                exit 1
-                ;;
-            esac
+            workflow_repository="$(python3 - <<'PY'
+          import json
+          import os
+          print(json.loads(os.environ["JOB_CONTEXT"]).get("workflow_repository", ""))
+          PY
+          )"
+            workflow_sha="$(python3 - <<'PY'
+          import json
+          import os
+          print(json.loads(os.environ["JOB_CONTEXT"]).get("workflow_sha", ""))
+          PY
+          )"
+
+            if [ "${workflow_repository}" != "HoneyDrunkStudios/HoneyDrunk.Actions" ] || [ -z "${workflow_sha}" ]; then
+              echo "::error::Unable to derive HoneyDrunk.Actions ref from the reusable workflow job identity. Pass actions-ref explicitly."
+              exit 1
+            fi
+
+            # job.workflow_* identifies the reusable workflow that defines this job,
+            # while github.workflow_* can describe the caller workflow.
+            actions_ref="${workflow_sha}"
           fi
 
           echo "ref=${actions_ref}" >> "$GITHUB_OUTPUT"
