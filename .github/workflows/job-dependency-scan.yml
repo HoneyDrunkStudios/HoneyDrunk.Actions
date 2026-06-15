@@ -127,7 +127,13 @@ jobs:
           DEPENDENCY_SCAN_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           set -euo pipefail
-          bash "$GITHUB_WORKSPACE/.github/actions-repo/.github/scripts/dependency-scan.sh"
+          SCAN_SCRIPT="$GITHUB_WORKSPACE/.github/actions-repo/.github/scripts/dependency-scan.sh"
+          if [ ! -f "$SCAN_SCRIPT" ]; then
+            echo "::error::Dependency scan helper is missing at ${SCAN_SCRIPT}. Confirm the HoneyDrunk.Actions checkout path is .github/actions-repo."
+            exit 1
+          fi
+
+          bash "$SCAN_SCRIPT"
 
       - name: Evaluate findings
         id: evaluate

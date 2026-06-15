@@ -88,6 +88,12 @@ jobs:
           set -euo pipefail
           tests/grid-health-aggregator-smoke.sh
 
+      - name: Smoke test dependency scan workflow helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/dependency-scan-workflow-smoke.sh
+
       - name: Unit-test scripts (discord_notify redaction)
         shell: bash
         working-directory: .github/scripts

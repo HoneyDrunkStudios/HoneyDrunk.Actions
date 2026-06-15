@@ -338,7 +338,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Dependency scan now fails closed when it cannot resolve a solution or package project. Set `project-path` explicitly for repos with nested solutions, multiple solution files, or non-standard layouts so `pr-core.yml` scans the intended graph. Solution targets may live under a subdirectory; package project paths listed by the solution are normalized relative to that solution file before each project is scanned, SQL database projects are ignored because they do not produce the `dotnet list package` JSON contract, and coverage validation resolves `.` / `..` path segments before comparing scan output.
+Dependency scan now fails closed when it cannot resolve a solution or package project. Set `project-path` explicitly for repos with nested solutions, multiple solution files, or non-standard layouts so `pr-core.yml` scans the intended graph. Solution targets may live under a subdirectory; package project paths listed by the solution are normalized relative to that solution file before each project is scanned, SQL database projects are ignored because they do not produce the `dotnet list package` JSON contract, and coverage validation resolves `.` / `..` path segments before comparing scan output. The reusable job checks out `HoneyDrunk.Actions` at `.github/actions-repo` and verifies the checked-in helper script exists before invoking it. The job requires a Linux-compatible Bash runner with `python3`; the default `ubuntu-latest` runner satisfies both requirements.
 
 ### Web App with Accessibility Check
 
