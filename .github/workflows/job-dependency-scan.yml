@@ -163,12 +163,29 @@ jobs:
 
           case "$TARGET" in
             *.sln|*.slnx)
+              solution_dir=$(dirname "$TARGET")
+              solution_projects="$PROJECT_REPORT_DIR/solution-projects.txt"
               if ! dotnet sln "$TARGET" list \
                 | awk 'tolower($0) ~ /\.(csproj|fsproj|vbproj|sqlproj)$/ { gsub(/\\/, "/"); print $0 }' \
-                > "$EXPECTED_PROJECTS"; then
+                > "$solution_projects"; then
                 echo "::error::Could not enumerate projects from solution target '$TARGET'."
                 exit 1
               fi
+              while IFS= read -r solution_project; do
+                [ -n "$solution_project" ] || continue
+                case "$solution_project" in
+                  /*|[A-Za-z]:/*)
+                    printf '%s\n' "$solution_project"
+                    ;;
+                  *)
+                    if [ "$solution_dir" = "." ]; then
+                      printf '%s\n' "$solution_project"
+                    else
+                      printf '%s/%s\n' "$solution_dir" "$solution_project"
+                    fi
+                    ;;
+                esac
+              done < "$solution_projects" > "$EXPECTED_PROJECTS"
               ;;
             *.csproj|*.fsproj|*.vbproj|*.sqlproj)
               printf '%s\n' "$TARGET" > "$EXPECTED_PROJECTS"

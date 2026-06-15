@@ -9,6 +9,8 @@
 
 ### Changed
 
+- `job-dependency-scan.yml`: scan resolved solution projects individually, normalize nested solution project paths relative to the solution file, and fail closed when no solution/project scan target is available. Callers with non-obvious repo layouts should pass `project-path` explicitly.
+
 - `job-review-request.yml`: added configurable explicit bypass labels for ADR-0086 Grid review queueing. The default now honors both the existing `skip-review` label and the clearer `skip-grid-review` alias; bypass remains a visible operator decision, not a docs-only or file-type shortcut.
 - `job-review-request.yml`: restored `pull-requests: write` in the reusable Grid review request workflow and consumer docs. `pull-requests: read` looked sufficient on paper with `issues: write`, but HoneyHub validation showed the queued-label/comment normalization path fails with `Resource not accessible by integration` unless the PR write scope is present; Architecture's known-good runs used the prior write scope.
 - `job-deploy-bicep.yml`: added a `what-if-only` boolean input (default `false`). When `true`, the workflow runs the `bicep build` + `lint` + `what-if` preflight and **stops without applying** — a reviewable dry run. Lets callers offer a `plan` mode so an operator can confirm a `what-if` (e.g. existing resources show as no-change, not Modify) before the first apply touches live resources.

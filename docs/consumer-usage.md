@@ -338,6 +338,8 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+Dependency scan now fails closed when it cannot resolve a solution or package project. Set `project-path` explicitly for repos with nested solutions, multiple solution files, or non-standard layouts so `pr-core.yml` scans the intended graph. Solution targets may live under a subdirectory; project paths listed by the solution are normalized relative to that solution file before each project is scanned.
+
 ### Web App with Accessibility Check
 
 ```yaml

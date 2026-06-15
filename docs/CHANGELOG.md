@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `job-dependency-scan.yml`: scan solution projects one project at a time with fail-closed `dotnet list package --vulnerable --include-transitive --format json` handling, normalize nested solution project paths relative to the solution file, and require callers to provide or auto-discover an actual solution/project target instead of treating the working directory as an implicit scan target.
+
 - `release.yml`: expose an optional `github-token` workflow-call secret and pass it to `softprops/action-gh-release` with the built-in `github.token` as a compatibility fallback. Consumers that request centralized GitHub Release creation can now hand off `GITHUB_TOKEN` explicitly, matching the standard HoneyDrunk reusable-workflow token contract.
 
 - `job-review-request.yml`: restored the Grid review request permission contract to `pull-requests: write` plus `issues: write`. The earlier read-only PR scope regressed HoneyHub queueing: the reusable job received `pull-requests: read` and failed with `Resource not accessible by integration` while normalizing labels/comments. Consumer docs now match the known-good Architecture/HoneyHub behavior.
