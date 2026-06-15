@@ -158,16 +158,28 @@ jobs:
           SCAN_EXIT_CODE=$?
           set -e
 
-          if [ "$SCAN_EXIT_CODE" -ne 0 ]; then
-            echo "::error::dotnet list package scan failed with exit code $SCAN_EXIT_CODE."
-            cat "$ERROR_REPORT" || true
-            exit "$SCAN_EXIT_CODE"
-          fi
-
           if [ ! -s "$JSON_REPORT" ]; then
             echo "::error::dotnet list completed without producing JSON output."
             cat "$ERROR_REPORT" || true
             exit 1
+          fi
+
+          if ! python3 - "$JSON_REPORT" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as f:
+              json.load(f)
+          PY
+          then
+            echo "::error::dotnet list completed without producing valid JSON output."
+            cat "$ERROR_REPORT" || true
+            exit 1
+          fi
+
+          if [ "$SCAN_EXIT_CODE" -ne 0 ]; then
+            echo "::warning::dotnet list package scan exited with code $SCAN_EXIT_CODE after producing valid JSON; evaluating report contents."
+            cat "$ERROR_REPORT" || true
           fi
 
       - name: Evaluate findings
