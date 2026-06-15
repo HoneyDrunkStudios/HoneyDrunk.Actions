@@ -52,10 +52,10 @@ on:
         default: 'high'
 
       actions-ref:
-        description: 'Optional Git ref of HoneyDrunk.Actions to use; defaults to the ref that supplied this reusable workflow'
+        description: 'Git ref of HoneyDrunk.Actions to use (main, tag, or commit)'
         required: false
         type: string
-        default: ''
+        default: 'main'
 
     outputs:
       has-warnings:
@@ -100,48 +100,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Resolve HoneyDrunk.Actions ref
-        id: resolve-actions-ref
-        shell: bash
-        env:
-          ACTIONS_REF_INPUT: ${{ inputs.actions-ref }}
-          JOB_CONTEXT: ${{ toJson(job) }}
-        run: |
-          set -euo pipefail
-
-          actions_ref="${ACTIONS_REF_INPUT}"
-          if [ -z "${actions_ref}" ]; then
-            workflow_repository="$(python3 - <<'PY'
-          import json
-          import os
-          print(json.loads(os.environ["JOB_CONTEXT"]).get("workflow_repository", ""))
-          PY
-          )"
-            workflow_sha="$(python3 - <<'PY'
-          import json
-          import os
-          print(json.loads(os.environ["JOB_CONTEXT"]).get("workflow_sha", ""))
-          PY
-          )"
-
-            if [ "${workflow_repository}" != "HoneyDrunkStudios/HoneyDrunk.Actions" ] || [ -z "${workflow_sha}" ]; then
-              echo "::error::Unable to derive HoneyDrunk.Actions ref from the reusable workflow job identity. Pass actions-ref explicitly."
-              exit 1
-            fi
-
-            # job.workflow_* identifies the reusable workflow that defines this job,
-            # while github.workflow_* can describe the caller workflow.
-            actions_ref="${workflow_sha}"
-          fi
-
-          echo "ref=${actions_ref}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
-          ref: ${{ steps.resolve-actions-ref.outputs.ref }}
+          ref: ${{ inputs.actions-ref }}
 
       - name: Setup .NET SDK
         uses: ./.github/actions-repo/.github/actions/dotnet/setup
@@ -159,10 +123,15 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
+          DEPENDENCY_SCAN_ACTIONS_REF: ${{ inputs.actions-ref }}
           DEPENDENCY_SCAN_PROJECT_PATH: ${{ inputs.project-path }}
           DEPENDENCY_SCAN_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           set -euo pipefail
+          echo "Using HoneyDrunk.Actions ref: ${DEPENDENCY_SCAN_ACTIONS_REF}"
+          echo "Dependency scan working directory: ${DEPENDENCY_SCAN_WORKING_DIRECTORY}"
+          echo "Dependency scan project path: ${DEPENDENCY_SCAN_PROJECT_PATH:-<auto-detect>}"
+
           SCAN_SCRIPT="$GITHUB_WORKSPACE/.github/actions-repo/.github/scripts/dependency-scan.sh"
           if [ ! -f "$SCAN_SCRIPT" ]; then
             echo "::error::Dependency scan helper is missing at ${SCAN_SCRIPT}. Confirm the HoneyDrunk.Actions checkout path is .github/actions-repo."
