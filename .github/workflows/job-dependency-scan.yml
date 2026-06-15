@@ -52,10 +52,10 @@ on:
         default: 'high'
 
       actions-ref:
-        description: 'Git ref of HoneyDrunk.Actions to use'
+        description: 'Optional Git ref of HoneyDrunk.Actions to use; defaults to the ref that supplied this reusable workflow'
         required: false
         type: string
-        default: 'main'
+        default: ''
 
     outputs:
       has-warnings:
@@ -100,12 +100,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Resolve HoneyDrunk.Actions ref
+        id: resolve-actions-ref
+        shell: bash
+        env:
+          ACTIONS_REF_INPUT: ${{ inputs.actions-ref }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+
+          actions_ref="${ACTIONS_REF_INPUT}"
+          if [ -z "${actions_ref}" ]; then
+            case "${WORKFLOW_REF}" in
+              HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-dependency-scan.yml@*)
+                actions_ref="${WORKFLOW_REF#*@}"
+                ;;
+              *)
+                echo "::error::Unable to derive HoneyDrunk.Actions ref from github.workflow_ref='${WORKFLOW_REF}'. Pass actions-ref explicitly."
+                exit 1
+                ;;
+            esac
+          fi
+
+          echo "ref=${actions_ref}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout HoneyDrunk.Actions
         uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
-          ref: ${{ inputs.actions-ref }}
+          ref: ${{ steps.resolve-actions-ref.outputs.ref }}
 
       - name: Setup .NET SDK
         uses: ./.github/actions-repo/.github/actions/dotnet/setup
