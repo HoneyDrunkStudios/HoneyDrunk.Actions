@@ -794,6 +794,8 @@ jobs:
       publish-projects: 'MyWorker/MyWorker.csproj;MyApi/MyApi.csproj'
       publish-runtime: 'linux-x64'
       publish-self-contained: false
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### Container with Custom Build Context
@@ -837,6 +839,8 @@ jobs:
 ### Permissions
 
 `release.yml` callers need `contents: write`, `packages: write`, `id-token: write`, and `security-events: write`. `contents: write` is part of the standard baseline because the reusable release workflow owns GitHub Release creation when `create-github-release: true`; callers that do not create GitHub Releases still use the same baseline so release scaffolds stay uniform. `id-token: write` enables Azure OIDC/SBOM attestation paths, `packages: write` covers package/container publication, and `security-events: write` covers SARIF upload from release-time scans. Missing scopes fail at workflow-load or upload time; broader scopes should be justified by adjacent jobs.
+
+Callers that create GitHub Releases should pass `github-token: ${{ secrets.GITHUB_TOKEN }}` to the reusable workflow. The release workflow falls back to `github.token` for compatibility, but the explicit secret handoff keeps release/package write behavior consistent with other HoneyDrunk reusable workflows.
 
 
 ## Azure Authentication
