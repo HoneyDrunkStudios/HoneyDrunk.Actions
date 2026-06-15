@@ -277,15 +277,19 @@ jobs:
 
           if ! python3 - "$JSON_REPORT" "$EXPECTED_PROJECTS" <<'PY'
           import json
+          import os
           import sys
 
           report_path, expected_path = sys.argv[1:3]
+          workspace = os.getcwd()
 
           def normalize(path: str) -> str:
               path = path.strip().replace("\\", "/")
-              while path.startswith("./"):
-                  path = path[2:]
-              return path.lower()
+              if not path:
+                  return path
+              if not os.path.isabs(path):
+                  path = os.path.join(workspace, path)
+              return os.path.normcase(os.path.realpath(os.path.normpath(path)))
 
           with open(expected_path, encoding="utf-8") as f:
               expected = [normalize(line) for line in f if line.strip()]
@@ -303,7 +307,7 @@ jobs:
           for expected_project in expected:
               if not any(
                   actual == expected_project
-                  or actual.endswith(f"/{expected_project}")
+                  or actual.endswith(os.sep + expected_project)
                   for actual in reported
               ):
                   missing.append(expected_project)
