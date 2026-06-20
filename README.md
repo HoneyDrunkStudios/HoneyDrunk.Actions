@@ -574,7 +574,6 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 
 - **[Quick Reference](docs/QUICK-REFERENCE.md)** - Common patterns and troubleshooting
 - **[Examples](examples/)** - Ready-to-use workflow examples
-- **[Azure DevOps Examples](devops-example/examples/)** - Azure Pipelines examples
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Azure Pipelines Documentation](https://docs.microsoft.com/en-us/azure/devops/pipelines/)
 - [.NET CLI Documentation](https://docs.microsoft.com/en-us/dotnet/core/tools/)
