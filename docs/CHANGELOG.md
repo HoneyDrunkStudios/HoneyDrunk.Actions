@@ -260,4 +260,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-For migration guides and breaking changes, see [MIGRATION.md](MIGRATION.md) (when applicable).
+Breaking changes are called out under the relevant version's **Changed** and **Removed** sections above.
