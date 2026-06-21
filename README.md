@@ -224,6 +224,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
 permissions:
+  actions: read
   contents: read
   security-events: write
   issues: write

@@ -32,7 +32,7 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `job-deploy-container.yml` | `contents: read`, `id-token: write` |
 | `job-deploy-container-app.yml` | `contents: read`, `id-token: write` |
 | `job-deploy-function.yml` | `contents: read`, `id-token: write` |
-| `nightly-security.yml` | `contents: read`, `security-events: write`, `issues: write` |
+| `nightly-security.yml` | `actions: read`, `contents: read`, `security-events: write`, `issues: write` |
 | `nightly-deps.yml` | `contents: write`, `pull-requests: write`, `issues: write` |
 | `nightly-accessibility.yml` | `contents: read`, `issues: write` |
 | `weekly-governance.yml` | `contents: read`, `issues: write` |
@@ -1241,6 +1241,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
 permissions:
+  actions: read
   contents: read
   security-events: write
   issues: write
@@ -1271,6 +1272,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
 permissions:
+  actions: read
   contents: read
   security-events: write
   issues: write
@@ -1280,7 +1282,7 @@ permissions:
 
 ### Permissions
 
-`nightly-security.yml` callers need `contents: read`, `security-events: write`, and `issues: write`. `security-events: write` uploads SARIF; `issues: write` lets the workflow maintain tracking issues. Missing permissions cause scheduled runs to fail at workflow-load time, which grid-health later classifies as Stale.
+`nightly-security.yml` callers need `actions: read`, `contents: read`, `security-events: write`, and `issues: write`. `actions: read` lets CodeQL read workflow-run metadata while finalizing analysis; `security-events: write` uploads SARIF; `issues: write` lets the workflow maintain tracking issues. Missing permissions cause scheduled runs to fail at workflow-load time or during scanner finalization, which grid-health later classifies as Stale.
 
 ### Node and Rust Audit Jobs
 
@@ -1590,6 +1592,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
   checks: write
   pull-requests: write
@@ -1623,15 +1626,6 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/nightly-security.yml@main
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: write
-  checks: write
-  pull-requests: write
-  packages: write
-  id-token: write
-  security-events: write
-  issues: write
 ```
 
 ---
