@@ -260,11 +260,26 @@ jobs:
           sarif-dir: ${{ inputs.working-directory }}/security-reports
 
       - name: Upload filtered SARIF
+        id: upload-filtered-sarif
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ inputs.working-directory }}/security-reports
           category: nightly-sast
           wait-for-processing: true
+
+      - name: Report degraded SAST SARIF upload
+        if: steps.upload-filtered-sarif.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning title=CodeQL SARIF upload skipped::Filtered SAST SARIF could not be uploaded to GitHub Code Scanning. The SARIF artifact is still retained for offline review."
+          {
+            echo "## CodeQL SARIF upload degraded"
+            echo
+            echo "Filtered SAST SARIF could not be uploaded to GitHub Code Scanning."
+            echo "This is expected for repositories without GitHub Code Security/code scanning enabled."
+            echo "The workflow still uploads the SARIF artifact as \`sast-report\` for offline review."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload SAST report
         if: always()
