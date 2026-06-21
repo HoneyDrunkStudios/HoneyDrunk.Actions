@@ -1626,15 +1626,6 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/nightly-security.yml@main
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
-permissions:
-  contents: write
-  checks: write
-  pull-requests: write
-  packages: write
-  id-token: write
-  security-events: write
-  issues: write
 ```
 
 ---
