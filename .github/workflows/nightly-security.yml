@@ -21,6 +21,14 @@
 #   - Consuming repos should trigger on schedule (e.g., cron: '0 2 * * *')
 #   - Can also be triggered manually via workflow_dispatch
 #
+# Permission contract:
+#   ADR-0012 D5 keeps effective reusable-workflow token scopes caller-owned.
+#   docs/consumer-usage.md is the canonical caller permission baseline for this
+#   workflow: actions: read, contents: read, security-events: write, and
+#   issues: write. This workflow omits a top-level permissions block so the
+#   runtime implementation does not imply callee-owned token scope. Remove the
+#   degraded actions: read path after callers have adopted the baseline.
+#
 # Usage Example:
 #   See docs/consumer-usage.md for sample consumer workflows
 # ==============================================================================
@@ -98,12 +106,6 @@ on:
           Note: the permissions block below scopes github.token only;
           if a PAT is passed here, its scopes are managed at the token level.
         required: false
-
-permissions:
-  actions: read
-  contents: read
-  security-events: write
-  issues: write
 
 jobs:
   dependency-scan:
@@ -247,12 +249,61 @@ jobs:
           fi
           dotnet build "$PROJECT" --no-incremental
 
+      - name: Check workflow-run metadata permission
+        id: workflow-run-permission
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Capture stderr from gh while discarding the successful JSON body.
+          if output=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" 2>&1 >/dev/null); then
+            echo "has_actions_read=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## CodeQL workflow-run metadata permission"
+              echo
+              echo "The caller grants \`actions: read\`; CodeQL can read workflow-run metadata during analysis finalization."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif grep -Eq 'HTTP 403|Resource not accessible by integration' <<< "$output"; then
+            echo "has_actions_read=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=CodeQL workflow-run metadata permission missing::Grant actions: read in the caller workflow for full CodeQL finalization. This run will keep the SARIF artifact path available when CodeQL can export results."
+          else
+            echo "::error title=Workflow-run metadata probe failed::Unable to determine whether the caller grants actions: read. Failing closed so transient API errors do not mask real CodeQL failures."
+            printf '%s\n' "$output"
+            exit 1
+          fi
+
       - name: Perform CodeQL Analysis
+        id: codeql-analysis
+        continue-on-error: ${{ steps.workflow-run-permission.outputs.has_actions_read != 'true' }}
         uses: github/codeql-action/analyze@v4
         with:
           category: nightly-sast
           output: ${{ inputs.working-directory }}/security-reports
           upload: never
+
+      - name: Verify degraded CodeQL SARIF output
+        if: steps.workflow-run-permission.outputs.has_actions_read != 'true' && steps.codeql-analysis.outcome == 'failure'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if find ./security-reports -type f -name '*.sarif' | grep -q .; then
+            echo "CodeQL produced SARIF before the workflow-run metadata finalization failure."
+          else
+            echo "::error title=CodeQL analysis failed before SARIF export::The caller is missing actions: read, but CodeQL did not produce a SARIF report. Treating this as a real analysis failure rather than degraded finalization."
+            exit 1
+          fi
+
+      - name: Report degraded CodeQL finalization
+        if: steps.workflow-run-permission.outputs.has_actions_read != 'true' && steps.codeql-analysis.outcome == 'failure'
+        shell: bash
+        run: |
+          {
+            echo "## CodeQL analysis finalization degraded"
+            echo
+            echo "The caller workflow does not grant \`actions: read\`, so CodeQL could not read workflow-run metadata while finalizing analysis."
+            echo "Add \`actions: read\` to the caller workflow permissions for full scheduled CodeQL status reporting."
+            echo "CodeQL produced SARIF before finalization failed, so the workflow continues and uploads scanner artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Filter generated-code findings from SARIF
         uses: ./.github/actions-repo/.github/actions/security/filter-sarif
@@ -529,8 +580,8 @@ jobs:
         shell: bash
         env:
           # Use github.token (not the PAT) for the API query — the workflow's
-          # permissions block grants security-events: write here, whereas the
-          # PAT is scoped for issue creation in the next step.
+          # caller-granted security-events: write scope is used here, whereas
+          # the PAT is scoped for issue creation in the next step.
           GH_TOKEN: ${{ github.token }}
         run: |
           SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

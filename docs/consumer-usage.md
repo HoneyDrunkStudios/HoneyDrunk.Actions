@@ -1282,7 +1282,7 @@ permissions:
 
 ### Permissions
 
-`nightly-security.yml` callers need `actions: read`, `contents: read`, `security-events: write`, and `issues: write`. `actions: read` lets CodeQL read workflow-run metadata while finalizing analysis; `security-events: write` uploads SARIF to GitHub Code Scanning when Code Security is enabled; `issues: write` lets the workflow maintain tracking issues. The filtered SAST SARIF upload is best-effort for repositories without Code Security; failed uploads emit a warning and job-summary entry, and the workflow still uploads the SARIF artifact report. Missing token permissions can still fail scheduled runs at workflow-load time or during scanner finalization, which grid-health later classifies as Stale.
+`nightly-security.yml` callers need `actions: read`, `contents: read`, `security-events: write`, and `issues: write`. `actions: read` lets CodeQL read workflow-run metadata while finalizing analysis; `security-events: write` uploads SARIF to GitHub Code Scanning when Code Security is enabled; `issues: write` lets the workflow maintain tracking issues. The reusable workflow does not grant caller permissions on its own, so callers should carry the full permission baseline. During rollout, callers missing `actions: read` get runtime CodeQL finalization degradation with a warning only when CodeQL has already exported SARIF; other missing baseline permissions remain caller defects and may still surface as failed or stale scheduled runs in grid-health. The filtered SAST SARIF upload is best-effort for repositories without Code Security; failed uploads emit a warning and job-summary entry, and the workflow still uploads the SARIF artifact report.
 
 ### Node and Rust Audit Jobs
 
