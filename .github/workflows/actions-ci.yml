@@ -93,6 +93,9 @@ jobs:
           set -euo pipefail
           tests/grid-health-aggregator-smoke.sh
 
+      - name: Regression test release-note generation
+        run: python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
+
       - name: Smoke test dependency scan workflow helper
         shell: bash
         run: |

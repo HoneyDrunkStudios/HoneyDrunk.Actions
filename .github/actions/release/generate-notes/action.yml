@@ -285,7 +285,8 @@ runs:
         if [ "$INCLUDE_COMPARE" == "true" ]; then
           REPO="${{ github.repository }}"
           # Find the previous tag to build a compare link
-          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | sed -n '2p')
+          # sed succeeds when there are no matching tags, including first releases.
+          PREV_TAG=$(git tag --sort=-v:refname | sed -n '/^v[0-9]/p' | sed -n '2p')
           if [ -n "$PREV_TAG" ]; then
             echo "- [Full Changelog](https://github.com/$REPO/compare/$PREV_TAG...v$VERSION)" >> "$BODY_FILE"
           fi
