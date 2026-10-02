@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- `coverage-baseline-ratchet.yml`: measure downloaded coverage without assuming a test-project filename suffix, and only stage/commit/push after a changed baseline is written. Missing, unreadable, empty, and unchanged coverage results now skip all Git writes. Coverage calculations and PR gate thresholds are unchanged.
+
 - `nightly-security.yml`: made the filtered CodeQL SARIF upload best-effort so repositories without GitHub Code Security/code scanning enabled still complete nightly SAST and retain the SARIF artifact report. Failed uploads now emit a warning annotation and job-summary entry so degraded Code Scanning ingestion stays visible.
 - `nightly-security.yml`: documented `actions: read` as part of the caller-owned permission baseline and made `docs/consumer-usage.md` the canonical permission source per ADR-0012 D5. Callers without `actions: read` now get a visible degraded CodeQL finalization warning only when CodeQL has already exported SARIF; transient workflow-run metadata probe failures and pre-SARIF CodeQL failures fail closed instead of masking real analysis failures.
 - Docs: removed two dead documentation links flagged by the 2026-06-19 docs-sync sweep — the `README.md` "Azure DevOps Examples" link pointed at a `devops-example/examples/` directory that was never created, and `docs/CHANGELOG.md` linked to a non-existent `MIGRATION.md`. Breaking changes are documented inline in the changelog's Changed/Removed sections.
