@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-02 — Studio migration (pending rollout)
+
+- Archive the retired work-item filing workflow/script and former packet-link enforcement. Existing issues and old refs are preserved.
+- Point active monitoring/agent references at HoneyDrunk.Studio while retaining the stable honeydrunk-architecture node ID.
+- Accept direct Request/Approved scope context in PR metadata without requiring a packet or out-of-band classification; retain authorship, review and security checks.
+- Document coordinated rollout, pinned-workflow limits and deployed local-worker follow-up in docs/studio-migration.md.
+
 ## Unreleased
 
 ### Added

@@ -29,6 +29,6 @@ The three known D4 retrofit findings from ADR-0012 are addressed in this PR. Fut
 
 ## Cross-references
 
-- HoneyDrunk.Architecture invariant 38 — reusable workflows invoke tool CLIs directly.
+- HoneyDrunk.Studio invariant 38 — reusable workflows invoke tool CLIs directly.
 - ADR-0012 D4 — direct CLI invocation policy.
 - ADR-0012 D10 — action-pin inventory.

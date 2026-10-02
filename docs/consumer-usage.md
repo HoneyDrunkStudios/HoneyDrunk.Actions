@@ -8,7 +8,7 @@ This document provides sample workflows for consuming repos to adopt the HoneyDr
 
 Every caller workflow that consumes a reusable workflow from `HoneyDrunk.Actions` must declare a top-level `permissions:` block. Under `workflow_call`, the callee's `permissions:` block is purely documentary — the effective job token permissions are determined by the **caller**. A caller that omits `permissions:` inherits the repository's default token scope (`contents: read`, all writes `none` in the default GitHub Actions configuration), and any reusable workflow that requests a `write` scope fails at workflow-load time with a validation error, before a single step runs.
 
-This rule is invariant 39 in `HoneyDrunk.Architecture/constitution/invariants.md` and is governed by ADR-0012 D5.
+This rule is invariant 39 in `HoneyDrunk.Studio/constitution/invariants.md` and is governed by ADR-0012 D5.
 
 **Validation failure is silent until the next scheduled run.** If you add a new caller without `permissions:`, your PR may merge cleanly (the workflow-load check runs at trigger time, not at merge time). The grid-health aggregator (`grid-health-report.yml`) classifies the workflow as **Stale** when its scheduled trigger fails to produce a run, surfacing the bug within ~24 hours. The review agent's Request Changes rule (per `.claude/agents/review.md`) is the earlier safety net.
 
@@ -158,12 +158,12 @@ Authorship: human
 
 Allowed classes are `human`, `agent-codex`, `agent-copilot`, `agent-claude-code`, and `mixed`. The `authorship-check` job fails when the line is absent or unparseable; it does not silently assume `human`.
 
-For non-`human` PRs, `pr-metadata-check` enforces ADR-0011/ADR-0044 work item discipline before size review:
+For non-`human` PRs, `pr-metadata-check` requires meaningful request context before size review:
 
-- If `Work Item:` or `Work Item:` is present, the PR is treated as work-item-scoped and the job removes any stale `out-of-band` label.
-- If no work item is present, the PR must include an explicit `Out-of-band reason:`. The job then applies `out-of-band` automatically.
-- If an agent/mixed PR has neither work item metadata nor an out-of-band reason, the job fails instead of silently degrading review scope.
-- A PR cannot declare both work item metadata and an out-of-band reason.
+- Use `Request:` or `Approved scope:` to describe the authorized change. A work item is not required, and a direct request is not classified as out of band.
+- Historical `Work Item:` and `Out-of-band reason:` fields remain accepted for old callers. Those two legacy fields are mutually exclusive, with the existing best-effort label sync.
+- Empty or placeholder context still fails. Authorship, review, tests and size checks remain in force.
+
 
 For non-`human` PRs, `pr-size-check` counts non-test changed lines. It excludes common test paths and any configured `.honeydrunk-review.yaml` `skip_paths`; missing config or missing `skip_paths` is treated as an empty list, not an error.
 
@@ -179,8 +179,7 @@ Consumer repos should add these PR-body placeholders before enabling the check b
 
 ```markdown
 Authorship: human
-Work Item: N/A (required for agent/mixed PRs unless Out-of-band reason is set)
-Out-of-band reason: N/A
+Request: N/A (describe the direct request or approved scope; no work item required)
 Size justification: N/A
 ```
 
@@ -475,7 +474,7 @@ Callers need `id-token: write` (OIDC) and `contents: read` (checkout) — a supe
 
 **Purpose:** Advisory ADR-0086 trigger rail for the pull-based local-worker Grid Review Runner. This workflow does **not** run Codex, Claude, Anthropic, OpenAI, or any model API in GitHub Actions. It applies high-confidence PR classification labels that already exist on the target repository, normalizes the worker-state labels, and upserts a structured queue comment that the local worker polls.
 
-**When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Architecture` for the Phase 1 pilot.
+**When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Studio` for the Phase 1 pilot.
 
 ### Minimal Caller
 
@@ -543,7 +542,7 @@ ADR-0088 removed the old OpenClaw webhook compatibility inputs. Callers should p
 
 ## Discord Operator-Alert Notification
 
-**Purpose:** Post one operator-alert to a Discord channel via the canonical seam per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md) D9. Every GitHub-Actions emitter routes through `job-discord-notify.yml`; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11).
+**Purpose:** Post one operator-alert to a Discord channel via the canonical seam per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Studio/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md) D9. Every GitHub-Actions emitter routes through `job-discord-notify.yml`; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11).
 
 **When to Use:** Any workflow that needs to surface an operator-actionable event (CI failure on `main`, release/NuGet event, scheduled-workflow failure, credential-rotation escalation, agent/hive/security signal). Pick the channel + severity from the ADR-0084 D6 routing table.
 
