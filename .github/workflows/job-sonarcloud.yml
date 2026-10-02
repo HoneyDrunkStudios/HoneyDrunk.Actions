@@ -34,7 +34,7 @@
 # Secret:
 #   SONAR_TOKEN — provisioned as a GitHub org secret with `Selected repositories`
 #   scope. Provisioning lives in `infrastructure/walkthroughs/sonarcloud-organization-setup.md`
-#   in HoneyDrunk.Architecture. Free/OSS plan caps Personal Access Token
+#   in HoneyDrunk.Studio. Free/OSS plan caps Personal Access Token
 #   expiration at 60 days — rotation discipline is tracked on the operator's
 #   calendar; the broader external-SaaS credential rotation policy is being
 #   formalized in a separate ADR (see `generated/adr-drafts/`).
@@ -117,7 +117,7 @@ on:
 
     secrets:
       sonar-token:
-        description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Architecture/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
+        description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Studio/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
         required: true
       github-token:
         description: 'GitHub token for PR decoration (falls back to github.token if not supplied)'

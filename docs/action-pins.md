@@ -40,6 +40,6 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 
 ## Cross-references
 
-- HoneyDrunk.Architecture invariant 38 — reusable workflows invoke tool CLIs directly; this inventory covers the permitted third-party/first-party action surface that remains.
+- HoneyDrunk.Studio invariant 38 — reusable workflows invoke tool CLIs directly; this inventory covers the permitted third-party/first-party action surface that remains.
 - ADR-0012 D10 — action-pin inventory and update cadence.
 - ADR-0012 Gap 5 — future optional workflow can parse `uses:` pins and diff them against this inventory.

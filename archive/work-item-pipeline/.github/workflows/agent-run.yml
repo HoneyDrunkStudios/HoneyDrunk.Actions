@@ -1,0 +1,327 @@
+# ==============================================================================
+# Agent Run — Generic Reusable AI Agent Workflow
+# ==============================================================================
+# Purpose:
+#   Reusable workflow that checks out HoneyDrunk.Architecture and invokes an
+#   AI agent (Claude Code Action or Codex) against it. Accepts either a named
+#   agent definition (resolved to .claude/agents/{agent}.md in Architecture)
+#   or a direct prompt string.
+#
+#   This is the single entrypoint for all agent-driven work in the Grid.
+#   D8 execution triggers, governance syncs, and any future agentic workflows
+#   call this workflow rather than wiring their own AI invocations.
+#
+# Usage example (named agent):
+#   jobs:
+#     sync:
+#       uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/agent-run.yml@main
+#       with:
+#         agent: initiatives-sync
+#         provider: claude
+#       secrets:
+#         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         github-token: ${{ secrets.INITIATIVES_SYNC_TOKEN }}
+#
+# Usage example (direct prompt):
+#   jobs:
+#     run:
+#       uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/agent-run.yml@main
+#       with:
+#         prompt: 'Read catalogs/grid-health.json and summarise Node health as a PR comment.'
+#       secrets:
+#         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         github-token: ${{ secrets.GITHUB_TOKEN }}
+#
+# Usage example (named agent + work item — invariant 32 enforcement):
+#   jobs:
+#     execute:
+#       uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/agent-run.yml@main
+#       with:
+#         agent: execute
+#         work-item-path: generated/work-items/active/adr-0011-code-review-pipeline/02-actions-job-sonarcloud-workflow.md
+#         checkout-target: HoneyDrunkStudios/HoneyDrunk.Actions
+#       secrets:
+#         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         github-token: ${{ secrets.AGENT_RUN_TOKEN }}
+#
+#   When `work-item-path` is supplied, the workflow appends a structured "Work Item:
+#   <permalink>" instruction to the agent's prompt envelope AND runs a post-hoc
+#   "Assert PR-body work item link" step that mechanically inserts the canonical
+#   `> Work Item: <permalink>` line into any PR the agent opened. The workflow —
+#   not the LLM — is the mechanical guarantor of invariant 32.
+# ==============================================================================
+
+name: Agent Run
+
+on:
+  workflow_call:
+    inputs:
+      provider:
+        description: 'AI provider: claude | codex. Default: claude.'
+        required: false
+        type: string
+        default: 'claude'
+      agent:
+        description: >-
+          Agent name. Resolves to .claude/agents/{agent}.md in the Architecture
+          repo. Mutually exclusive with prompt — agent takes precedence when
+          both are supplied.
+        required: false
+        type: string
+        default: ''
+      prompt:
+        description: >-
+          Direct prompt text. Used when agent is not set. Ignored if agent is
+          provided.
+        required: false
+        type: string
+        default: ''
+      checkout-target:
+        description: >-
+          Optional second repo to checkout alongside Architecture
+          (e.g. HoneyDrunkStudios/HoneyDrunk.Vault). Checked out at path
+          target-repo/ so the agent can read and write to it.
+        required: false
+        type: string
+        default: ''
+      allowed-tools:
+        description: 'Comma-separated list of tools the agent may use.'
+        required: false
+        type: string
+        default: 'Read,Grep,Glob,Edit,Write,Bash,TodoWrite'
+      max-turns:
+        description: 'Maximum agent turns before stopping.'
+        required: false
+        type: number
+        default: 30
+      model:
+        description: >-
+          Claude model ID to use (e.g. claude-haiku-4-5-20251001,
+          claude-sonnet-4-6). Leave empty to use the action default (Sonnet).
+        required: false
+        type: string
+        default: ''
+      architecture-ref:
+        description: 'Git ref of HoneyDrunk.Architecture to checkout.'
+        required: false
+        type: string
+        default: 'main'
+      work-item-path:
+        description: >-
+          Optional path to the work item file (relative to HoneyDrunk.Architecture
+          root, e.g. generated/work-items/active/adr-0011-code-review-pipeline/02-actions-job-sonarcloud-workflow.md).
+          When set, the workflow (1) injects a "Work Item: <permalink>" instruction
+          into the agent's prompt envelope and (2) runs a post-hoc assert step
+          that mechanically inserts the canonical "> Work Item: <permalink>" line
+          into any PR the agent opened in the checkout-target repo. Together
+          these enforce invariant 32 in HoneyDrunk.Architecture regardless of
+          LLM behaviour.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      anthropic-api-key:
+        description: 'Anthropic API key. Required when provider=claude.'
+        required: false
+      openai-api-key:
+        description: 'OpenAI API key. Required when provider=codex.'
+        required: false
+      github-token:
+        description: >-
+          Token with contents:write and pull-requests:write on Architecture,
+          plus issues:read on any repos whose issues the agent will query
+          via the gh CLI.
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Architecture
+        uses: actions/checkout@v5
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Architecture
+          ref: ${{ inputs.architecture-ref }}
+          token: ${{ secrets.github-token }}
+
+      - name: Checkout target repo
+        if: ${{ inputs.checkout-target != '' }}
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.checkout-target }}
+          token: ${{ secrets.github-token }}
+          path: target-repo
+
+      - name: Configure git identity
+        run: |
+          git config user.name "hd-agent[bot]"
+          git config user.email "hd-agent[bot]@honeydrunkstudios.dev"
+
+      - name: Validate inputs
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          AGENT: ${{ inputs.agent }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          set -euo pipefail
+          if [[ "${PROVIDER}" != "claude" && "${PROVIDER}" != "codex" ]]; then
+            echo "::error::Unsupported provider '${PROVIDER}'. Must be 'claude' or 'codex'."
+            exit 1
+          fi
+          if [[ -z "${AGENT}" && -z "${PROMPT}" ]]; then
+            echo "::error::Either 'agent' or 'prompt' must be provided."
+            exit 1
+          fi
+
+      - name: Resolve work item link
+        id: work-item
+        env:
+          WORK_ITEM_PATH: ${{ inputs.work-item-path }}
+          ARCH_REF: ${{ inputs.architecture-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${WORK_ITEM_PATH}" ]]; then
+            # Resolve the Architecture checkout's actual commit SHA so the
+            # produced URL is a true permalink — won't move if the ref
+            # (e.g. 'main') advances after this run. Falls back to the
+            # input ref if SHA resolution fails for any reason.
+            ARCH_SHA=$(git rev-parse HEAD 2>/dev/null || echo "${ARCH_REF}")
+            LINK="https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/${ARCH_SHA}/${WORK_ITEM_PATH}"
+            echo "link=${LINK}" >> "$GITHUB_OUTPUT"
+            echo "has-work-item=true" >> "$GITHUB_OUTPUT"
+            # Verify the file exists in the checked-out Architecture tree.
+            # Warn (do not fail) on missing — hotfix and out-of-band runs may
+            # legitimately reference a work item that does not exist at this ref.
+            if [[ ! -f "${WORK_ITEM_PATH}" ]]; then
+              echo "::warning::work-item-path '${WORK_ITEM_PATH}' was supplied but the file does not exist at the resolved Architecture ref (ref=${ARCH_REF}, sha=${ARCH_SHA}). The PR will still be opened, but the work item link will 404 until the work item lands at that ref."
+            fi
+          else
+            echo "has-work-item=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve prompt
+        id: resolve
+        env:
+          AGENT: ${{ inputs.agent }}
+          PROMPT: ${{ inputs.prompt }}
+          HAS_WORK_ITEM: ${{ steps.work-item.outputs.has-work-item }}
+          WORK_ITEM_LINK: ${{ steps.work-item.outputs.link }}
+          WORK_ITEM_PATH: ${{ inputs.work-item-path }}
+        run: |
+          set -euo pipefail
+
+          # Build the base envelope (agent-mode vs direct-prompt-mode).
+          if [[ -n "${AGENT}" ]]; then
+            BASE="You are the **${AGENT}** agent. Read your full instructions from \`.claude/agents/${AGENT}.md\` first, then execute your full workflow as described there."
+          else
+            BASE="${PROMPT}"
+          fi
+
+          # When a work item is supplied, append a structured instruction that
+          # tells the agent to include the canonical work item link line in any
+          # PR body it opens. This is best-effort soft enforcement — the
+          # post-hoc "Assert PR-body work item link" step is the mechanical
+          # guarantor of invariant 32 if the LLM ignores this instruction.
+          if [[ "${HAS_WORK_ITEM}" == "true" ]]; then
+            WORK_ITEM_INSTRUCTION="
+
+          ---
+
+          **Work item for this run:** \`${WORK_ITEM_PATH}\`
+          **Work item permalink:** ${WORK_ITEM_LINK}
+
+          When you open a pull request for this work, include the following line verbatim in the PR body (this satisfies invariant 32 in HoneyDrunk.Architecture and is what the review agent uses to resolve the work item as the primary scope anchor):
+
+          > Work Item: ${WORK_ITEM_LINK}
+
+          If you cannot include the link for any reason, label the PR \`out-of-band\` and explain why in the PR body."
+            FULL_PROMPT="${BASE}${WORK_ITEM_INSTRUCTION}"
+          else
+            FULL_PROMPT="${BASE}"
+          fi
+
+          {
+            echo "prompt<<EOF_PROMPT"
+            printf '%s' "${FULL_PROMPT}"
+            echo ""
+            echo "EOF_PROMPT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run agent — Claude
+        if: ${{ inputs.provider == 'claude' || inputs.provider == '' }}
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+        with:
+          prompt: ${{ steps.resolve.outputs.prompt }}
+          anthropic_api_key: ${{ secrets.anthropic-api-key }}
+          github_token: ${{ secrets.github-token }}
+          claude_args: |
+            --allowedTools ${{ inputs.allowed-tools }}
+            --max-turns ${{ inputs.max-turns }}
+            ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
+
+      - name: Run agent — Codex
+        if: ${{ inputs.provider == 'codex' }}
+        run: |
+          # TODO: wire openai/codex-action once stable
+          echo "::error::Codex provider is not yet wired. Use provider: claude."
+          exit 1
+
+      # Mechanical guarantor of invariant 32 (HoneyDrunk.Architecture).
+      # The prompt-side instruction in "Resolve prompt" is best-effort —
+      # this step is the workflow-side enforcement. It locates any PR the
+      # agent opened on the run's branch in the checkout-target repo and
+      # asserts the canonical "> Work Item: <permalink>" line into the PR body
+      # via `gh pr edit`. Idempotent (no-op if the line is already present)
+      # and soft on edge cases (no PR, no checkout-target, detached HEAD,
+      # main-branch run → notice + exit 0).
+      - name: Assert PR-body work item link
+        if: ${{ inputs.work-item-path != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.github-token }}
+          WORK_ITEM_LINK: ${{ steps.work-item.outputs.link }}
+          WORK_ITEM_PATH: ${{ inputs.work-item-path }}
+          CHECKOUT_TARGET: ${{ inputs.checkout-target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CHECKOUT_TARGET}" ]]; then
+            echo "::notice::No checkout-target — agent ran in Architecture-only mode; PR-body assert skipped (no target repo to inspect)."
+            exit 0
+          fi
+
+          # The agent runs in target-repo/ (set by the "Checkout target repo" step).
+          cd target-repo
+
+          BRANCH=$(git branch --show-current || true)
+          if [[ -z "${BRANCH}" || "${BRANCH}" == "main" ]]; then
+            echo "::notice::Agent did not open a feature branch (current=${BRANCH:-detached}); no PR to assert."
+            exit 0
+          fi
+
+          # Find the PR opened from this branch in the target repo.
+          PR_NUMBER=$(gh pr list --repo "${CHECKOUT_TARGET}" --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "${PR_NUMBER}" ]]; then
+            echo "::notice::Agent did not open a PR on branch '${BRANCH}' in ${CHECKOUT_TARGET}; nothing to assert."
+            exit 0
+          fi
+
+          # Read current PR body. If the exact canonical line is already present, no-op.
+          BODY=$(gh pr view "${PR_NUMBER}" --repo "${CHECKOUT_TARGET}" --json body --jq '.body // ""')
+          EXPECTED_LINE="> Work Item: ${WORK_ITEM_LINK}"
+
+          if printf '%s\n' "${BODY}" | grep -Fxq "${EXPECTED_LINE}"; then
+            echo "PR #${PR_NUMBER} already contains the canonical work item link line; no edit needed."
+            exit 0
+          fi
+
+          # Otherwise, prepend the canonical work item link block, preserving the agent's body below an `---` separator.
+          NEW_BODY=$(printf '%s\n\n---\n\n%s\n' "${EXPECTED_LINE}" "${BODY}")
+          echo "Asserting canonical work item link on PR #${PR_NUMBER} in ${CHECKOUT_TARGET}."
+          gh pr edit "${PR_NUMBER}" --repo "${CHECKOUT_TARGET}" --body "${NEW_BODY}"

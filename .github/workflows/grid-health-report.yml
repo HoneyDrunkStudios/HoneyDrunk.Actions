@@ -28,7 +28,7 @@ jobs:
       - name: Checkout Architecture catalog
         uses: actions/checkout@v5
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Architecture
+          repository: HoneyDrunkStudios/HoneyDrunk.Studio
           path: architecture
           token: ${{ secrets.GRID_HEALTH_PAT }}
           sparse-checkout: catalogs/grid-health.json
@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "ERROR: GRID_HEALTH_PAT secret is required. It must read HoneyDrunk.Architecture, read Actions workflow runs and org repo metadata, and write Issues on HoneyDrunk.Actions plus every repo with tracked_workflows." >&2
+            echo "ERROR: GRID_HEALTH_PAT secret is required. It must read HoneyDrunk.Studio, read Actions workflow runs and org repo metadata, and write Issues on HoneyDrunk.Actions plus every repo with tracked_workflows." >&2
             exit 1
           fi
           gh auth status >/dev/null

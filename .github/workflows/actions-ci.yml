@@ -96,6 +96,9 @@ jobs:
       - name: Regression test release-note generation
         run: python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
 
+      - name: Regression test direct-request PR metadata
+        run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
+
       - name: Smoke test dependency scan workflow helper
         shell: bash
         run: |

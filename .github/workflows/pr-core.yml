@@ -361,7 +361,7 @@ jobs:
       issues: write
       pull-requests: read
     steps:
-      - name: Validate work item metadata and out-of-band label
+      - name: Validate request context and legacy metadata
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.github-token || github.token }}
@@ -413,18 +413,26 @@ jobs:
                       found.append(line.lstrip('- ').strip())
               return '\n'.join(found).strip()
 
+          request = field_value(['Request', 'Approved scope']) or section_value('Request') or section_value('Approved scope')
           work_item = field_value(['Work Item']) or section_value('Work Item')
           out_of_band_reason = field_value(['Out-of-band reason', 'Out of band reason']) or section_value('Out-of-band reason') or section_value('Out of band reason')
           has_work_item = bool(work_item)
           has_oob_reason = bool(out_of_band_reason)
+
+          if request:
+              if has_work_item and has_oob_reason:
+                  print('::error::PR declares both Work Item and Out-of-band reason. Use exactly one legacy field or neither.')
+                  sys.exit(1)
+              print('Direct request context present; no work item or out-of-band classification required.')
+              sys.exit(0)
 
           if authorship in {'agent-codex', 'agent-copilot', 'agent-claude-code', 'mixed'}:
               if has_work_item and has_oob_reason:
                   print('::error::Agent/mixed PR declares both Work Item and Out-of-band reason. Use exactly one.')
                   sys.exit(1)
               if not has_work_item and not has_oob_reason:
-                  print('::error::Agent/mixed PRs must include Work Item metadata, or an explicit Out-of-band reason.')
-                  print('::error::Do not silently rely on the out-of-band label; make the degraded context visible in the PR body.')
+                  print('::error::Agent/mixed PRs must describe Request or Approved scope. Legacy Work Item or Out-of-band reason metadata is also accepted.')
+                  print('::error::Keep the authorized scope visible in the PR body; a tracking ticket is not required.')
                   sys.exit(1)
           elif has_oob_reason and has_work_item:
               print('::error::PR declares both Work Item and Out-of-band reason. Use exactly one.')
