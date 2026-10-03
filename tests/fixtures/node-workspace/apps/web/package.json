@@ -1,0 +1,10 @@
+{
+  "name": "actions-node-smoke-web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node ../../prepare.cjs",
+    "test": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/junit.xml ../../smoke.test.cjs",
+    "lint": "node --check ../../smoke.test.cjs"
+  }
+}

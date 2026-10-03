@@ -133,3 +133,69 @@ jobs:
           # job-discord-notify.yml (ADR-0084 D8). This is the gate that keeps the
           # runtime workflow thin — the reusable workflow trusts this script.
           python3 -m unittest test_discord_notify -v
+
+  # Relative workflow calls use this exact repository revision, including PRs.
+  # No consumer app, registry credential, deployed service, or device is needed.
+  node-workspace-smoke:
+    name: Node workflow smoke (${{ matrix.profile }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: npm-defaults
+            package-manager-version: ''
+            node-version-file: ''
+          - profile: npm-pinned
+            package-manager-version: '10.9.2'
+            node-version-file: ../../.nvmrc
+    uses: ./.github/workflows/job-node-workspace.yml
+    with:
+      working-directory: tests/fixtures/node-workspace/apps/web
+      cache-dependency-path: ../../package-lock.json
+      node-version-file: ${{ matrix.node-version-file }}
+      package-manager-version: ${{ matrix.package-manager-version }}
+      test-results-path: reports
+      artifact-name: node-smoke-${{ matrix.profile }}
+      artifact-retention-days: 1
+      timeout-minutes: 10
+
+  verify-node-workspace-smoke:
+    name: Verify hosted Node evidence
+    needs: [node-workspace-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download smoke evidence
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: node-smoke-*-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: node-smoke-evidence
+
+      - name: Verify uploaded outcomes, test results, and runtime versions
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = Path('node-smoke-evidence')
+          for profile in ('npm-defaults', 'npm-pinned'):
+              artifacts = list(root.glob(f'node-smoke-{profile}-*'))
+              assert len(artifacts) == 1, f'{profile}: expected one uploaded artifact'
+              artifact = artifacts[0]
+              results = json.loads((artifact / 'validation-results.json').read_text())
+              assert not results['evidenceErrors'], results['evidenceErrors']
+              for check in ('install', 'build', 'test', 'lint'):
+                  assert results['checks'][check]['outcome'] == 'success', (profile, check)
+              for check in ('typecheck', 'browser-install', 'accessibility', 'e2e'):
+                  assert results['checks'][check]['outcome'] == 'skipped', (profile, check)
+                  assert results['checks'][check]['requested'] is False, (profile, check)
+              runtime = json.loads((artifact / 'test-results/runtime.json').read_text())
+              assert runtime['node'].split('.')[0] == '22', runtime
+              if profile == 'npm-pinned':
+                  assert runtime['npm'] == '10.9.2', runtime
+              junit = ET.parse(artifact / 'test-results/junit.xml')
+              assert junit.findall('.//testcase'), f'{profile}: no executed tests in JUnit'
+              assert not junit.findall('.//failure'), f'{profile}: JUnit reports failures'
+              assert not junit.findall('.//error'), f'{profile}: JUnit reports errors'
+              print(f'{profile}: uploaded outcomes and JUnit verified; Node {runtime["node"]}, npm {runtime["npm"]}')

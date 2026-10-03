@@ -140,9 +140,9 @@ class NodeWorkspaceTests(unittest.TestCase):
         result, outputs = self.execute('validate')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(outputs['working-directory'], self.workdir.resolve().as_posix())
-        self.assertEqual(outputs['node-version-file'], (self.workdir / '.nvmrc').as_posix())
+        self.assertEqual(outputs['node-version-file'], (self.workdir / '.nvmrc').resolve().as_posix())
         self.assertEqual(len(outputs['cache-dependency-path'].splitlines()), 2)
-        self.assertTrue(all(p.startswith(self.workdir.as_posix()) for p in outputs['cache-dependency-path'].splitlines()))
+        self.assertTrue(all(p.startswith(self.workdir.resolve().as_posix()) for p in outputs['cache-dependency-path'].splitlines()))
 
     def test_reject_invalid_configuration(self):
         cases = [
@@ -155,7 +155,7 @@ class NodeWorkspaceTests(unittest.TestCase):
             ('artifact-name', '../bad'), ('artifact-name', 'bad\nname'),
             ('coverage-path', '.'), ('coverage-path', '.git'), ('coverage-path', '**/*'),
             ('coverage-path', '../private'), ('test-results-path', '/private'),
-            ('cache-dependency-path', '../package-lock.json'), ('cache-dependency-path', ''),
+            ('cache-dependency-path', '../../package-lock.json'), ('cache-dependency-path', ''),
             ('test-command', ' \n '), ('install-command', ''), ('e2e-command', ' '),
             ('node-version-file', 'missing'), ('browser-install-command', 'npm run browsers'),
         ]
@@ -175,6 +175,30 @@ class NodeWorkspaceTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         order = list(STEPS)
         self.assertLess(order.index('Provision package manager locally'), order.index('Restore package manager cache'))
+
+    def test_monorepo_paths_can_resolve_to_checkout_root(self):
+        (self.repo / '.nvmrc').write_text('22', encoding='utf-8')
+        (self.repo / 'package-lock.json').write_text('{}', encoding='utf-8')
+        self.inputs.update({'node-version-file': '../.nvmrc',
+                            'cache-dependency-path': '../package-lock.json\n../apps/*/package-lock.json'})
+        result, outputs = self.execute('validate')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outputs['node-version-file'], (self.repo / '.nvmrc').resolve().as_posix())
+        self.assertEqual(outputs['cache-dependency-path'].splitlines()[0],
+                         (self.repo / 'package-lock.json').resolve().as_posix())
+
+    def test_parent_paths_cannot_escape_checkout(self):
+        for key in ('node-version-file', 'cache-dependency-path'):
+            with self.subTest(key=key):
+                result, _ = self.execute('validate', inputs={**self.inputs, key: '../../outside'})
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_monorepo_version_symlink_cannot_escape_checkout(self):
+        outside = self.root / 'outside-version'
+        outside.write_text('22', encoding='utf-8')
+        self.make_symlink(self.repo / '.nvmrc', outside)
+        result, _ = self.execute('validate', inputs={**self.inputs, 'node-version-file': '../.nvmrc'})
+        self.assertNotEqual(result.returncode, 0)
 
     def test_default_npm_consumer_executes_install_build_test_lint(self):
         # No registry dependencies, credentials, or network needed by this fixture.
@@ -285,6 +309,24 @@ class NodeWorkspaceTests(unittest.TestCase):
         self.assertIn('always()', upload['if'])
         self.assertEqual(upload['with']['if-no-files-found'], 'error')
         self.assertFalse(upload['with']['include-hidden-files'])
+        self.assertFalse(DEFAULTS['upload-summary-artifact'])
+        self.assertIn("(inputs.upload-summary-artifact || inputs.coverage-path != '' || inputs.test-results-path != '')",
+                      upload['if'])
+
+    def test_hosted_smoke_calls_this_revision_with_default_and_pinned_managers(self):
+        ci = yaml.safe_load((ROOT / '.github/workflows/actions-ci.yml').read_text(encoding='utf-8'))
+        smoke = ci['jobs']['node-workspace-smoke']
+        self.assertEqual(smoke['uses'], './.github/workflows/job-node-workspace.yml')
+        cases = smoke['strategy']['matrix']['include']
+        self.assertEqual([case['package-manager-version'] for case in cases], ['', '10.9.2'])
+        self.assertEqual(smoke['with']['cache-dependency-path'], '../../package-lock.json')
+        for command in ('install-command', 'build-command', 'test-command', 'lint-command'):
+            self.assertNotIn(command, smoke['with'])
+        verify = ci['jobs']['verify-node-workspace-smoke']
+        self.assertIn('node-workspace-smoke', verify['needs'])
+        download = next(step for step in verify['steps'] if step.get('uses', '').startswith('actions/download-artifact@'))
+        self.assertRegex(download['uses'], r'@[0-9a-f]{40}$')
+        self.assertIn('github.run_attempt', download['with']['pattern'])
 
     def test_repeated_default_calls_have_distinct_artifact_ids(self):
         first, first_outputs = self.execute('evidence')

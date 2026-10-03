@@ -40,6 +40,10 @@ Node Workspace quality extension retains the existing exact pins:
 The setup-node pin is also used by its regression fixtures in `actions-ci.yml`.
 No new marketplace action is introduced. Package-manager provisioning is an
 optional exact-version npm install into `RUNNER_TEMP`, not a global install.
+Hosted Node smoke verification resolves the existing download-artifact v7
+convention to `actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131`.
+The smoke calls use the local reusable-workflow reference so they execute the
+same revision as the CI caller, including unmerged PR commits.
 
 - Any PR that adds, removes, or changes an action pin updates this file in the same PR.
 - Bumping a `Deprecated-with-deadline` entry to its successor flips `Status` to `Current` and sets the deadline to `none` until a new deprecation is announced.

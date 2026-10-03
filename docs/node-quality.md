@@ -25,23 +25,31 @@ Install, build, test, and lint retain their order and fail-fast behavior.
 | `coverage-path` | empty | One report file or directory below the workdir; requires `run-test`. |
 | `test-results-path` | empty | One report file or directory below the workdir, such as `reports` or `test-results`. |
 | `artifact-name` | `node-workspace` | 1–100 letters/digits/dots/underscores/hyphens, beginning with a letter/digit. A descriptive prefix helps identify each call/matrix entry. Run ID, attempt, and a unique invocation suffix are appended to prevent collisions even with unchanged caller defaults. |
+| `upload-summary-artifact` | `false` | Opt into a JSON-only artifact when neither report path is configured. A requested coverage/test report always enables upload, including the JSON summary. |
 | `artifact-retention-days` | `14` | Integer 1–90, subject to the repository's retention policy. |
 | `timeout-minutes` | `360` | Integer 1–360. Preserves the previous inherited timeout; callers should set 20 for fast checks or an appropriate bounded heavy-suite budget. |
 
-All paths use forward slashes and are relative to `working-directory`; the
-workdir itself is relative to the caller's checkout. Absolute paths, traversal,
-control characters, and escaping symlinks fail validation. The cache input
-accepts newline-separated relative lockfile paths/globs, each rooted at the
-workdir. Evidence paths are literal files/directories: no glob, repository root,
+Paths use forward slashes. The workdir is relative to the caller's checkout;
+`cache-dependency-path` and `node-version-file` resolve from that workdir and may
+use `..` to reach shared monorepo files inside `GITHUB_WORKSPACE`. For example,
+`working-directory: packages/web` accepts `cache-dependency-path: ../../package-lock.json`
+and `node-version-file: ../../.nvmrc`. Resolved paths and glob matches must stay
+inside the checkout, including through symlinks. Absolute paths, drive prefixes,
+backslashes, control characters, and checkout escapes are rejected as explicit
+input hardening; migrate absolute paths to relative paths when adopting this
+revision. The cache input accepts newline-separated relative lockfiles/globs.
+New evidence paths are confined to the workdir: no parent traversal, glob, workdir root,
 hidden path, or symlink. Requested evidence that is missing or has no nonempty files fails the
 job even if its test command returned zero. Hidden files are excluded. Coverage
 and test reports are copied into a temporary artifact directory before upload.
 
-The job always attempts a summary and `validation-results.json`, including after
+The job always attempts a step summary and local `validation-results.json`, including after
 command failure. It records each command's `requested` flag and actual step
 `outcome`: `success`, `failure`, `skipped`, or `cancelled`. Skipped checks say
-whether they were disabled or blocked before execution. The upload includes any
-requested evidence that exists; the original test failure remains fatal.
+whether they were disabled or blocked before execution. Artifact upload runs only
+when a report path is requested or `upload-summary-artifact: true`; unchanged
+callers do not acquire an artifact-service dependency. Enabled uploads include
+the JSON summary and validated report snapshots; the original test failure remains fatal.
 Hard runner loss or job termination can prevent this best-effort upload.
 
 Reusable outputs are `test-result`, `typecheck-result`, `accessibility-result`,
@@ -98,8 +106,8 @@ not cached. This follows the [setup-node cache contract](https://github.com/acti
 Use immutable installs (`npm ci`, `pnpm install --frozen-lockfile`, or the
 corresponding Yarn option). Choosing `package-manager` only chooses the manager
 and cache: callers must explicitly change `install-command` and other commands
-when using pnpm/Yarn. For monorepos with a root lockfile, use the repository root
-as workdir and invoke scripts through workspace selectors.
+when using pnpm/Yarn. Monorepos can either use a nested workdir with parent-relative
+lockfile/version paths or use the repository root with workspace script selectors.
 
 Reuse [`job-node-security-audit.yml`](../.github/workflows/job-node-security-audit.yml)
 as a separate dependency gate. Its nonzero audit status remains fatal and its
@@ -160,8 +168,15 @@ actionlint -shellcheck=
 
 The suite parses the real YAML, executes its validator/report scripts, and runs
 its Bash command steps in a temporary npm consumer without registry dependencies.
-It covers defaults, outcomes, failure propagation, quoting, paths, missing
-reports, and symlink escapes. Existing repository regressions still run in
-`actions-ci.yml`. GitHub's hosted cache/artifact services, Windows/macOS runner
-images, actual app harnesses, and native device flows require separate execution
-evidence; these local checks do not claim to emulate them.
+It covers defaults, outcomes, failure propagation, quoting, parent-relative
+monorepo paths, missing reports, and symlink escapes. Existing regressions still
+run in `actions-ci.yml`. That workflow also calls this exact reusable-workflow
+revision against a dependency-free nested npm fixture with the default manager
+and an explicit npm version. A follow-on job downloads and validates the real
+artifacts, JUnit results, command outcomes, and Node/npm versions, covering
+setup-node, cache setup, temporary-manager PATH propagation, and the artifact
+service. Downloads are scoped to the current run attempt so reruns cannot use
+stale evidence. A rerun can additionally verify cache-hit restoration in the
+hosted step logs. This fixture does not attest app/browser or native behavior.
+pnpm/Yarn provisioning, Windows/macOS hosted images, actual app harnesses, and
+native device flows still require their own execution evidence.

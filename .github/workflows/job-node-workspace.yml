@@ -113,6 +113,11 @@ on:
         required: false
         type: string
         default: node-workspace
+      upload-summary-artifact:
+        description: Upload validation-results.json when no coverage or test-results path is requested.
+        required: false
+        type: boolean
+        default: false
       artifact-retention-days:
         description: Evidence retention from 1 to 90 days, subject to repository policy.
         required: false
@@ -188,24 +193,27 @@ jobs:
           def relative_path(value, base, *, pattern=False, evidence=False):
               if not isinstance(value, str) or not value or any(ord(c) < 32 for c in value):
                   raise ValueError('Paths must be nonempty and contain no control characters')
-              # Accept portable relative paths. Backslashes and drive prefixes are ambiguous
-              # across runners; traversal is never needed because workdir is configurable.
+              # Operational paths may walk to a monorepo root, but never outside
+              # the checkout. New evidence paths are confined to the workdir.
               parts = PurePosixPath(value).parts
-              if value.startswith(('/', '!')) or '\\' in value or ':' in value or '..' in parts:
-                  raise ValueError('Paths must be relative, use /, and stay inside working-directory')
+              if value.startswith(('/', '!')) or '\\' in value or ':' in value:
+                  raise ValueError('Paths must be relative and use /')
+              if evidence and '..' in parts:
+                  raise ValueError('Evidence paths must stay below working-directory')
               if not pattern and any(c in value for c in '*?[]'):
                   raise ValueError('Only cache-dependency-path accepts glob patterns')
               candidate = base / value
-              candidate.resolve().relative_to(base.resolve())
+              boundary = base.resolve() if evidence else workspace
+              candidate.resolve().relative_to(boundary)
               if evidence and (candidate.resolve() == base.resolve() or any(p.startswith('.') for p in parts)):
                   raise ValueError('Evidence must name a nonhidden file or directory below working-directory')
               if pattern:
                   for match in glob.glob(str(candidate), recursive=True):
-                      Path(match).resolve().relative_to(base.resolve())
-              return candidate
+                      Path(match).resolve().relative_to(boundary)
+              return candidate.resolve()
 
           workdir = relative_path(inputs['working-directory'], workspace).resolve()
-          if not workdir.is_dir() or not (workdir / 'package.json').is_file():
+          if not workdir.is_dir() or not relative_path('package.json', workdir).is_file():
               raise ValueError('working-directory must contain package.json')
           manager = inputs['package-manager']
           if manager not in ('npm', 'pnpm', 'yarn'):
@@ -441,7 +449,7 @@ jobs:
               raise SystemExit(1)
 
       - name: Upload validation evidence
-        if: ${{ always() && steps.evidence.outputs.directory != '' }}
+        if: ${{ always() && steps.evidence.outputs.directory != '' && (inputs.upload-summary-artifact || inputs.coverage-path != '' || inputs.test-results-path != '') }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ inputs.artifact-name }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.evidence.outputs.artifact-id }}
