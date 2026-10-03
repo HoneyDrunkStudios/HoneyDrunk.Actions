@@ -140,7 +140,7 @@ class NodeWorkspaceTests(unittest.TestCase):
         result, outputs = self.execute('validate')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(outputs['working-directory'], self.workdir.resolve().as_posix())
-        self.assertEqual(outputs['node-version-file'], (self.workdir / '.nvmrc').resolve().as_posix())
+        self.assertEqual(outputs['node-version-file'], 'app with spaces/.nvmrc')
         self.assertEqual(len(outputs['cache-dependency-path'].splitlines()), 2)
         self.assertTrue(all(p.startswith(self.workdir.resolve().as_posix()) for p in outputs['cache-dependency-path'].splitlines()))
 
@@ -183,9 +183,25 @@ class NodeWorkspaceTests(unittest.TestCase):
                             'cache-dependency-path': '../package-lock.json\n../apps/*/package-lock.json'})
         result, outputs = self.execute('validate')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(outputs['node-version-file'], (self.repo / '.nvmrc').resolve().as_posix())
+        self.assertEqual(outputs['node-version-file'], '.nvmrc')
         self.assertEqual(outputs['cache-dependency-path'].splitlines()[0],
                          (self.repo / 'package-lock.json').resolve().as_posix())
+
+    def test_setup_node_can_read_validated_version_file_from_checkout(self):
+        (self.repo / '.nvmrc').write_text('22', encoding='utf-8')
+        result, outputs = self.execute('validate', inputs={**self.inputs, 'node-version-file': '../.nvmrc'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(Path(outputs['node-version-file']).is_absolute())
+        # Pinned setup-node uses path.join(GITHUB_WORKSPACE, versionFileInput).
+        # Passing our former absolute output doubled the checkout prefix on Linux.
+        result = subprocess.run([
+            'node', '-e',
+            "const fs = require('node:fs'); const path = require('node:path'); "
+            "process.stdout.write(fs.readFileSync(path.join(process.argv[1], process.argv[2]), 'utf8'));",
+            self.repo.resolve().as_posix(), outputs['node-version-file'],
+        ], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '22')
 
     def test_parent_paths_cannot_escape_checkout(self):
         for key in ('node-version-file', 'cache-dependency-path'):
