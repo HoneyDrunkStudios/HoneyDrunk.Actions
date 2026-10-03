@@ -128,4 +128,4 @@ If you are about to embed complex scanning behavior directly in a workflow YAML 
 - Prefer small, composable composite actions for repeated step patterns.  
 - Keep consumer repo workflows as thin wrappers that call reusable workflows from this repo.  
 - Do not add business or application specific logic here.  
-- If a request clearly belongs in another node (for example implementing a scanner CLI), suggest creating a work item for that node instead of writing it here.
+- If a request clearly belongs in another node (for example implementing a scanner CLI), state the scoped request and owning repository instead of writing it here; do not create a work item or ticket unless separately requested.

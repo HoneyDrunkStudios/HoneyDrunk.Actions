@@ -110,6 +110,12 @@ jobs:
           "$RUNNER_TEMP/node-workflow-tests/bin/python" -m pip install -r tests/requirements.txt
           "$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p 'test_node_workspace.py' -v
 
+      - name: Regression test direct-request PR metadata
+        run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
+
+      - name: Regression test coverage baseline ratchet
+        run: python3 -m unittest discover -s tests -p 'test_coverage_baseline_ratchet.py' -v
+
       - name: Smoke test dependency scan workflow helper
         shell: bash
         run: |

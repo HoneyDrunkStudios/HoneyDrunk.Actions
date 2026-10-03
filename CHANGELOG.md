@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-02 — Studio migration (pending rollout)
+
+- Archive the retired work-item filing workflow/script and former packet-link enforcement. Existing issues and old refs are preserved.
+- Point active monitoring/agent references at HoneyDrunk.Studio while retaining the stable honeydrunk-architecture node ID.
+- Accept direct Request/Approved scope context in PR metadata without requiring a packet or out-of-band classification; retain authorship, review and security checks.
+- Document coordinated rollout, pinned-workflow limits and deployed local-worker follow-up in docs/studio-migration.md.
+
 ## Unreleased
 
 ### Added
@@ -22,6 +29,8 @@
 - `actions/azure/deploy-function`: deploy via the Azure CLI (`az functionapp deployment source config-zip`) instead of the `azure/functions-action@v1` marketplace action. This brings the action into invariant-38 compliance (invoke the tool CLI directly rather than wrapping a tool that ships a stable CLI) and removes the external dependency that broke **every** Function deploy when GitHub ToS-blocked the `Azure/functions-action` repo on 2026-06-05. `config-zip` is the one-deploy path for Flex Consumption and zip-deploy for classic plans; the downloaded publish directory is zipped (including the hidden `.azurefunctions` dir required for Flex) before upload, with a single retry for transient post-upload status-poll blips.
 
 ### Fixed
+
+- `coverage-baseline-ratchet.yml`: measure downloaded coverage without assuming a test-project filename suffix, and only stage/commit/push after a changed baseline is written. Missing, unreadable, empty, and unchanged coverage results now skip all Git writes. Coverage calculations and PR gate thresholds are unchanged.
 
 - `nightly-security.yml`: made the filtered CodeQL SARIF upload best-effort so repositories without GitHub Code Security/code scanning enabled still complete nightly SAST and retain the SARIF artifact report. Failed uploads now emit a warning annotation and job-summary entry so degraded Code Scanning ingestion stays visible.
 - `nightly-security.yml`: documented `actions: read` as part of the caller-owned permission baseline and made `docs/consumer-usage.md` the canonical permission source per ADR-0012 D5. Callers without `actions: read` now get a visible degraded CodeQL finalization warning only when CodeQL has already exported SARIF; transient workflow-run metadata probe failures and pre-SARIF CodeQL failures fail closed instead of masking real analysis failures.

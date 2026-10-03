@@ -3,8 +3,7 @@
 
 Authorship: human
 
-Work Item: N/A (required for agent/mixed PRs unless Out-of-band reason is set)
-Out-of-band reason: N/A
+Request: N/A (describe the direct request or approved scope; no work item required)
 
 ## Verification
 - 

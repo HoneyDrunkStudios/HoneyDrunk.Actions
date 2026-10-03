@@ -5,6 +5,13 @@ All notable changes to the GitHub Actions template library will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2026-10-02 — Studio migration (pending rollout)
+
+- Archive the retired work-item filing workflow/script and former packet-link enforcement. Existing issues and old refs are preserved.
+- Point active monitoring/agent references at HoneyDrunk.Studio while retaining the stable honeydrunk-architecture node ID.
+- Accept direct Request/Approved scope context in PR metadata without requiring a packet or out-of-band classification; retain authorship, review and security checks.
+- Document coordinated rollout, pinned-workflow limits and deployed local-worker follow-up in docs/studio-migration.md.
+
 ## [Unreleased]
 
 ### Changed

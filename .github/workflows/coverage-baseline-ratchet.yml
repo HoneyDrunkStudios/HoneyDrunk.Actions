@@ -96,13 +96,14 @@ jobs:
           path: TestResults
         continue-on-error: true
 
-      - name: Ratchet committed coverage baseline
+      - name: Measure coverage baseline
+        id: coverage-baseline
         shell: bash
         env:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          echo 'changed=false' >> "$GITHUB_OUTPUT"
           python3 <<'PY'
           import json, os, sys, xml.etree.ElementTree as ET
           from datetime import datetime, timezone
@@ -131,10 +132,10 @@ jobs:
                           return str(resolved).replace('\\', '/').lower()
               return path.as_posix().lstrip('/').lower()
 
-          test_projects = [p for p in workdir.rglob('*.csproj') if p.name.endswith('.Tests.csproj') or p.name.endswith('.Canary.csproj')]
+          # Coverage reports are authoritative; test project names vary by consumer.
           cov_files = list(Path('TestResults').rglob('coverage.cobertura.xml'))
-          if not test_projects or not cov_files:
-              print('No test projects or coverage report found; skipping baseline ratchet.')
+          if not cov_files:
+              print('No coverage report found; skipping baseline ratchet.')
               sys.exit(0)
           line_hits = {}
           for cov in cov_files:
@@ -179,9 +180,19 @@ jobs:
               'measuredAtUtc': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
           }
           target.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('changed=true\n')
           print(f'Wrote {target} at {rate:.2f}%')
           PY
 
+      - name: Commit changed coverage baseline
+        if: steps.coverage-baseline.outputs.changed == 'true'
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f "${WORKING_DIRECTORY%/}/.github/coverage-baseline.json"

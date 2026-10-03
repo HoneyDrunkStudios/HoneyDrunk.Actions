@@ -116,7 +116,7 @@ manager provisioning option currently belongs only to Node Workspace.
 
 ## Standards and current limits
 
-[ADR-0047](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0047-testing-patterns-and-tooling.md)
+[ADR-0047](https://github.com/HoneyDrunkStudios/HoneyDrunk.Studio/blob/main/adrs/ADR-0047-testing-patterns-and-tooling.md)
 separates fast unit/integration checks from deployed E2E, defines risk-based
 coverage targets, and names Maestro for mobile. Its committed web E2E binding is
 .NET Playwright. The user-approved Node/TS/RN-web work here supplies a

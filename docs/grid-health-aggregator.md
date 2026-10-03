@@ -2,9 +2,9 @@
 
 `grid-health-report.yml` is the ADR-0012 D6 runtime surface for Grid CI/CD health. It runs daily at `03:30 UTC` and can also be run manually with `workflow_dispatch`.
 
-The workflow reads `HoneyDrunk.Architecture/catalogs/grid-health.json`, requires schema version `>= 1.1`, polls each repo's `tracked_workflows`, and updates the stable `Grid Health` issue in `HoneyDrunk.Actions`.
+The workflow reads `HoneyDrunk.Studio/catalogs/grid-health.json`, requires schema version `>= 1.1`, polls each repo's `tracked_workflows`, and updates the stable `Grid Health` issue in `HoneyDrunk.Actions`.
 
-`GRID_HEALTH_PAT` must be able to read `HoneyDrunk.Architecture`, read Actions workflow runs and org repo metadata, and write Issues in `HoneyDrunk.Actions` plus every repo with `tracked_workflows`. The Architecture checkout explicitly uses this token because the catalog repo may be private.
+`GRID_HEALTH_PAT` must be able to read `HoneyDrunk.Studio`, read Actions workflow runs and org repo metadata, and write Issues in `HoneyDrunk.Actions` plus every repo with `tracked_workflows`. The Architecture checkout explicitly uses this token because the catalog repo may be private.
 
 ## Classifications
 
@@ -32,4 +32,4 @@ There is no snooze mechanism today. If a workflow is known broken, missing, or i
 ## References
 
 - ADR-0012 D6 — Grid Health aggregator.
-- HoneyDrunk.Architecture invariant 40 — Grid pipeline health is centrally visible.
+- HoneyDrunk.Studio invariant 40 — Grid pipeline health is centrally visible.
