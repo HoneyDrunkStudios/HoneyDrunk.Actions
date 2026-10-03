@@ -96,6 +96,20 @@ jobs:
       - name: Regression test release-note generation
         run: python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
 
+      - name: Set up Node for workflow regression fixtures
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Regression test Node workspace contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/node-workflow-tests"
+          "$RUNNER_TEMP/node-workflow-tests/bin/python" -m pip install -r tests/requirements.txt
+          "$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p 'test_node_workspace.py' -v
+
       - name: Smoke test dependency scan workflow helper
         shell: bash
         run: |

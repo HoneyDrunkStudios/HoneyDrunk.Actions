@@ -33,6 +33,14 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 
 ## Update protocol
 
+Node Workspace quality extension retains the existing exact pins:
+`actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd` (v5),
+`actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444` (v5), and
+`actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f` (v6).
+The setup-node pin is also used by its regression fixtures in `actions-ci.yml`.
+No new marketplace action is introduced. Package-manager provisioning is an
+optional exact-version npm install into `RUNNER_TEMP`, not a global install.
+
 - Any PR that adds, removes, or changes an action pin updates this file in the same PR.
 - Bumping a `Deprecated-with-deadline` entry to its successor flips `Status` to `Current` and sets the deadline to `none` until a new deprecation is announced.
 - Removing an action entirely, such as replacing a marketplace wrapper with direct CLI invocation per invariant 38, deletes the row or records the direct-CLI successor when useful for audit continuity.
