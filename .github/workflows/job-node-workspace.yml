@@ -68,6 +68,82 @@ on:
         required: false
         type: boolean
         default: true
+      package-manager-version:
+        description: Exact npm, pnpm, or Yarn Classic version to install into RUNNER_TEMP before caching; empty uses the runner manager.
+        required: false
+        type: string
+        default: ''
+      run-typecheck:
+        description: Run the separate typecheck command.
+        required: false
+        type: boolean
+        default: false
+      typecheck-command:
+        description: Typecheck command; evaluated as trusted caller-authored Bash.
+        required: false
+        type: string
+        default: npm run typecheck
+      browser-install-command:
+        description: Optional project-pinned browser setup before accessibility/E2E commands.
+        required: false
+        type: string
+        default: ''
+      accessibility-command:
+        description: Optional accessibility check; nonzero exit fails the job.
+        required: false
+        type: string
+        default: ''
+      e2e-command:
+        description: Optional browser E2E check; use a separate manual/release caller for heavy suites.
+        required: false
+        type: string
+        default: ''
+      coverage-path:
+        description: Optional coverage file or directory relative to working-directory; missing/empty evidence fails.
+        required: false
+        type: string
+        default: ''
+      test-results-path:
+        description: Optional test report file or directory relative to working-directory; missing/empty evidence fails.
+        required: false
+        type: string
+        default: ''
+      artifact-name:
+        description: Artifact prefix; a unique invocation suffix prevents matrix or repeated-call collisions.
+        required: false
+        type: string
+        default: node-workspace
+      upload-summary-artifact:
+        description: Upload validation-results.json when no coverage or test-results path is requested.
+        required: false
+        type: boolean
+        default: false
+      artifact-retention-days:
+        description: Evidence retention from 1 to 90 days, subject to repository policy.
+        required: false
+        type: number
+        default: 14
+      timeout-minutes:
+        description: Job timeout from 1 to 360 minutes; default preserves the inherited GitHub limit.
+        required: false
+        type: number
+        default: 360
+    outputs:
+      test-result:
+        description: Unit/component command outcome (success, failure, skipped, or cancelled).
+        value: ${{ jobs.node-workspace.outputs.test-result }}
+      typecheck-result:
+        description: Typecheck command outcome; skipped is not success.
+        value: ${{ jobs.node-workspace.outputs.typecheck-result }}
+      accessibility-result:
+        description: Accessibility command outcome; skipped is not success.
+        value: ${{ jobs.node-workspace.outputs.accessibility-result }}
+      e2e-result:
+        description: Browser E2E command outcome; does not attest native mobile testing.
+        value: ${{ jobs.node-workspace.outputs.e2e-result }}
+      evidence-artifact-id:
+        description: Uploaded artifact ID, or empty when upload was disabled or failed; preserves producer identity across reruns.
+        value: ${{ jobs.node-workspace.outputs.evidence-artifact-id }}
 
 permissions:
   contents: read
@@ -76,55 +152,318 @@ jobs:
   node-workspace:
     name: Node Workspace
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      test-result: ${{ steps.test.outcome }}
+      typecheck-result: ${{ steps.typecheck.outcome }}
+      accessibility-result: ${{ steps.accessibility.outcome }}
+      e2e-result: ${{ steps.e2e.outcome }}
+      evidence-artifact-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
+      - name: Reject privileged PR context
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+            echo '::error::Use pull_request with contents: read and no secrets for Node validation.'
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
 
-      - name: Validate package manifest
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
+      # Keep the small contract validator in this workflow so a pinned reusable
+      # call never executes a helper fetched from a different Actions revision.
+      - name: Validate Node contract
+        id: validate
+        shell: python
+        env:
+          NODE_INPUTS: ${{ toJSON(inputs) }}
         run: |
-          set -euo pipefail
-          test -f package.json
+          import glob
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import re
+          import uuid
+
+          inputs = json.loads(os.environ['NODE_INPUTS'])
+          workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve()
+
+          def relative_path(value, base, *, pattern=False, evidence=False):
+              if not isinstance(value, str) or not value or any(ord(c) < 32 for c in value):
+                  raise ValueError('Paths must be nonempty and contain no control characters')
+              # Operational paths may walk to a monorepo root, but never outside
+              # the checkout. New evidence paths are confined to the workdir.
+              parts = PurePosixPath(value).parts
+              if value.startswith(('/', '!')) or '\\' in value or ':' in value:
+                  raise ValueError('Paths must be relative and use /')
+              if evidence and '..' in parts:
+                  raise ValueError('Evidence paths must stay below working-directory')
+              if not pattern and any(c in value for c in '*?[]'):
+                  raise ValueError('Only cache-dependency-path accepts glob patterns')
+              candidate = base / value
+              boundary = base.resolve() if evidence else workspace
+              candidate.resolve().relative_to(boundary)
+              if evidence and (candidate.resolve() == base.resolve() or any(p.startswith('.') for p in parts)):
+                  raise ValueError('Evidence must name a nonhidden file or directory below working-directory')
+              if pattern:
+                  for match in glob.glob(str(candidate), recursive=True):
+                      Path(match).resolve().relative_to(boundary)
+              return candidate.resolve()
+
+          workdir = relative_path(inputs['working-directory'], workspace).resolve()
+          if not workdir.is_dir() or not relative_path('package.json', workdir).is_file():
+              raise ValueError('working-directory must contain package.json')
+          manager = inputs['package-manager']
+          if manager not in ('npm', 'pnpm', 'yarn'):
+              raise ValueError('package-manager must be npm, pnpm, or yarn')
+          version = inputs['package-manager-version']
+          if version and not re.fullmatch(r'\d+\.\d+\.\d+', version):
+              raise ValueError('package-manager-version must be an exact stable version')
+          if manager == 'yarn' and version and not version.startswith('1.'):
+              raise ValueError('Provision Yarn Classic 1.x; modern Yarn must use a checked-in yarnPath')
+          for name, maximum in (('artifact-retention-days', 90), ('timeout-minutes', 360)):
+              value = inputs[name]
+              if isinstance(value, bool) or not isinstance(value, (float, int)) or int(value) != value or not 1 <= value <= maximum:
+                  raise ValueError(f'{name} must be an integer from 1 to {maximum}')
+          if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}', inputs['artifact-name']):
+              raise ValueError('artifact-name must use 1-100 letters, digits, dots, underscores, or hyphens')
+          for name in ('build', 'test', 'lint', 'typecheck'):
+              if inputs['run-' + name] and not inputs[name + '-command'].strip():
+                  raise ValueError(f'{name}-command is required when run-{name} is true')
+          if not inputs['install-command'].strip():
+              raise ValueError('install-command must not be empty')
+          for name in ('browser-install-command', 'accessibility-command', 'e2e-command'):
+              if inputs[name] and not inputs[name].strip():
+                  raise ValueError(f'{name} must be empty or a nonblank command')
+          if inputs['browser-install-command'] and not (inputs['accessibility-command'] or inputs['e2e-command']):
+              raise ValueError('browser-install-command requires accessibility-command or e2e-command')
+          for name in ('coverage-path', 'test-results-path'):
+              if inputs[name]:
+                  relative_path(inputs[name], workdir, evidence=True)
+          if inputs['coverage-path'] and not inputs['run-test']:
+              raise ValueError('coverage-path requires run-test')
+          cache_paths = inputs['cache-dependency-path'].splitlines()
+          if not cache_paths:
+              raise ValueError('cache-dependency-path must name a lockfile or pattern')
+          resolved_cache = [relative_path(p, workdir, pattern=True).as_posix() for p in cache_paths]
+          version_file = ''
+          if inputs['node-version-file']:
+              version_path = relative_path(inputs['node-version-file'], workdir)
+              if not version_path.is_file():
+                  raise ValueError('node-version-file does not exist')
+              # setup-node joins this input to GITHUB_WORKSPACE, unlike cache paths.
+              version_file = version_path.relative_to(workspace).as_posix()
+          outputs = {'working-directory': workdir.as_posix(), 'node-version-file': version_file,
+                     'cache-dependency-path': '\n'.join(resolved_cache)}
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              for name, value in outputs.items():
+                  delimiter = 'node_' + uuid.uuid4().hex
+                  output.write(f'{name}<<{delimiter}\n{value}\n{delimiter}\n')
 
       - name: Setup Node.js from version file
         if: ${{ inputs.node-version-file != '' }}
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
-          cache: ${{ inputs.package-manager }}
-          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+          node-version-file: ${{ steps.validate.outputs.node-version-file }}
+          package-manager-cache: false
 
       - name: Setup Node.js from version input
         if: ${{ inputs.node-version-file == '' }}
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+
+      - name: Provision package manager locally
+        if: ${{ inputs.package-manager-version != '' }}
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          PACKAGE_MANAGER_VERSION: ${{ inputs.package-manager-version }}
+        run: |
+          set -euo pipefail
+          manager_dir="$RUNNER_TEMP/hd-node-package-manager"
+          npm install --prefix "$manager_dir" --ignore-scripts --no-audit --no-fund "$PACKAGE_MANAGER@$PACKAGE_MANAGER_VERSION"
+          printf '%s\n' "$manager_dir/node_modules/.bin" >> "$GITHUB_PATH"
+
+      # setup-node needs the selected package manager on PATH before cache restore.
+      # Cache only package-manager data, never node_modules, reports, or credentials.
+      - name: Restore package manager cache
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
           cache: ${{ inputs.package-manager }}
-          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+          cache-dependency-path: ${{ steps.validate.outputs.cache-dependency-path }}
+          package-manager-cache: false
 
       - name: Install dependencies
+        id: install
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: ${{ inputs.install-command }}
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.install-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
 
       - name: Build workspace
+        id: build
         if: ${{ inputs.run-build }}
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: ${{ inputs.build-command }}
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.build-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
 
       - name: Test workspace
+        id: test
         if: ${{ inputs.run-test }}
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: ${{ inputs.test-command }}
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.test-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
 
       - name: Lint workspace
+        id: lint
         if: ${{ inputs.run-lint }}
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: ${{ inputs.lint-command }}
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.lint-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
+
+      - name: Typecheck workspace
+        id: typecheck
+        if: ${{ inputs.run-typecheck }}
+        shell: bash
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.typecheck-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
+
+      - name: Install browser dependencies
+        id: browser-install
+        if: ${{ inputs.browser-install-command != '' }}
+        shell: bash
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.browser-install-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
+
+      - name: Check accessibility
+        id: accessibility
+        if: ${{ inputs.accessibility-command != '' }}
+        shell: bash
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.accessibility-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
+
+      - name: Run browser E2E
+        id: e2e
+        if: ${{ inputs.e2e-command != '' }}
+        shell: bash
+        working-directory: ${{ steps.validate.outputs.working-directory }}
+        env:
+          CI: 'true'
+          NODE_COMMAND: ${{ inputs.e2e-command }}
+        run: bash --noprofile --norc -e -o pipefail -c "$NODE_COMMAND"
+
+      - name: Collect validation evidence
+        id: evidence
+        if: ${{ always() }}
+        shell: python
+        env:
+          NODE_INPUTS: ${{ toJSON(inputs) }}
+          NODE_STEPS: ${{ toJSON(steps) }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import tempfile
+
+          inputs = json.loads(os.environ['NODE_INPUTS'])
+          steps = json.loads(os.environ['NODE_STEPS'])
+          artifact = Path(tempfile.mkdtemp(prefix='node-evidence-', dir=os.environ['RUNNER_TEMP']))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'directory={artifact.as_posix()}\n')
+              output.write(f'artifact-id={artifact.name}\n')
+          statuses = {}
+          for name in ('install', 'build', 'test', 'lint', 'typecheck', 'browser-install', 'accessibility', 'e2e'):
+              requested = (inputs.get('run-' + name, False) if name in ('build', 'test', 'lint', 'typecheck')
+                           else bool(inputs[name + '-command']))
+              outcome = steps.get(name, {}).get('outcome', 'skipped')
+              statuses[name] = {'requested': requested, 'outcome': outcome,
+                                'reason': ('not requested' if not requested else 'blocked or cancelled before execution')
+                                if outcome == 'skipped' else ''}
+          errors = []
+          if steps.get('validate', {}).get('outcome') == 'success':
+              workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve()
+              workdir = (workspace / inputs['working-directory']).resolve()
+              try:
+                  workdir.relative_to(workspace)
+                  for key, category in (('coverage-path', 'coverage'), ('test-results-path', 'test-results')):
+                      if not inputs[key]:
+                          continue
+                      source = workdir / inputs[key]
+                      source.resolve().relative_to(workdir)
+                      candidates = sorted(source.rglob('*')) if source.is_dir() else [source]
+                      copied = 0
+                      for item in candidates:
+                          item.resolve().relative_to(workdir)
+                          # Report symlinks are never followed, even within the workspace.
+                          # This also prevents upload-artifact from traversing a link later.
+                          if any(part.is_symlink() for part in (item, *item.parents) if part != workdir and workdir in part.parents):
+                              raise ValueError('Evidence contains a symbolic link')
+                          if any(part.startswith('.') for part in item.relative_to(workdir).parts):
+                              continue
+                          if item.is_file() and item.stat().st_size > 0:
+                              relative = item.relative_to(source) if source.is_dir() else Path(item.name)
+                              destination = artifact / category / relative
+                              destination.parent.mkdir(parents=True, exist_ok=True)
+                              shutil.copyfile(item, destination)
+                              copied += 1
+                      if not copied:
+                          errors.append(f'{category}: requested evidence is missing or empty')
+              except (OSError, ValueError) as error:
+                  errors.append(f'Evidence collection failed: {error}')
+          provenance = {'runId': os.environ.get('GITHUB_RUN_ID', ''),
+                        'runAttempt': os.environ.get('GITHUB_RUN_ATTEMPT', ''),
+                        'sha': os.environ.get('GITHUB_SHA', ''),
+                        'repository': os.environ.get('GITHUB_REPOSITORY', '')}
+          report = {'schemaVersion': 1, 'checks': statuses, 'evidenceErrors': errors, 'provenance': provenance,
+                    'scope': 'Node/TypeScript/RN-web; no native mobile E2E attestation'}
+          (artifact / 'validation-results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('## Node validation\n\n| Check | Outcome | Detail |\n| --- | --- | --- |\n')
+              for name, status in statuses.items():
+                  summary.write(f"| {name} | {status['outcome']} | {status['reason']} |\n")
+              summary.write('\nSkipped checks are not passing evidence. Native E2E requires device runners.\n')
+              for error in errors:
+                  # Only fixed messages are included in Markdown; paths/errors stay in JSON.
+                  summary.write('\nEvidence collection failed; see validation-results.json.\n')
+          if errors:
+              raise SystemExit(1)
+
+      - name: Upload validation evidence
+        id: upload
+        if: ${{ always() && steps.evidence.outputs.directory != '' && (inputs.upload-summary-artifact || inputs.coverage-path != '' || inputs.test-results-path != '') }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ inputs.artifact-name }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.evidence.outputs.artifact-id }}
+          path: ${{ steps.evidence.outputs.directory }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error
+          include-hidden-files: false

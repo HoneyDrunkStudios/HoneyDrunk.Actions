@@ -1,5 +1,9 @@
 # Consumer Usage Guide
 
+Node/TypeScript/RN-web consumers: use the [Node quality contract](node-quality.md)
+for the extended `job-node-workspace.yml`, fast PR and manual/release gates,
+dependency audit reuse, and the proposed native device E2E boundary.
+
 This document provides sample workflows for consuming repos to adopt the HoneyDrunk.Actions workflow families.
 
 > Authoritative per ADR-0012 D9 (Decision: caller-workflow scaffolding is documented here). The canonical baselines below are the source of truth for invariant 39 (caller-workflow `permissions:` superset rule).

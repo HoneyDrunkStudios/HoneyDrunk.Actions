@@ -1,0 +1,59 @@
+# Copy into a consumer and replace NODE_QUALITY_COMMIT with the reviewed,
+# published 40-character Actions SHA. Adapt scripts/paths to the real app.
+name: Node quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-node-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fast-pr:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-workspace.yml@NODE_QUALITY_COMMIT
+    with:
+      working-directory: .
+      node-version: '22'
+      install-command: npm ci
+      test-command: npm run test:coverage
+      run-typecheck: true
+      coverage-path: coverage
+      test-results-path: reports
+      artifact-name: node-fast
+      artifact-retention-days: 14
+      timeout-minutes: 20
+
+  browser-gate:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-workspace.yml@NODE_QUALITY_COMMIT
+    with:
+      working-directory: .
+      node-version: '22'
+      # Run all fast checks again against the exact manual/tag checkout.
+      test-command: npm run test:coverage
+      run-typecheck: true
+      browser-install-command: npm exec --no -- playwright install --with-deps chromium
+      accessibility-command: npm run test:a11y
+      e2e-command: npm run test:e2e
+      coverage-path: coverage
+      test-results-path: reports
+      artifact-name: node-browser
+      artifact-retention-days: 14
+      timeout-minutes: 45
+
+  dependency-audit:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-security-audit.yml@NODE_QUALITY_COMMIT
+    with:
+      working-directory: .
+      node-version: '22'
+      # This existing job defaults to --workspaces; a single-package app overrides it.
+      audit-command: npm audit --audit-level=high --json

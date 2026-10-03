@@ -2,6 +2,11 @@
 
 Central library of reusable GitHub Actions workflows and composite actions for the HoneyDrunk Grid.
 
+For Node, TypeScript, and RN-web consumers, see the [Node quality contract](docs/node-quality.md)
+and [fast PR/manual browser example](examples/node-quality.yml). The existing
+`job-node-workspace.yml` now supports optional typecheck, accessibility/E2E commands,
+coverage/report artifacts, and explicit outcomes while retaining its original defaults.
+
 ## 📚 Table of Contents
 
 - [Overview](#overview)

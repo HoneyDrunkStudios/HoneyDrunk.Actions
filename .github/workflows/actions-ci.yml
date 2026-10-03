@@ -96,6 +96,20 @@ jobs:
       - name: Regression test release-note generation
         run: python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
 
+      - name: Set up Node for workflow regression fixtures
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Regression test Node workspace contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/node-workflow-tests"
+          "$RUNNER_TEMP/node-workflow-tests/bin/python" -m pip install -r tests/requirements.txt
+          "$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p 'test_node_workspace.py' -v
+
       - name: Regression test direct-request PR metadata
         run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
 
@@ -119,3 +133,98 @@ jobs:
           # job-discord-notify.yml (ADR-0084 D8). This is the gate that keeps the
           # runtime workflow thin — the reusable workflow trusts this script.
           python3 -m unittest test_discord_notify -v
+
+  # Relative workflow calls use this exact repository revision, including PRs.
+  # No consumer app, registry credential, deployed service, or device is needed.
+  node-workspace-smoke:
+    name: Node workflow smoke (npm-defaults)
+    uses: ./.github/workflows/job-node-workspace.yml
+    with:
+      working-directory: tests/fixtures/node-workspace/apps/web
+      cache-dependency-path: ../../package-lock.json
+      test-results-path: reports
+      artifact-name: node-smoke-npm-defaults
+      artifact-retention-days: 1
+      timeout-minutes: 10
+
+  # Separate calls preserve each producer's artifact ID in needs outputs.
+  # A matrix's single aggregate output cannot identify both executions.
+  node-workspace-smoke-pinned:
+    name: Node workflow smoke (npm-pinned)
+    uses: ./.github/workflows/job-node-workspace.yml
+    with:
+      working-directory: tests/fixtures/node-workspace/apps/web
+      cache-dependency-path: ../../package-lock.json
+      node-version-file: ../../.nvmrc
+      package-manager-version: '10.9.2'
+      test-results-path: reports
+      artifact-name: node-smoke-npm-pinned
+      artifact-retention-days: 1
+      timeout-minutes: 10
+
+  verify-node-workspace-smoke:
+    name: Verify hosted Node evidence
+    needs: [node-workspace-smoke, node-workspace-smoke-pinned]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate producer artifact IDs
+        id: producers
+        shell: python
+        env:
+          PRODUCER_ARTIFACT_IDS: ${{ needs.node-workspace-smoke.outputs.evidence-artifact-id }},${{ needs.node-workspace-smoke-pinned.outputs.evidence-artifact-id }}
+        run: |
+          import os
+          import re
+
+          ids = os.environ['PRODUCER_ARTIFACT_IDS'].split(',')
+          assert len(ids) == 2 and len(set(ids)) == 2, 'Expected two distinct producer artifact IDs'
+          assert all(re.fullmatch(r'[1-9][0-9]*', value) for value in ids), 'Missing or invalid producer artifact ID'
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('artifact-ids=' + ','.join(ids) + '\n')
+
+      - name: Download smoke evidence
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          artifact-ids: ${{ steps.producers.outputs.artifact-ids }}
+          path: node-smoke-evidence
+
+      - name: Verify uploaded outcomes, test results, and runtime versions
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+
+          root = Path('node-smoke-evidence')
+          assert len(list(root.iterdir())) == 2, 'Expected exactly two producer artifacts'
+          for profile in ('npm-defaults', 'npm-pinned'):
+              artifacts = list(root.glob(f'node-smoke-{profile}-*'))
+              assert len(artifacts) == 1, f'{profile}: expected one uploaded artifact'
+              artifact = artifacts[0]
+              name = re.fullmatch(rf'node-smoke-{profile}-{re.escape(os.environ["GITHUB_RUN_ID"])}-([1-9][0-9]*)-node-evidence-[A-Za-z0-9_-]+', artifact.name)
+              assert name, f'{profile}: artifact is from a different run or has an invalid name'
+              producer_attempt = name[1]
+              assert int(producer_attempt) <= int(os.environ['GITHUB_RUN_ATTEMPT']), 'Artifact is from a future attempt'
+              results = json.loads((artifact / 'validation-results.json').read_text())
+              assert results['provenance'] == {
+                  'runId': os.environ['GITHUB_RUN_ID'], 'runAttempt': producer_attempt,
+                  'sha': os.environ['GITHUB_SHA'], 'repository': os.environ['GITHUB_REPOSITORY'],
+              }, f'{profile}: artifact provenance does not match this run and revision'
+              assert not results['evidenceErrors'], results['evidenceErrors']
+              for check in ('install', 'build', 'test', 'lint'):
+                  assert results['checks'][check]['outcome'] == 'success', (profile, check)
+              for check in ('typecheck', 'browser-install', 'accessibility', 'e2e'):
+                  assert results['checks'][check]['outcome'] == 'skipped', (profile, check)
+                  assert results['checks'][check]['requested'] is False, (profile, check)
+              runtime = json.loads((artifact / 'test-results/runtime.json').read_text())
+              assert runtime['node'].split('.')[0] == '22', runtime
+              if profile == 'npm-pinned':
+                  assert runtime['npm'] == '10.9.2', runtime
+              junit = ET.parse(artifact / 'test-results/junit.xml')
+              assert junit.findall('.//testcase'), f'{profile}: no executed tests in JUnit'
+              assert not junit.findall('.//failure'), f'{profile}: JUnit reports failures'
+              assert not junit.findall('.//error'), f'{profile}: JUnit reports errors'
+              print(f'{profile}: producer attempt {producer_attempt}, verifier attempt {os.environ["GITHUB_RUN_ATTEMPT"]}; uploaded outcomes and JUnit verified; Node {runtime["node"]}, npm {runtime["npm"]}')
