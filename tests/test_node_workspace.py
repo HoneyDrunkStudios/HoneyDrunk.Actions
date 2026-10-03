@@ -23,6 +23,8 @@ JOB = WORKFLOW['jobs']['node-workspace']
 STEPS = {step.get('id', step['name']): step for step in JOB['steps']}
 DEFAULTS = {key: value['default'] for key, value in CONTRACT['inputs'].items()}
 BASH = os.environ.get('BASH_EXE', 'bash')
+CI_WORKFLOW = yaml.safe_load((ROOT / '.github/workflows/actions-ci.yml').read_text(encoding='utf-8'))
+SMOKE_STEPS = {step['name']: step for step in CI_WORKFLOW['jobs']['verify-node-workspace-smoke']['steps']}
 
 
 def read_outputs(path):
@@ -75,6 +77,8 @@ class NodeWorkspaceTests(unittest.TestCase):
         self.environment = {**os.environ, 'GITHUB_WORKSPACE': self.repo.as_posix(),
                             'RUNNER_TEMP': self.root.as_posix(), 'GITHUB_OUTPUT': self.outputs.as_posix(),
                             'GITHUB_STEP_SUMMARY': self.summary.as_posix(), 'CI': 'true',
+                            'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '2',
+                            'GITHUB_SHA': 'a' * 40, 'GITHUB_REPOSITORY': 'fixture/consumer',
                             'npm_config_cache': (self.root / 'npm-cache').as_posix()}
 
     def execute(self, step_id, *, inputs=None, steps=None, extra_env=None):
@@ -321,7 +325,7 @@ class NodeWorkspaceTests(unittest.TestCase):
         for name in ('browser-install', 'accessibility', 'e2e'):
             self.assertEqual(STEPS[name]['if'], "${{ inputs." + name + "-command != '' }}")
         self.assertEqual(STEPS['evidence']['if'], '${{ always() }}')
-        upload = STEPS['Upload validation evidence']
+        upload = STEPS['upload']
         self.assertIn('always()', upload['if'])
         self.assertEqual(upload['with']['if-no-files-found'], 'error')
         self.assertFalse(upload['with']['include-hidden-files'])
@@ -330,19 +334,104 @@ class NodeWorkspaceTests(unittest.TestCase):
                       upload['if'])
 
     def test_hosted_smoke_calls_this_revision_with_default_and_pinned_managers(self):
-        ci = yaml.safe_load((ROOT / '.github/workflows/actions-ci.yml').read_text(encoding='utf-8'))
-        smoke = ci['jobs']['node-workspace-smoke']
-        self.assertEqual(smoke['uses'], './.github/workflows/job-node-workspace.yml')
-        cases = smoke['strategy']['matrix']['include']
-        self.assertEqual([case['package-manager-version'] for case in cases], ['', '10.9.2'])
-        self.assertEqual(smoke['with']['cache-dependency-path'], '../../package-lock.json')
-        for command in ('install-command', 'build-command', 'test-command', 'lint-command'):
-            self.assertNotIn(command, smoke['with'])
-        verify = ci['jobs']['verify-node-workspace-smoke']
-        self.assertIn('node-workspace-smoke', verify['needs'])
+        profiles = ('node-workspace-smoke', 'node-workspace-smoke-pinned')
+        for job_id, manager_version in zip(profiles, ('', '10.9.2')):
+            smoke = CI_WORKFLOW['jobs'][job_id]
+            self.assertEqual(smoke['uses'], './.github/workflows/job-node-workspace.yml')
+            self.assertEqual(smoke['with'].get('package-manager-version', ''), manager_version)
+            self.assertEqual(smoke['with']['cache-dependency-path'], '../../package-lock.json')
+            for command in ('install-command', 'build-command', 'test-command', 'lint-command'):
+                self.assertNotIn(command, smoke['with'])
+        verify = CI_WORKFLOW['jobs']['verify-node-workspace-smoke']
+        self.assertEqual(verify['needs'], list(profiles))
         download = next(step for step in verify['steps'] if step.get('uses', '').startswith('actions/download-artifact@'))
         self.assertRegex(download['uses'], r'@[0-9a-f]{40}$')
-        self.assertIn('github.run_attempt', download['with']['pattern'])
+        self.assertEqual(download['with']['artifact-ids'], '${{ steps.producers.outputs.artifact-ids }}')
+        self.assertNotIn('pattern', download['with'])
+        producers = SMOKE_STEPS['Validate producer artifact IDs']['env']['PRODUCER_ARTIFACT_IDS']
+        for job_id in profiles:
+            self.assertIn('needs.' + job_id + '.outputs.evidence-artifact-id', producers)
+        self.assertEqual(CONTRACT['outputs']['evidence-artifact-id']['value'],
+                         '${{ jobs.node-workspace.outputs.evidence-artifact-id }}')
+        self.assertEqual(JOB['outputs']['evidence-artifact-id'], '${{ steps.upload.outputs.artifact-id }}')
+
+    def execute_smoke_verifier(self, step_name='Verify uploaded outcomes, test results, and runtime versions', **env):
+        self.outputs.write_text('', encoding='utf-8')
+        return subprocess.run([sys.executable, '-c', SMOKE_STEPS[step_name]['run']],
+                              cwd=self.root, env={**self.environment, **env},
+                              capture_output=True, text=True, timeout=30)
+
+    def smoke_artifacts(self, attempts=(1, 1)):
+        """Build reports with the real collector, then emulate downloaded directories."""
+        downloaded = self.root / 'node-smoke-evidence'
+        downloaded.mkdir()
+        artifacts = []
+        for profile, attempt in zip(('npm-defaults', 'npm-pinned'), attempts):
+            previous_attempt = self.environment['GITHUB_RUN_ATTEMPT']
+            self.environment['GITHUB_RUN_ATTEMPT'] = str(attempt)
+            result, artifact, _ = self.collect(steps={name: {'outcome': 'success'}
+                                                     for name in ('install', 'build', 'test', 'lint')})
+            self.environment['GITHUB_RUN_ATTEMPT'] = previous_attempt
+            self.assertEqual(result.returncode, 0, result.stderr)
+            target = downloaded / f'node-smoke-{profile}-42-{attempt}-{artifact.name}'
+            artifact.rename(target)
+            (target / 'test-results').mkdir()
+            (target / 'test-results/runtime.json').write_text(json.dumps({
+                'node': '22.23.3', 'npm': '10.9.2' if profile == 'npm-pinned' else '10.9.9'}), encoding='utf-8')
+            (target / 'test-results/junit.xml').write_text(
+                '<testsuites><testsuite><testcase name="executed"/></testsuite></testsuites>', encoding='utf-8')
+            artifacts.append(target)
+        return artifacts
+
+    def test_verifier_only_rerun_accepts_original_producer_attempts(self):
+        self.smoke_artifacts((1, 1))
+        result = self.execute_smoke_verifier()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count('producer attempt 1, verifier attempt 2'), 2)
+
+    def test_partial_rerun_accepts_mixed_producer_attempts(self):
+        self.smoke_artifacts((1, 2))
+        result = self.execute_smoke_verifier()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('producer attempt 1, verifier attempt 2', result.stdout)
+        self.assertIn('producer attempt 2, verifier attempt 2', result.stdout)
+
+    def test_verifier_rejects_ambiguous_profile_artifacts(self):
+        artifacts = self.smoke_artifacts()
+        artifacts[1].rename(artifacts[1].with_name(artifacts[1].name.replace('npm-pinned', 'npm-defaults')))
+        result = self.execute_smoke_verifier()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected one uploaded artifact', result.stderr)
+
+    def test_verifier_rejects_wrong_revision_or_run_provenance(self):
+        artifact = self.smoke_artifacts()[0]
+        path = artifact / 'validation-results.json'
+        original = json.loads(path.read_text(encoding='utf-8'))
+        for field, value in (('runId', '43'), ('runAttempt', '2'), ('sha', 'b' * 40), ('repository', 'wrong/repo')):
+            with self.subTest(field=field):
+                report = json.loads(json.dumps(original))
+                report['provenance'][field] = value
+                path.write_text(json.dumps(report), encoding='utf-8')
+                result = self.execute_smoke_verifier()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('provenance does not match', result.stderr)
+
+    def test_verifier_rejects_future_producer_attempt(self):
+        self.smoke_artifacts((1, 3))
+        result = self.execute_smoke_verifier()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('future attempt', result.stderr)
+
+    def test_download_requires_two_distinct_valid_producer_ids(self):
+        step = 'Validate producer artifact IDs'
+        for value in ('', '1,', ',2', '1,1', '1,2,3', '1,garbage', '1,2\nother=value'):
+            with self.subTest(value=value):
+                result = self.execute_smoke_verifier(step, PRODUCER_ARTIFACT_IDS=value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(read_outputs(self.outputs), {})
+        result = self.execute_smoke_verifier(step, PRODUCER_ARTIFACT_IDS='123,456')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(read_outputs(self.outputs), {'artifact-ids': '123,456'})
 
     def test_repeated_default_calls_have_distinct_artifact_ids(self):
         first, first_outputs = self.execute('evidence')
@@ -350,7 +439,7 @@ class NodeWorkspaceTests(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertNotEqual(first_outputs['artifact-id'], second_outputs['artifact-id'])
-        self.assertIn('steps.evidence.outputs.artifact-id', STEPS['Upload validation evidence']['with']['name'])
+        self.assertIn('steps.evidence.outputs.artifact-id', STEPS['upload']['with']['name'])
 
     def test_existing_security_audit_surfaces_unpatched_findings(self):
         audit = yaml.safe_load((ROOT / '.github/workflows/job-node-security-audit.yml').read_text(encoding='utf-8'))

@@ -53,7 +53,11 @@ the JSON summary and validated report snapshots; the original test failure remai
 Hard runner loss or job termination can prevent this best-effort upload.
 
 Reusable outputs are `test-result`, `typecheck-result`, `accessibility-result`,
-and `e2e-result`. A successful command is not proof that a framework discovered
+`e2e-result`, and `evidence-artifact-id` (empty if upload was disabled or failed).
+Use each producer job's artifact ID for downstream downloads, including partial
+reruns; successful producers can belong to an earlier attempt than the verifier.
+The JSON report includes run ID, producer attempt, repository, and checkout SHA
+in `provenance`. A successful command is not proof that a framework discovered
 tests: consumer configs must reject zero tests and enforce their actual coverage
 thresholds. This workflow does not invent thresholds, parse LCOV into a quality
 claim, or turn skipped native testing into a pass. Overall job failure remains
@@ -175,8 +179,12 @@ revision against a dependency-free nested npm fixture with the default manager
 and an explicit npm version. A follow-on job downloads and validates the real
 artifacts, JUnit results, command outcomes, and Node/npm versions, covering
 setup-node, cache setup, temporary-manager PATH propagation, and the artifact
-service. Downloads are scoped to the current run attempt so reruns cannot use
-stale evidence. A rerun can additionally verify cache-hit restoration in the
+service. Downloads select the exact IDs returned by the two successful producer
+jobs, preserving their identity on verifier-only and mixed-attempt reruns.
+Verification rejects duplicate profiles and mismatched run/repository/revision
+provenance while reporting each producer's original attempt. Regressions cover
+both partial-rerun cases and invalid/ambiguous evidence. A rerun can additionally
+verify cache-hit restoration in the
 hosted step logs. This fixture does not attest app/browser or native behavior.
 pnpm/Yarn provisioning, Windows/macOS hosted images, actual app harnesses, and
 native device flows still require their own execution evidence.

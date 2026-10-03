@@ -11,6 +11,8 @@
 
 ### Added
 
+- Node evidence exposes the uploaded artifact ID and records run/attempt/repository/revision provenance. Hosted verification downloads each successful producer's exact artifact, allowing verifier-only and mixed-attempt reruns while rejecting missing IDs, ambiguous profiles, and mismatched provenance.
+
 - Node quality review follow-up: preserve monorepo parent-relative lockfile and Node-version paths when their resolved targets remain inside the checkout, including symlink checks. Absolute/drive/backslash/control-character paths and checkout escapes are explicitly rejected; migrate absolute paths to portable relative paths when adopting this revision. Summary-only artifact upload is opt-in (`upload-summary-artifact: false` by default), so unchanged callers retain no artifact-service dependency. Hosted npm-default/pinned-manager smoke calls exercise the actual reusable revision, download its evidence, and verify runtime versions and outcomes.
 
 - `job-node-workspace.yml`: opt-in typecheck, accessibility and browser E2E commands; coverage/test-report artifacts and explicit success/failure/skipped/cancelled outcomes; bounded retention/timeout inputs; optional exact package-manager provisioning before cache restore. Existing Node command defaults/order and .NET workflows are preserved. Paths and configuration are validated; `pull_request_target` is rejected before checkout. Includes fixture-based workflow regressions and fast PR/manual/tag examples. See `docs/node-quality.md` for trust boundaries, existing advisory a11y/security distinctions, and the unimplemented native-device E2E contract.

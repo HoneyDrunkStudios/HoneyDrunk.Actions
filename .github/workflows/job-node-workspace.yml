@@ -141,6 +141,9 @@ on:
       e2e-result:
         description: Browser E2E command outcome; does not attest native mobile testing.
         value: ${{ jobs.node-workspace.outputs.e2e-result }}
+      evidence-artifact-id:
+        description: Uploaded artifact ID, or empty when upload was disabled or failed; preserves producer identity across reruns.
+        value: ${{ jobs.node-workspace.outputs.evidence-artifact-id }}
 
 permissions:
   contents: read
@@ -157,6 +160,7 @@ jobs:
       typecheck-result: ${{ steps.typecheck.outcome }}
       accessibility-result: ${{ steps.accessibility.outcome }}
       e2e-result: ${{ steps.e2e.outcome }}
+      evidence-artifact-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Reject privileged PR context
@@ -435,7 +439,11 @@ jobs:
                           errors.append(f'{category}: requested evidence is missing or empty')
               except (OSError, ValueError) as error:
                   errors.append(f'Evidence collection failed: {error}')
-          report = {'schemaVersion': 1, 'checks': statuses, 'evidenceErrors': errors,
+          provenance = {'runId': os.environ.get('GITHUB_RUN_ID', ''),
+                        'runAttempt': os.environ.get('GITHUB_RUN_ATTEMPT', ''),
+                        'sha': os.environ.get('GITHUB_SHA', ''),
+                        'repository': os.environ.get('GITHUB_REPOSITORY', '')}
+          report = {'schemaVersion': 1, 'checks': statuses, 'evidenceErrors': errors, 'provenance': provenance,
                     'scope': 'Node/TypeScript/RN-web; no native mobile E2E attestation'}
           (artifact / 'validation-results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
@@ -450,6 +458,7 @@ jobs:
               raise SystemExit(1)
 
       - name: Upload validation evidence
+        id: upload
         if: ${{ always() && steps.evidence.outputs.directory != '' && (inputs.upload-summary-artifact || inputs.coverage-path != '' || inputs.test-results-path != '') }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
