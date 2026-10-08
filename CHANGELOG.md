@@ -34,6 +34,8 @@
 
 ### Fixed
 
+- `job-deploy-container-app.yml`: fail closed on unreadable, missing, malformed, latest-revision, or ambiguous current traffic instead of guessing an active revision; recheck the original named 100% target before creating the candidate and before promotion. Preserve full/canary/hold modes and leave explicit migration/rollback decisions to operators. Deployment status now reflects any failed or cancelled job stage and requires completed deploy/health/traffic gates; summaries no longer claim an unconfirmed 0% or success after preflight failure. Offline contract tests exercise the shipped guard and workflow steps in repository CI. See `docs/consumer-usage.md` for bootstrap, ownership and adoption requirements.
+
 - `coverage-baseline-ratchet.yml`: measure downloaded coverage without assuming a test-project filename suffix, and only stage/commit/push after a changed baseline is written. Missing, unreadable, empty, and unchanged coverage results now skip all Git writes. Coverage calculations and PR gate thresholds are unchanged.
 
 - `nightly-security.yml`: made the filtered CodeQL SARIF upload best-effort so repositories without GitHub Code Security/code scanning enabled still complete nightly SAST and retain the SARIF artifact report. Failed uploads now emit a warning annotation and job-summary entry so degraded Code Scanning ingestion stays visible.

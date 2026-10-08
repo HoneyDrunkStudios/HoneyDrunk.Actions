@@ -110,6 +110,9 @@ jobs:
           "$RUNNER_TEMP/node-workflow-tests/bin/python" -m pip install -r tests/requirements.txt
           "$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p 'test_node_workspace.py' -v
 
+      - name: Regression test Container App deployment contract
+        run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_container_app_deployment.py -v'
+
       - name: Regression test direct-request PR metadata
         run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
 

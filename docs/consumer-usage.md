@@ -1124,13 +1124,28 @@ Secret name mapping:
 
 ### Target Prerequisites
 
+- Runners need `python3`, Azure CLI with Container Apps support, `jq`, Bash, and `curl`; the default GitHub-hosted Ubuntu runner supplies these. Self-hosted runners must provision them.
 - Container App name must match `ca-hd-{service}-{env}`.
 - Container App `activeRevisionsMode` must be `Multiple`.
 - Container App must have system-assigned Managed Identity enabled.
+- Ingress must route 100% to exactly one explicitly named revision. Positive `latestRevision` routing, split traffic, empty/unknown traffic, malformed responses, and traffic-read errors fail before build or deployment. Zero-weight entries are permitted. The workflow never guesses a current revision from the active revision list.
+- Coordinate all writers for the app: serialize application rollouts, manual rollbacks, and Infrastructure maintenance. The captured traffic target is rechecked before Key Vault/environment mutation, immediately before candidate creation, and before traffic shifting (including `hold`); a changed target fails instead of overwriting another rollout. These reads are guardrails, not an atomic Azure lock.
 - For Key Vault references, that managed identity must have access to the referenced Key Vault secrets.
 - For OIDC deploys, the federated credential needs `AcrPush` on the shared ACR and `Container Apps Contributor` on the target Container App.
 
 ---
+
+### Bootstrap and Infrastructure ownership
+
+Bootstrap must establish a healthy placeholder or application revision before this rollout workflow is used. Its named traffic target must already exist; this workflow does not create a missing app or automatically pin `latestRevision` traffic. Infrastructure should stop writing the application image and traffic after initialization, or require an explicit approved maintenance snapshot. Reapplying a stale image or `latestRevision: true` restores the same unsafe contract.
+
+For an existing app using `latestRevision`, perform a separately approved migration with deployments paused: read the current traffic and the actual ready revision receiving it, verify identity/readiness and health, then pin the same revision at 100%. Re-read traffic and health before retrying the application release. Do not pick the last active revision or assume `latestRevisionName` is serving traffic while a newer revision is still provisioning. Named traffic must be explicit in subsequent IaC applies. See the [Infrastructure Pulse lifecycle](https://github.com/HoneyDrunkStudios/HoneyDrunk.Infrastructure/tree/main/nodes/pulse) for its initialization and maintenance contract.
+
+A canary leaves two traffic-bearing revisions intentionally. Before the next rollout, an operator must deliberately finish or roll back that canary to a single known-good named 100% target. Automatic consolidation is not performed.
+
+`deployment-status` remains `success`, `health-check-failed`, or `deploy-failed`. Success requires the whole job so far to be successful, a completed revision deployment, a successful requested health probe, and a completed traffic step. Checkout, setup, preflight, Azure-read errors, cancellation, or skipped required stages cannot report success. If cancellation prevents the final status step itself from running, its output can be absent: callers must use the job result as authoritative. Summary traffic percent is `not confirmed` when the shift step produced no confirmed outcome.
+
+These changes preserve the existing health-probe inputs and their semantics. A relative `health-check-url` is intended to target the candidate's revision-specific FQDN; empty input skips the HTTP probe. Existing absolute-URL and app-FQDN-fallback behavior is unchanged and is not evidence that a particular candidate passed an application-level probe.
 
 ### Permissions
 

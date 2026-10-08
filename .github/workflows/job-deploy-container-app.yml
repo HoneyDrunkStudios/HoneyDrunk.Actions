@@ -307,44 +307,9 @@ jobs:
           RESOURCE_GROUP: ${{ inputs.resource-group }}
         run: |
           set -euo pipefail
-          TRAFFIC_JSON=$(az containerapp ingress traffic show \
-            --name "$APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --output json 2>/dev/null || echo '[]')
-
-          LATEST_TRAFFIC_WEIGHT=$(echo "$TRAFFIC_JSON" | jq -r '
-            [.[] | select((.latestRevision // false) == true) | (.weight // .trafficWeight // 0)]
-            | add // 0')
-          if [ "$LATEST_TRAFFIC_WEIGHT" -gt 0 ]; then
-            echo "::error::Container App '$APP_NAME' routes ${LATEST_TRAFFIC_WEIGHT}% traffic to latestRevision. Configure explicit revision traffic before using this workflow so new revisions stay at 0% until health succeeds."
-            exit 1
-          fi
-
-          POSITIVE_TRAFFIC_REVISIONS=$(echo "$TRAFFIC_JSON" | jq -c '
-            [.[] | select((.weight // .trafficWeight // 0) > 0) | select((.revisionName // "") != "") | .revisionName]')
-          POSITIVE_TRAFFIC_REVISION_COUNT=$(echo "$POSITIVE_TRAFFIC_REVISIONS" | jq 'length')
-          if [ "$POSITIVE_TRAFFIC_REVISION_COUNT" -gt 1 ]; then
-            REVISION_LIST=$(echo "$POSITIVE_TRAFFIC_REVISIONS" | jq -r 'join(", ")')
-            echo "::error::Container App '$APP_NAME' has multiple revisions receiving traffic (${REVISION_LIST}). This workflow's canary traffic shift only supports a single existing traffic-bearing revision. Consolidate traffic to one explicit revision before using this workflow."
-            exit 1
-          fi
-
-          CURRENT_REVISION=$(echo "$POSITIVE_TRAFFIC_REVISIONS" | jq -r 'first // empty')
-
-          if [ -z "$CURRENT_REVISION" ]; then
-            CURRENT_REVISION=$(az containerapp revision list \
-              --name "$APP_NAME" \
-              --resource-group "$RESOURCE_GROUP" \
-              --query "[?properties.active].name | [-1]" \
-              --output tsv 2>/dev/null || true)
-          fi
-
+          CURRENT_REVISION=$(python3 .actions/.github/scripts/container_app_traffic.py)
           echo "current-revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
-          if [ -n "$CURRENT_REVISION" ]; then
-            echo "Current traffic target: $CURRENT_REVISION"
-          else
-            echo "::warning::Could not determine current traffic target; canary mode will fail if requested"
-          fi
+          echo "Current traffic target: $CURRENT_REVISION"
 
       - name: Login to ACR for build
         if: ${{ inputs.build-context != '' }}
@@ -402,8 +367,11 @@ jobs:
           SECRETS_INPUT: ${{ inputs.keyvault-secrets }}
           APP_NAME: ${{ inputs.container-app }}
           RESOURCE_GROUP: ${{ inputs.resource-group }}
+          EXPECTED_REVISION: ${{ steps.current-traffic.outputs.current-revision }}
         run: |
           set -euo pipefail
+          # Updating environment variables can also create a revision.
+          python3 .actions/.github/scripts/container_app_traffic.py
           SECRET_ARGS=()
           ENV_ARGS=()
           COUNT=0
@@ -452,6 +420,15 @@ jobs:
 
             echo "Configured $COUNT Key Vault-backed Container App secret reference(s)"
           fi
+
+      - name: Revalidate traffic before creating a revision
+        id: pre-deploy-traffic
+        shell: bash
+        env:
+          APP_NAME: ${{ inputs.container-app }}
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          EXPECTED_REVISION: ${{ steps.current-traffic.outputs.current-revision }}
+        run: python3 .actions/.github/scripts/container_app_traffic.py
 
       - name: Deploy Container App revision
         id: deploy-container-app
@@ -513,9 +490,12 @@ jobs:
           RESOURCE_GROUP: ${{ inputs.resource-group }}
           NEW_REVISION: ${{ steps.deploy-container-app.outputs.revision-name }}
           CURRENT_REVISION: ${{ steps.current-traffic.outputs.current-revision }}
+          EXPECTED_REVISION: ${{ steps.current-traffic.outputs.current-revision }}
           TRAFFIC_SHIFT_MODE: ${{ inputs.traffic-shift-mode }}
         run: |
           set -euo pipefail
+          # Refuse to overwrite a rollback or another rollout during this run.
+          python3 .actions/.github/scripts/container_app_traffic.py
           TRAFFIC_PERCENT=0
 
           case "$TRAFFIC_SHIFT_MODE" in
@@ -554,25 +534,31 @@ jobs:
         if: ${{ failure() && steps.deploy-container-app.outputs.revision-name != '' }}
         shell: bash
         run: |
-          echo "::error::Container App deployment did not complete successfully. Traffic was not shifted unless the failure happened after the traffic step. To roll back manually, run: az containerapp ingress traffic set --name '${{ inputs.container-app }}' --resource-group '${{ inputs.resource-group }}' --revision-weight '<previous-revision>=100'."
+          echo "::error::Container App deployment did not complete successfully. Read current traffic before taking action: a traffic update can apply even when its response fails. Verify the captured previous revision is still healthy before an approved manual rollback: az containerapp ingress traffic set --name '${{ inputs.container-app }}' --resource-group '${{ inputs.resource-group }}' --revision-weight '<previous-revision>=100'."
 
       - name: Set deployment status
         id: deployment-status
         if: always()
         shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+          DEPLOY_OUTCOME: ${{ steps.deploy-container-app.outcome }}
+          HEALTH_OUTCOME: ${{ steps.health-check.outcome }}
+          HEALTH_CHECK_URL: ${{ inputs.health-check-url }}
+          SHIFT_OUTCOME: ${{ steps.shift-traffic.outcome }}
         run: |
           set -euo pipefail
-          STATUS="success"
-          if [ "${{ steps.health-check.outcome }}" = "failure" ]; then
+          # Default to failure. job.status includes checkout/setup/preflight
+          # failures (even steps without IDs), and cancellation. Successful
+          # deployment also requires the deploy and traffic gates to have run.
+          STATUS="deploy-failed"
+          if [ "$HEALTH_OUTCOME" = "failure" ]; then
             STATUS="health-check-failed"
-          elif [ "${{ steps.validate-inputs.outcome }}" = "failure" ] \
-            || [ "${{ steps.azure-login.outcome }}" = "failure" ] \
-            || [ "${{ steps.validate-target.outcome }}" = "failure" ] \
-            || [ "${{ steps.configure-keyvault-refs.outcome }}" = "failure" ] \
-            || [ "${{ steps.image.outcome }}" = "failure" ] \
-            || [ "${{ steps.deploy-container-app.outcome }}" = "failure" ] \
-            || [ "${{ steps.shift-traffic.outcome }}" = "failure" ]; then
-            STATUS="deploy-failed"
+          elif [ "$JOB_STATUS" = "success" ] \
+            && [ "$DEPLOY_OUTCOME" = "success" ] \
+            && [ "$SHIFT_OUTCOME" = "success" ] \
+            && { [ -z "$HEALTH_CHECK_URL" ] || [ "$HEALTH_OUTCOME" = "success" ]; }; then
+            STATUS="success"
           fi
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "Deployment status: $STATUS"
@@ -591,7 +577,9 @@ jobs:
           echo "| **Resource Group** | ${{ inputs.resource-group }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Revision** | ${{ steps.deploy-container-app.outputs.revision-name }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Revision FQDN** | ${{ steps.deploy-container-app.outputs.revision-fqdn }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Traffic Preflight** | ${{ steps.current-traffic.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Previous Revision** | ${{ steps.current-traffic.outputs.current-revision }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Traffic Mode** | ${{ inputs.traffic-shift-mode }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Traffic Percent** | ${{ steps.shift-traffic.outputs.traffic-percent || '0' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Traffic Percent** | ${{ steps.shift-traffic.outputs.traffic-percent || 'not confirmed' }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Key Vault** | ${{ inputs.keyvault-name || 'N/A' }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Status** | ${{ steps.deployment-status.outputs.status }} |" >> "$GITHUB_STEP_SUMMARY"
