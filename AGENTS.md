@@ -9,3 +9,11 @@ Work within the selected request. Preserve unrelated changes and use a separate 
 ## Verification
 
 Use [.github/workflows/actions-ci.yml](.github/workflows/actions-ci.yml) for the current pinned actionlint setup, Python dependencies and contract-test commands. Run the tests matching changed behavior, for example `python -m unittest discover -s tests -p test_pr_metadata.py -v` for PR metadata and `python -m unittest discover -s tests -p test_review_retirement.py -v` for retirement guards. For YAML changes, run actionlint as CI does. Never dispatch a deployment, rotation or paid review merely to verify documentation.
+
+## Code Review Rules
+
+Apply the [shared review criteria](https://github.com/HoneyDrunkStudios/HoneyDrunk.Standards/blob/main/HoneyDrunk.Standards/docs/CONVENTIONS.md#code-review) to changed behavior, using the repository boundaries above. Report actionable findings with the failing path, concrete impact and a small corrective action; disclose unavailable evidence. These rules grant no cross-repository access or merge authority.
+
+- Trace reusable workflow changes through real callers: preserve inputs, outputs, secret names, defaults and caller/job permissions. Keep application decisions in consumers and resource definitions in Infrastructure; reuse existing workflow helpers only when their behavior fits.
+- Flag untrusted-input interpolation, secret-bearing logs/artifacts, privilege escalation, unsafe event/ref conditions, mutable deployment artifacts, or release/rollback paths that can affect the wrong target. Check timeouts, concurrency, cancellation and aggregate gates for failed or skipped prerequisites.
+- Require focused caller/contract and failure-path evidence for changed orchestration, including rejected targets and rollback failures where relevant. A YAML lint pass cannot establish safe execution; leave formatting and deterministic inventory checks to CI.
