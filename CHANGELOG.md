@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-10 — Legacy Grid Review retirement
+
+- Retire automatic PR-review callers and configuration under the founder's explicit complete-removal request. Preserve tests, Sonar/security checks, metadata/authorship checks and manual review.
+- Preserve post-merge audits with distinct state labels; central source merge and installed audit alignment must precede live legacy-label cleanup. No merge, deployment or protection change is included.
+
 ## 2026-10-02 — Studio migration (pending rollout)
 
 - Archive the retired work-item filing workflow/script and former packet-link enforcement. Existing issues and old refs are preserved.

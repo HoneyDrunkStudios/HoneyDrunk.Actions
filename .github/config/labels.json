@@ -6,6 +6,21 @@
       "description": "PR selected for ADR-0044 post-merge audit sampling."
     },
     {
+      "name": "post-merge-audit-in-progress",
+      "color": "e3b341",
+      "description": "Retained post-merge audit worker has claimed the selected merged PR."
+    },
+    {
+      "name": "post-merge-audited",
+      "color": "0e8a16",
+      "description": "Retained post-merge audit completed without blocking findings."
+    },
+    {
+      "name": "post-merge-audit-findings",
+      "color": "b60205",
+      "description": "Retained post-merge audit found blocking or request-changes findings."
+    },
+    {
       "name": "large-pr",
       "color": "fbca04",
       "description": "Non-human-authored PR exceeds ADR-0044 size guidance and needs review attention."
@@ -14,36 +29,6 @@
       "name": "out-of-band",
       "color": "ed7d31",
       "description": "Out-of-band PR without packet scope context; review runs with reduced scope."
-    },
-    {
-      "name": "skip-review",
-      "color": "cfd3d7",
-      "description": "Manual ADR-0044 escape hatch; Grid Review Runner skips PRs carrying this label."
-    },
-    {
-      "name": "skip-grid-review",
-      "color": "cfd3d7",
-      "description": "Explicit operator-approved bypass for ADR-0086 Grid review queueing."
-    },
-    {
-      "name": "needs-agent-review",
-      "color": "1d76db",
-      "description": "PR is in the Grid Review Runner queue; the pull-based local worker will pick it up on its next tick."
-    },
-    {
-      "name": "agent-review-in-progress",
-      "color": "e3b341",
-      "description": "Local worker has claimed the PR and is running the Grid review."
-    },
-    {
-      "name": "agent-reviewed",
-      "color": "0e8a16",
-      "description": "Local worker posted a clean Grid review verdict."
-    },
-    {
-      "name": "changes-requested-by-agent",
-      "color": "b60205",
-      "description": "Local worker posted a Grid review verdict with blocking or request-changes findings."
     },
     {
       "name": "meta",

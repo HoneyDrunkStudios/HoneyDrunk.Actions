@@ -28,7 +28,6 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 | `job-rust-dependency-report.yml` | `contents: read` |
 | `job-node-security-audit.yml` | `contents: read` |
 | `job-rust-security-audit.yml` | `contents: read` |
-| `job-review-request.yml` | `contents: read`, `pull-requests: write`, `issues: write` |
 | `job-discord-notify.yml` | none required (`permissions: {}` callee; any caller block is a superset) |
 | `release.yml` | `contents: write`, `packages: write`, `id-token: write`, `security-events: write` |
 | `job-solution-preflight.yml` | `contents: read` |
@@ -187,7 +186,7 @@ Request: N/A (describe the direct request or approved scope; no work item requir
 Size justification: N/A
 ```
 
-`large-pr`, `audit-sample`, `out-of-band`, `skip-review`, and `skip-grid-review` are defined in `.github/config/labels.json` and can be seeded with `seed-labels.json` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
+`large-pr`, `audit-sample`, `out-of-band`, `post-merge-audit-in-progress`, `post-merge-audited`, and `post-merge-audit-findings` are defined in `.github/config/labels.json` and can be seeded with `seed-labels.yml` / `seed-labels-fanout.yml`. The size job also attempts to apply `large-pr` automatically when the threshold is crossed; label seeding keeps that path quiet instead of relying on best-effort creation at review time.
 
 ### Coverage Gate and Baseline Ratchet
 
@@ -474,75 +473,23 @@ jobs:
 
 Callers need `id-token: write` (OIDC) and `contents: read` (checkout) — a superset of the reusable workflow's declared permissions (invariant 39).
 
-## Grid Review Request Workflow
+## Legacy PR review retirement
 
-**Purpose:** Advisory ADR-0086 trigger rail for the pull-based local-worker Grid Review Runner. This workflow does **not** run Codex, Claude, Anthropic, OpenAI, or any model API in GitHub Actions. It applies high-confidence PR classification labels that already exist on the target repository, normalizes the worker-state labels, and upserts a structured queue comment that the local worker polls.
+The founder authorized full Grid Review retirement on October 10, 2026.
+`job-review-request.yml`, its PR-event callers, and `.honeydrunk-review.yaml`
+are retired. Do not add a caller or recreate the six former review labels.
+Tests, Sonar/security checks, PR metadata/authorship/size checks and manual
+review remain required. Greptile setup and required-check changes are separate
+approvals; retirement does not claim Greptile is installed or authorize merge.
 
-**When to Use:** Repos that opt in to automatic Grid review by adding `.honeydrunk-review.yaml` with `enabled: true`. Start with `HoneyDrunk.Studio` for the Phase 1 pilot.
+Post-merge audit is retained. Its `audit-sample` queue now has distinct
+`post-merge-audit-in-progress`, `post-merge-audited`, and
+`post-merge-audit-findings` state labels. Install the matching reviewed audit
+configuration before removing the three shared legacy state labels. Merge
+this central catalog and seed-filter change before live label cleanup. Both
+seeding entry points filter the six retired names even from an older catalog
+source ref; unrelated labels continue to be seeded.
 
-### Minimal Caller
-
-```yaml
-name: Grid Review Request
-
-on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review]
-
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-
-jobs:
-  grid-review-request:
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-review-request.yml@main
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-```
-
-### Consumer Config
-
-The repo must carry `.honeydrunk-review.yaml` and explicitly opt in:
-
-```yaml
-enabled: true
-runner: local-worker
-review_risk_class: normal
-```
-
-Skip behavior:
-
-- draft PRs are skipped
-- PRs with a configured bypass label are skipped; the default bypass labels are `skip-review` and `skip-grid-review`
-- missing `.honeydrunk-review.yaml` is skipped
-- `enabled: false` is skipped
-
-Bypass labels are an explicit operator choice, not a docs-only/content-type shortcut. Documentation changes still queue for review unless a human deliberately applies a bypass label.
-
-### Queue Contract
-
-The workflow emits the ADR-0086 `grid-review-request` payload into a machine-readable PR comment with idempotency key:
-
-```text
-owner/repo#pr@headSha
-```
-
-It adds `needs-agent-review`, removes stale worker-state completion/claim labels, and upserts a comment marked `honeydrunk-grid-review-queue:v1` containing `head_sha`, `queued_at`, `runner`, `risk_class`, and the workflow run metadata. The workflow also infers existing non-worker labels from PR title/body/files, such as ADR number, docs, meta, infra, security, secrets, and known node labels. Optional classification failures warn and do not block queueing. The local worker claims the PR by replacing `needs-agent-review` with `agent-review-in-progress`, runs the subscribed local CLI review, and posts one advisory verdict for the recorded head SHA.
-
-Set `apply-classification-labels: false` only for a repo that wants the review queue without central PR label classification.
-
-Set `bypass-labels` only when a repo needs a different visible operator-approved escape hatch. The default is `skip-review,skip-grid-review`.
-
-ADR-0088 removed the old OpenClaw webhook compatibility inputs. Callers should pass only the local-worker queue settings and `github-token`.
-
----
-
-### Permissions
-
-`job-review-request.yml` callers need `contents: read`, `pull-requests: write`, and `issues: write`. The workflow reads PR file metadata, then uses the write scopes for queue labels and the queue comment; empirical validation on HoneyHub showed `pull-requests: read` can leave the reusable job with a token that cannot normalize PR labels/comments even when `issues: write` is present. Missing caller permissions fail before the reusable workflow runs; over-granting is legal but discouraged.
-
----
 
 ## Discord Operator-Alert Notification
 
