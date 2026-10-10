@@ -11,6 +11,11 @@
 
 ### Added
 
+- Development-only `job-deploy-app-service.yml` orchestrates protected OIDC, unique
+  image build/scan/push and explicit rollback, invoking a caller-owned product
+  verifier. No slots, resource provisioning, SQL or automatic rollback. Shell
+  regressions cover setup guards, scan-before-push and immutable image outputs.
+
 - Node evidence exposes the uploaded artifact ID and records run/attempt/repository/revision provenance. Hosted verification downloads each successful producer's exact artifact, allowing verifier-only and mixed-attempt reruns while rejecting missing IDs, ambiguous profiles, and mismatched provenance.
 
 - Node quality review follow-up: preserve monorepo parent-relative lockfile and Node-version paths when their resolved targets remain inside the checkout, including symlink checks. Absolute/drive/backslash/control-character paths and checkout escapes are explicitly rejected; migrate absolute paths to portable relative paths when adopting this revision. Summary-only artifact upload is opt-in (`upload-summary-artifact: false` by default), so unchanged callers retain no artifact-service dependency. Hosted npm-default/pinned-manager smoke calls exercise the actual reusable revision, download its evidence, and verify runtime versions and outcomes.
@@ -52,3 +57,4 @@
 ### Removed
 
 - `job-review-request.yml`: removed the deprecated ADR-0044/OpenClaw compatibility inputs (`openclaw-webhook-url`, `upload-fallback-artifact`, `post-fallback-comment`, `artifact-name`) and the no-op `openclaw-webhook-secret` workflow-call secret. The reusable workflow now exposes only the ADR-0086 local-worker queue contract plus `github-token`; the org secret itself is not removed here.
+

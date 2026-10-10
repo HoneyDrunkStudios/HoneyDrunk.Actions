@@ -181,6 +181,13 @@ permissions:
   id-token: write
 ```
 
+### Development App Service containers
+
+See [the direct-image development contract](docs/app-service-development.md) for the
+B1-compatible shared workflow, protected environment variables, product-owned
+release/readiness verifier and explicit retained-image rollback. Production and
+slot deployment are not part of this contract.
+
 ### Azure OIDC Deploy
 
 For deployable Nodes, callers pass Azure identifiers as variables and grant the job `id-token: write`. No Azure credential secret is accepted.
@@ -729,3 +736,4 @@ Further emitter families (CI failure on `main`, release/NuGet/deploy events, and
 The active Hive field mirror translates labels on existing issues into project fields. To reuse it, replace the project shape and repository-to-node mapping, then review the existing least-privilege token contract. It does not create issues from planning documents.
 
 The archived work-item pipeline is historical source, not an active supported workflow. Do not restore it as part of normal setup.
+

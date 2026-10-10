@@ -1,0 +1,130 @@
+name: Deploy development App Service container
+
+on:
+  workflow_call:
+    inputs:
+      operation:
+        description: 'deploy or explicit image rollback; neither applies SQL or settings'
+        type: string
+        required: true
+      registry-name:
+        description: 'Approved ACR short name'
+        type: string
+        required: true
+      image-name:
+        description: 'Repository within that registry'
+        type: string
+        required: true
+      rollback-image:
+        description: 'Retained immutable image for explicit rollback'
+        type: string
+        default: ''
+      rollback-release-id:
+        description: 'Release ID baked into the rollback image'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Require reviewed setup and protected environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENABLED: ${{ vars.APP_SERVICE_DEPLOYMENT_APPROVED }}
+          APP: ${{ vars.APP_SERVICE_NAME }}
+          CLIENT: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          REGISTRY: ${{ inputs.registry-name }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+          OPERATION: ${{ inputs.operation }}
+          ROLLBACK_IMAGE: ${{ inputs.rollback-image }}
+          ROLLBACK_RELEASE: ${{ inputs.rollback-release-id }}
+        run: |
+          set -euo pipefail
+          test "$ENABLED" = 'true'
+          test -n "$APP"
+          test -n "$CLIENT"
+          test -n "$TENANT"
+          test -n "$SUBSCRIPTION"
+          gh api "repos/$GITHUB_REPOSITORY/environments/dev" --jq '.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length' | grep -Eq '^[1-9][0-9]*$'
+          [[ "$REGISTRY" =~ ^[a-z0-9]{5,50}$ ]]
+          [[ "$IMAGE_NAME" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]]
+          test -f scripts/deploy_app_service.py
+          if [ "$OPERATION" = rollback ]; then
+            test -n "$ROLLBACK_IMAGE"
+            test -n "$ROLLBACK_RELEASE"
+          elif [ "$OPERATION" = deploy ]; then
+            test -z "$ROLLBACK_IMAGE"
+            test -z "$ROLLBACK_RELEASE"
+          else
+            exit 1
+          fi
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and push unique release image
+        id: build
+        if: inputs.operation == 'deploy'
+        env:
+          REGISTRY: ${{ inputs.registry-name }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+        run: |
+          set -euo pipefail
+          release="dev-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          tag="$REGISTRY.azurecr.io/$IMAGE_NAME:$release"
+          az acr login --name "$REGISTRY"
+          docker build --build-arg "RELEASE_ID=$release" --tag "$tag" .
+          scan_dir=$(mktemp -d)
+          trap 'rm -rf "$scan_dir"' EXIT
+          docker save "$tag" -o "$scan_dir/image.tar"
+          docker run --rm -v "$scan_dir:/scan:ro" aquasec/trivy:0.69.3 image \
+            --input /scan/image.tar --scanners vuln --severity HIGH,CRITICAL --exit-code 1
+          docker push "$tag"
+          digest=$(az acr repository show --name "$REGISTRY" --image "$IMAGE_NAME:$release" --query digest -o tsv)
+          printf 'image=%s.azurecr.io/%s@%s\nrelease=%s\n' "$REGISTRY" "$IMAGE_NAME" "$digest" "$release" >> "$GITHUB_OUTPUT"
+      - name: Scan retained rollback image before serving update
+        if: inputs.operation == 'rollback'
+        env:
+          REGISTRY: ${{ inputs.registry-name }}
+          IMAGE: ${{ inputs.rollback-image }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE" =~ ^${REGISTRY}\.azurecr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          az acr login --name "$REGISTRY"
+          docker pull "$IMAGE"
+          scan_dir=$(mktemp -d)
+          trap 'rm -rf "$scan_dir"' EXIT
+          docker save "$IMAGE" -o "$scan_dir/image.tar"
+          docker run --rm -v "$scan_dir:/scan:ro" aquasec/trivy:0.69.3 image \
+            --input /scan/image.tar --scanners vuln --severity HIGH,CRITICAL --exit-code 1
+      - name: Update serving image and verify release plus SQL readiness
+        env:
+          APP: ${{ vars.APP_SERVICE_NAME }}
+          IMAGE: ${{ inputs.operation == 'rollback' && inputs.rollback-image || steps.build.outputs.image }}
+          RELEASE: ${{ inputs.operation == 'rollback' && inputs.rollback-release-id || steps.build.outputs.release }}
+        run: python3 scripts/deploy_app_service.py --app-name "$APP" --image "$IMAGE" --release-id "$RELEASE"
+      - name: Retain image and rollback evidence even after health failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: app-service-dev-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: deployment-evidence/
+          retention-days: 30
+          if-no-files-found: warn
+

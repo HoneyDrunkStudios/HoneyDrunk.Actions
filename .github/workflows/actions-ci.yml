@@ -113,6 +113,9 @@ jobs:
       - name: Regression test Container App deployment contract
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_container_app_deployment.py -v'
 
+      - name: Regression test App Service workflow boundary
+        run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_app_service_workflow.py -v'
+
       - name: Regression test formatter with the real .NET SDK
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_static_analysis.py -v'
 
@@ -234,3 +237,4 @@ jobs:
               assert not junit.findall('.//failure'), f'{profile}: JUnit reports failures'
               assert not junit.findall('.//error'), f'{profile}: JUnit reports errors'
               print(f'{profile}: producer attempt {producer_attempt}, verifier attempt {os.environ["GITHUB_RUN_ATTEMPT"]}; uploaded outcomes and JUnit verified; Node {runtime["node"]}, npm {runtime["npm"]}')
+
