@@ -5,7 +5,7 @@
 #   Run SonarQube Cloud (formerly SonarCloud — rebrand 2026) static analysis
 #   on a .NET repo using `dotnet-sonarscanner`. Reuses the coverage artifact
 #   from `job-build-and-test.yml`, publishes coverage to SonarQube Cloud,
-#   and reports the SonarQube Cloud quality gate as a PR check.
+#   and waits for the server-side quality gate before reporting success.
 #
 # Tier:
 #   Tier 2 of the ADR-0011 PR review pipeline. Required check on public repos
@@ -34,17 +34,16 @@
 # Secret:
 #   SONAR_TOKEN — provisioned as a GitHub org secret with `Selected repositories`
 #   scope. Provisioning lives in `infrastructure/walkthroughs/sonarcloud-organization-setup.md`
-#   in HoneyDrunk.Studio. Free/OSS plan caps Personal Access Token
-#   expiration at 60 days — rotation discipline is tracked on the operator's
-#   calendar; the broader external-SaaS credential rotation policy is being
-#   formalized in a separate ADR (see `generated/adr-drafts/`).
+#   in HoneyDrunk.Studio. Respect the token's actual expiry choice; inactivity
+#   removal is separate from expiration. Never print or persist its value.
 #
 # Single Responsibility:
-#   SonarQube Cloud analysis only. Does not run tests (reuses
-#   `job-build-and-test.yml`'s coverage artifact). Does not gate on Sonar Way
-#   quality-gate failure — failure surfaces via the PR check that SonarQube
-#   Cloud itself publishes; branch protection enforces it as a required check
-#   on a per-repo basis.
+#   Reuses `job-build-and-test.yml`'s coverage artifact, or collects coverage
+#   when it is absent. Fails on server processing errors, quality-gate failure,
+#   or timeout. The external `SonarCloud Code Analysis` check still requires a
+#   correctly bound GitHub project/App and remains a separate required check.
+#   A passed quality gate does not establish zero new issues: inspect the actual
+#   findings for the analyzed PR head before calling it ready.
 #
 # Non-goals:
 #   Vulnerability scanning (see `job-dependency-scan.yml`), CodeQL SAST (see
@@ -211,6 +210,8 @@ jobs:
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
             /d:sonar.token="${SONAR_TOKEN}" \
+            /d:sonar.qualitygate.wait=true \
+            /d:sonar.qualitygate.timeout=300 \
             /d:sonar.exclusions="${{ inputs.sonar-exclusions }}" \
             /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
 
