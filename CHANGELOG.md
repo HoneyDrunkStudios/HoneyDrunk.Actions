@@ -24,7 +24,9 @@
 - Development-only `job-deploy-app-service.yml` orchestrates protected OIDC, unique
   image build/scan/push and explicit rollback, invoking a caller-owned product
   verifier. No slots, resource provisioning, SQL or automatic rollback. Shell
-  regressions cover setup guards, scan-before-push and immutable image outputs.
+  regressions cover setup guards, scan-before-push, immutable image outputs and
+  rollback reference/pull/scan failures. The caller token requires `actions: read`
+  to verify protected-environment reviewers on private repositories.
 
 - Node evidence exposes the uploaded artifact ID and records run/attempt/repository/revision provenance. Hosted verification downloads each successful producer's exact artifact, allowing verifier-only and mixed-attempt reruns while rejecting missing IDs, ambiguous profiles, and mismatched provenance.
 

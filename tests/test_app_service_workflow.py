@@ -10,6 +10,8 @@ WORKFLOW = yaml.safe_load((Path(__file__).parents[1] / '.github/workflows/job-de
 STEPS = WORKFLOW['jobs']['deploy']['steps']
 GUARD = next(s['run'] for s in STEPS if s.get('name') == 'Require reviewed setup and protected environment')
 BUILD = next(s['run'] for s in STEPS if s.get('id') == 'build')
+ROLLBACK = next(s['run'] for s in STEPS if s.get('name') == 'Scan retained rollback image before serving update')
+DIGEST_IMAGE = 'acrhdshareddev.azurecr.io/honeydrunk-identity-api@sha256:' + 'a' * 64
 
 
 class AppServiceWorkflowTests(unittest.TestCase):
@@ -19,9 +21,9 @@ class AppServiceWorkflowTests(unittest.TestCase):
             (root / 'scripts').mkdir()
             (root / 'scripts/deploy_app_service.py').touch()
             for name, body in {
-                'gh': 'printf "%s\\n" "$REVIEWERS"',
+                'gh': 'if [ "${GH_FAIL:-0}" = 1 ]; then exit 1; fi; printf "%s\\n" "$REVIEWERS"',
                 'az': 'if [ "$1 $2" = "acr repository" ]; then printf "sha256:%064d\\n" 0; fi',
-                'docker': 'printf "%s\\n" "$*" >> "$CALLS"; if [ "$1" = run ] && [ "${SCAN_FAIL:-0}" = 1 ]; then exit 1; fi',
+                'docker': 'printf "%s\\n" "$*" >> "$CALLS"; if [ "$1" = pull ] && [ "${PULL_FAIL:-0}" = 1 ]; then exit 1; fi; if [ "$1" = run ] && [ "${SCAN_FAIL:-0}" = 1 ]; then exit 1; fi',
             }.items():
                 tool = root / name
                 tool.write_text('#!/bin/bash\nset -eu\n' + body + '\n')
@@ -44,10 +46,10 @@ class AppServiceWorkflowTests(unittest.TestCase):
         for invalid in [{'ENABLED': 'false'}, {'REVIEWERS': ''}, {'REVIEWERS': '0'},
                         {'CLIENT': ''}, {'OPERATION': 'prod'}, {'OPERATION': 'rollback'},
                         {'ROLLBACK_IMAGE': 'unexpected'}, {'REGISTRY': 'bad; command'},
-                        {'IMAGE_NAME': '../outside'}]:
+                        {'IMAGE_NAME': '../outside'}, {'GH_FAIL': '1'}]:
             with self.subTest(invalid=invalid):
                 self.assertNotEqual(self.execute(GUARD, invalid)[0].returncode, 0)
-        self.assertEqual(self.execute(GUARD, {'OPERATION': 'rollback', 'ROLLBACK_IMAGE': 'retained',
+        self.assertEqual(self.execute(GUARD, {'OPERATION': 'rollback', 'ROLLBACK_IMAGE': DIGEST_IMAGE,
                                             'ROLLBACK_RELEASE': 'known'})[0].returncode, 0)
 
     def test_build_bakes_unique_release_and_outputs_immutable_digest(self):
@@ -68,6 +70,9 @@ class AppServiceWorkflowTests(unittest.TestCase):
 
     def test_scope_and_verifier_are_fail_closed(self):
         job = WORKFLOW['jobs']['deploy']
+        expected_permissions = {'contents': 'read', 'actions': 'read', 'id-token': 'write'}
+        self.assertEqual(WORKFLOW['permissions'], expected_permissions)
+        self.assertEqual(job['permissions'], expected_permissions)
         self.assertEqual(job['environment'], 'dev')
         self.assertEqual(job['if'], "github.ref == 'refs/heads/main'")
         names = [s.get('name', s.get('uses', '')) for s in STEPS]
@@ -77,6 +82,42 @@ class AppServiceWorkflowTests(unittest.TestCase):
         self.assertIn('scripts/deploy_app_service.py', verify['run'])
         self.assertNotIn('slot', verify['run'])
         self.assertNotIn('sql', verify['run'])
+
+    def test_rollback_scans_the_exact_retained_digest_without_pushing(self):
+        result, output, calls = self.execute(ROLLBACK, {'IMAGE': DIGEST_IMAGE})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('pull ' + DIGEST_IMAGE, calls)
+        self.assertIn('save ' + DIGEST_IMAGE, calls)
+        self.assertLess(calls.index('pull '), calls.index('aquasec/trivy:0.69.3'))
+        self.assertIn('--severity HIGH,CRITICAL --exit-code 1', calls)
+        self.assertNotIn('push ', calls)
+        self.assertEqual(output, '')
+
+    def test_rollback_rejects_wrong_registry_tags_and_malformed_digests(self):
+        for image in [DIGEST_IMAGE.replace('acrhdshareddev', 'otherregistry'),
+                      DIGEST_IMAGE.split('@')[0] + ':latest',
+                      DIGEST_IMAGE[:-1], DIGEST_IMAGE.replace('sha256:', 'sha512:'),
+                      DIGEST_IMAGE + '; echo unsafe']:
+            with self.subTest(image=image):
+                result, output, calls = self.execute(ROLLBACK, {'IMAGE': image})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, '')
+                self.assertEqual(output, '')
+
+    def test_rollback_pull_failure_stops_before_scan(self):
+        result, output, calls = self.execute(ROLLBACK, {'IMAGE': DIGEST_IMAGE, 'PULL_FAIL': '1'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pull ' + DIGEST_IMAGE, calls)
+        self.assertNotIn('save ', calls)
+        self.assertNotIn('aquasec/trivy', calls)
+        self.assertEqual(output, '')
+
+    def test_rollback_scanner_failure_is_not_ignored(self):
+        result, output, calls = self.execute(ROLLBACK, {'IMAGE': DIGEST_IMAGE, 'SCAN_FAIL': '1'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('aquasec/trivy:0.69.3', calls)
+        self.assertNotIn('push ', calls)
+        self.assertEqual(output, '')
 
 
 if __name__ == '__main__':
