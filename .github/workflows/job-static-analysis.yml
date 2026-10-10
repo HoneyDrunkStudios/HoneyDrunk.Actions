@@ -108,20 +108,28 @@ jobs:
         if: ${{ inputs.check-formatting }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
+        env:
+          FORMAT_PROJECT_PATH: ${{ inputs.project-path }}
+          FAIL_ON_FORMATTING_ISSUES: ${{ inputs.fail-on-formatting-issues }}
         run: |
           echo "Checking code formatting..."
-          FORMAT_STATUS=0
-          if ! dotnet format --verify-no-changes --verbosity diagnostic; then
-            FORMAT_STATUS=1
-            if [ "${{ inputs.fail-on-formatting-issues }}" = "true" ]; then
-              echo "::error::Code formatting issues detected. Run 'dotnet format' to fix."
-              exit 1
+          FORMAT_ARGS=(--verify-no-changes --verbosity diagnostic)
+          if [ -n "$FORMAT_PROJECT_PATH" ]; then
+            FORMAT_ARGS=("$FORMAT_PROJECT_PATH" "${FORMAT_ARGS[@]}")
+          fi
+          if dotnet format "${FORMAT_ARGS[@]}"; then
+            echo "has-issue=false" >> "$GITHUB_OUTPUT"
+          else
+            FORMAT_STATUS=$?
+            # Exit 2 is the formatter's changes-needed result. Invocation/workspace
+            # failures must never be downgraded into an advisory formatting warning.
+            if [ "$FAIL_ON_FORMATTING_ISSUES" = "true" ] || [ "$FORMAT_STATUS" -ne 2 ]; then
+              echo "::error::dotnet format failed (exit $FORMAT_STATUS). See formatter diagnostics above."
+              exit "$FORMAT_STATUS"
             else
               echo "::warning::Code formatting issues detected. Run 'dotnet format' to fix."
-              echo "has-issue=true" >> $GITHUB_OUTPUT
+              echo "has-issue=true" >> "$GITHUB_OUTPUT"
             fi
-          else
-            echo "has-issue=false" >> $GITHUB_OUTPUT
           fi
       
       - name: Validate test naming conventions

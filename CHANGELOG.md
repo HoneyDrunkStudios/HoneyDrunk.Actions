@@ -21,6 +21,13 @@
 
 ### Added
 
+- Development-only `job-deploy-app-service.yml` orchestrates protected OIDC, unique
+  image build/scan/push and explicit rollback, invoking a caller-owned product
+  verifier. No slots, resource provisioning, SQL or automatic rollback. Shell
+  regressions cover setup guards, scan-before-push, immutable image outputs and
+  rollback reference/pull/scan failures. The caller token requires `actions: read`
+  to verify protected-environment reviewers on private repositories.
+
 - Node evidence exposes the uploaded artifact ID and records run/attempt/repository/revision provenance. Hosted verification downloads each successful producer's exact artifact, allowing verifier-only and mixed-attempt reruns while rejecting missing IDs, ambiguous profiles, and mismatched provenance.
 
 - Node quality review follow-up: preserve monorepo parent-relative lockfile and Node-version paths when their resolved targets remain inside the checkout, including symlink checks. Absolute/drive/backslash/control-character paths and checkout escapes are explicitly rejected; migrate absolute paths to portable relative paths when adopting this revision. Summary-only artifact upload is opt-in (`upload-summary-artifact: false` by default), so unchanged callers retain no artifact-service dependency. Hosted npm-default/pinned-manager smoke calls exercise the actual reusable revision, download its evidence, and verify runtime versions and outcomes.
@@ -44,6 +51,12 @@
 
 ### Fixed
 
+- Static analysis passes the explicit solution/project path to `dotnet format` in
+  its configured working directory. Invocation/workspace errors always fail;
+  formatting differences remain advisory by default. PR Core exposes the strict
+  formatting opt-in and calls static analysis at the same reusable-workflow revision.
+  Real SDK regressions cover nested paths with spaces, discovery, differences and errors.
+
 - `job-deploy-container-app.yml`: fail closed on unreadable, missing, malformed, latest-revision, or ambiguous current traffic instead of guessing an active revision; recheck the original named 100% target before creating the candidate and before promotion. Preserve full/canary/hold modes and leave explicit migration/rollback decisions to operators. Deployment status now reflects any failed or cancelled job stage and requires completed deploy/health/traffic gates; summaries no longer claim an unconfirmed 0% or success after preflight failure. Offline contract tests exercise the shipped guard and workflow steps in repository CI. See `docs/consumer-usage.md` for bootstrap, ownership and adoption requirements.
 
 - `coverage-baseline-ratchet.yml`: measure downloaded coverage without assuming a test-project filename suffix, and only stage/commit/push after a changed baseline is written. Missing, unreadable, empty, and unchanged coverage results now skip all Git writes. Coverage calculations and PR gate thresholds are unchanged.
@@ -56,3 +69,4 @@
 ### Removed
 
 - `job-review-request.yml`: removed the deprecated ADR-0044/OpenClaw compatibility inputs (`openclaw-webhook-url`, `upload-fallback-artifact`, `post-fallback-comment`, `artifact-name`) and the no-op `openclaw-webhook-secret` workflow-call secret. The reusable workflow now exposes only the ADR-0086 local-worker queue contract plus `github-token`; the org secret itself is not removed here.
+

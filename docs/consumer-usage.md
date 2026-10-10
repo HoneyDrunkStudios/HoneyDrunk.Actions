@@ -72,6 +72,14 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 
 **When to Use:** All repos that need basic CI validation (build, test, standards).
 
+For a nested .NET solution, pass `project-path` relative to `working-directory`;
+static analysis uses that same target for restore and formatting. Set
+`fail-on-formatting-issues: true` on `pr-core.yml` to fail on formatting differences.
+The default keeps differences advisory, but formatter invocation/workspace errors
+always fail. The static-analysis reusable workflow is resolved at the same commit
+as PR Core, so a reviewed commit pin covers this fix without changing other jobs'
+working directories or coverage paths.
+
 ### Minimal Example
 
 ```yaml
