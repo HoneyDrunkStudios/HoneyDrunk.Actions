@@ -228,6 +228,18 @@ jobs:
           values = {}
           last_error = ""
           fatal_error = ""
+
+          def new_code_value(measure):
+              period = measure.get("period") or {}
+              if period.get("value") is not None:
+                  return period["value"]
+              # Cloud's measures API returns the new-code period as index 1.
+              # Keep the singular shape for servers that already use it.
+              for period in measure.get("periods") or []:
+                  if period.get("index") == 1:
+                      return period.get("value")
+              return None
+
           for attempt in range(1, 7):
               try:
                   request = urllib.request.Request(url, headers=headers)
@@ -235,7 +247,7 @@ jobs:
                       payload = json.loads(response.read().decode("utf-8"))
                   measures = (payload.get("component") or {}).get("measures") or []
                   values = {
-                      measure.get("metric"): (measure.get("period") or {}).get("value")
+                      measure.get("metric"): new_code_value(measure)
                       for measure in measures
                       if measure.get("metric")
                   }
