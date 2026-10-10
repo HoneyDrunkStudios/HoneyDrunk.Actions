@@ -119,6 +119,9 @@ jobs:
       - name: Regression test formatter with the real .NET SDK
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_static_analysis.py -v'
 
+      - name: Regression test retired review label seeding
+        run: python3 -m unittest discover -s tests -p 'test_review_retirement.py' -v
+
       - name: Regression test direct-request PR metadata
         run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
 
