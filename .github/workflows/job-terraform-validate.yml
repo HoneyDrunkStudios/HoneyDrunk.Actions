@@ -7,6 +7,10 @@ on:
         description: 'Exact Actions commit containing this workflow and its validation helper.'
         type: string
         required: true
+      working-directory:
+        description: 'Relative caller directory containing the Terraform manifest and lock.'
+        type: string
+        default: '.'
 
 permissions:
   contents: read
@@ -29,13 +33,23 @@ jobs:
         with:
           persist-credentials: false
           path: source
-      - name: Validate control-plane pin
-        shell: bash
+      - name: Validate control-plane pin and caller directory
+        shell: python
         env:
           ACTIONS_REF: ${{ inputs.actions-ref }}
+          SOURCE_PATH: ${{ inputs.working-directory }}
         run: |
-          set -euo pipefail
-          [[ "$ACTIONS_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'Exact Actions SHA required'; exit 1; }
+          import os
+          from pathlib import Path
+          import re
+          assert re.fullmatch(r'[0-9a-f]{40}', os.environ['ACTIONS_REF']), 'Exact Actions SHA required'
+          source = os.environ['SOURCE_PATH']
+          assert re.fullmatch(r'\.|[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*', source), 'Use a relative caller directory'
+          checkout = Path('source').resolve()
+          target = (checkout / source).resolve()
+          assert target.is_relative_to(checkout) and target.is_dir(), 'Caller directory must stay inside checkout'
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              output.write(f'TF_SOURCE_DIR={target}\n')
       - uses: actions/checkout@v5
         with:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
@@ -57,7 +71,7 @@ jobs:
           TERRAFORM_VERSION: 1.16.5
         run: |
           set -euo pipefail
-          test "$(cat source/.terraform-version)" = "$TERRAFORM_VERSION"
+          test "$(cat "$TF_SOURCE_DIR/.terraform-version")" = "$TERRAFORM_VERSION"
           archive="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
           url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
           mkdir -p "$RUNNER_TEMP/terraform"
@@ -69,7 +83,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/terraform-provider-cache"
           echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/terraform-provider-cache" >> "$GITHUB_ENV"
       - name: Validate without backend or Azure credentials
-        run: python control-plane/.github/scripts/terraform_validate.py source
+        run: python control-plane/.github/scripts/terraform_validate.py "$TF_SOURCE_DIR"
       - name: Verify caller ownership contracts
-        working-directory: source
+        working-directory: ${{ env.TF_SOURCE_DIR }}
         run: python -m unittest discover -s tests -v

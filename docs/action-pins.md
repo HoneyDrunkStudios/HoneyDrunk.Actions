@@ -15,7 +15,7 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | actions/setup-dotnet | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | actions/setup-java | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | actions/setup-node | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
-| actions/setup-python | v5 | none | Current | none | Pins Python 3.12 for `job-discord-notify.yml`'s redaction helper and the `discord_notify` unit tests in `actions-ci.yml` (ADR-0084 D9). |
+| actions/setup-python | v5, v6 | none | Current | none | v5 remains in existing helpers/Actions tests. The new `job-terraform-validate.yml` uses v6 with Python 3.12, including its real-CLI smoke call from `actions-ci.yml`. |
 | actions/upload-artifact | v6 | none | Current | none | Bumped to default Node 24 successor for ADR-0012 packet 09. |
 | anthropics/claude-code-action | v1 | unknown | Current | none | none |
 | azure/login | v3 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |

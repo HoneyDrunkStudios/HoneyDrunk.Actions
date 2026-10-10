@@ -1,9 +1,13 @@
 """Exercise the same runner invoked by the reusable workflow."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+import sys
+import textwrap
 from types import SimpleNamespace
 
 spec = importlib.util.spec_from_file_location('terraform_validate', Path(__file__).parents[1] / '.github/scripts/terraform_validate.py')
@@ -92,6 +96,19 @@ class TerraformValidationTests(unittest.TestCase):
             (self.root / 'main.tf').write_text(f'module "unsafe" {{ source = "{source}" }}')
             with self.assertRaises(ValueError):
                 validator.require_azurerm_only(self.root, {self.root})
+
+    def test_workflow_guard_checks_pin_and_caller_directory(self):
+        workflow = (Path(__file__).parents[1] / '.github/workflows/job-terraform-validate.yml').read_text()
+        script = textwrap.dedent(workflow.split('        run: |\n', 1)[1].split('      - uses:', 1)[0])
+        (self.repo / 'source/nested/fixture').mkdir(parents=True)
+        for source, pin, allowed in [('.', 'a'*40, True), ('nested/fixture', 'a'*40, True),
+                                     ('../outside', 'a'*40, False), ('/absolute', 'a'*40, False),
+                                     ('nested\nINJECTED=value', 'a'*40, False), ('.', 'main', False)]:
+            with self.subTest(source=source, pin=pin):
+                result = subprocess.run([sys.executable, '-c', script], cwd=self.repo, capture_output=True,
+                                        env={**os.environ, 'SOURCE_PATH':source, 'ACTIONS_REF':pin,
+                                             'GITHUB_ENV':str(self.repo/'github-env')})
+                self.assertEqual(result.returncode == 0, allowed)
 
 
 if __name__ == '__main__':

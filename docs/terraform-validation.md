@@ -10,6 +10,13 @@ The caller supplies `.terraform-version` (currently `1.16.5`), one reviewed root
 in every root and two-level concern module. The helper checks all declared roots
 and `modules/*/*`, copies the shared lock, and runs format, backend-disabled
 initialization with a read-only lock, schema validation and mocked plan tests.
+
+`working-directory` defaults to the caller repository root. A nested caller may
+select a relative directory inside that checkout; absolute paths, traversal and
+symlink escapes are rejected. Actions CI calls this same workflow at its own
+revision against `tests/fixtures/terraform`, exercising the real CLI, AzureRM
+schema, backend-disabled initialization, shared-lock copies and JSON test results
+on every PR. The fixture includes both a successful plan and a rejected tier.
 Every test must explicitly use the mocked AzureRM provider and `command = plan`.
 Root duplication/path traversal, real test providers, alternate test modules,
 and test applies fail before invoking Terraform. New provider kinds require a
