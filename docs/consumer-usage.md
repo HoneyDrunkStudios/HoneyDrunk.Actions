@@ -229,6 +229,14 @@ with:
 
 ### SonarQube Cloud Quality Gate
 
+`job-sonarcloud.yml` waits up to 300 seconds for server processing and the
+project quality gate. Upload success alone is insufficient: a failed gate,
+processing error or timeout fails the scanner job. This does not create or
+replace the external `SonarCloud Code Analysis` check; confirm the Sonar
+project's GitHub binding and App access when that required check is absent.
+Keep inspecting the exact analyzed head's new issues and security hotspots,
+because a passing project gate does not imply zero findings.
+
 `pr-core.yml` can optionally poll SonarQube Cloud PR new-code metrics after `job-sonarcloud.yml` has uploaded analysis data. This exists because the free SonarQube Cloud "Sonar way" gate cannot be customized to fail on every new issue, so HoneyDrunk enforces ADR-0011 D11 thresholds in Actions while using SonarQube Cloud as the data source.
 
 Default posture is off and warn-only:
