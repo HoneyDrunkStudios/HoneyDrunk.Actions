@@ -1,0 +1,75 @@
+name: Terraform validation
+
+on:
+  workflow_call:
+    inputs:
+      actions-ref:
+        description: 'Exact Actions commit containing this workflow and its validation helper.'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Terraform format, schema and mocked tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      TF_IN_AUTOMATION: '1'
+      TF_INPUT: '0'
+      ARM_USE_CLI: 'false'
+      ARM_USE_MSI: 'false'
+      ARM_USE_OIDC: 'false'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          path: source
+      - name: Validate control-plane pin
+        shell: bash
+        env:
+          ACTIONS_REF: ${{ inputs.actions-ref }}
+        run: |
+          set -euo pipefail
+          [[ "$ACTIONS_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'Exact Actions SHA required'; exit 1; }
+      - uses: actions/checkout@v5
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          ref: ${{ inputs.actions-ref }}
+          persist-credentials: false
+          path: control-plane
+          sparse-checkout: |
+            .github/scripts/terraform_validate.py
+            .github/config/terraform-requirements.txt
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned validation parser
+        run: python -m pip install -r control-plane/.github/config/terraform-requirements.txt
+      - name: Install checksum-verified Terraform CLI
+        shell: bash
+        env:
+          TERRAFORM_VERSION: 1.16.5
+        run: |
+          set -euo pipefail
+          test "$(cat source/.terraform-version)" = "$TERRAFORM_VERSION"
+          archive="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
+          mkdir -p "$RUNNER_TEMP/terraform"
+          curl --fail --silent --show-error --location "$url/$archive" -o "$RUNNER_TEMP/$archive"
+          curl --fail --silent --show-error --location "$url/terraform_${TERRAFORM_VERSION}_SHA256SUMS" -o "$RUNNER_TEMP/terraform-checksums"
+          (cd "$RUNNER_TEMP" && grep "  ${archive}$" terraform-checksums | sha256sum --check --strict -)
+          unzip -q "$RUNNER_TEMP/$archive" terraform -d "$RUNNER_TEMP/terraform"
+          echo "$RUNNER_TEMP/terraform" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/terraform-provider-cache"
+          echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/terraform-provider-cache" >> "$GITHUB_ENV"
+      - name: Validate without backend or Azure credentials
+        run: python control-plane/.github/scripts/terraform_validate.py source
+      - name: Verify caller ownership contracts
+        working-directory: source
+        run: python -m unittest discover -s tests -v

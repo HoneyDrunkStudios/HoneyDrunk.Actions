@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Terraform validation
+
+- Add pinned, credential-free Terraform format/schema/mocked-plan validation
+  and safety regression tests. Live state, plan, import and apply remain absent.
+
 ## 2026-10-10 — Legacy Grid Review retirement
 
 - Retire automatic PR-review callers and configuration under the founder's explicit complete-removal request. Preserve tests, Sonar/security checks, metadata/authorship checks and manual review.
