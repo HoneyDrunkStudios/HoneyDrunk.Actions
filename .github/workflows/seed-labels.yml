@@ -60,7 +60,16 @@ jobs:
           from pathlib import Path
 
           data = json.loads(Path('actions-repo/.github/config/labels.json').read_text(encoding='utf-8'))
+          # Keep retirement effective even when an operator selects an older
+          # labels-source-ref. Both seed entry points intentionally share this
+          # small allow-preserving filter; the regression checks both copies.
+          retired = {
+              'needs-agent-review', 'agent-review-in-progress', 'agent-reviewed',
+              'changes-requested-by-agent', 'skip-grid-review', 'skip-review',
+          }
           for label in data['labels']:
+              if label['name'] in retired:
+                  continue
               print(f"{label['name']}\t{label['color']}\t{label['description']}")
           PY
 
