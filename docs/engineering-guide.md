@@ -1,4 +1,4 @@
-# Copilot Instructions - HoneyDrunk.Actions
+# HoneyDrunk.Actions engineering guide
 
 You are working in the **HoneyDrunk.Actions** repo.
 
@@ -122,7 +122,7 @@ When scanning logic is needed:
 
 If you are about to embed complex scanning behavior directly in a workflow YAML step, extract it into a composite action instead.
 
-## How Copilot should behave in this repo
+## Making workflow changes
 
 - When asked to create a new workflow, first propose using or extending an existing workflow family (`pr-core`, `pr-sdk`, `release`, `nightly-security`, `nightly-deps`, `nightly-accessibility`, `weekly-governance`).  
 - Prefer small, composable composite actions for repeated step patterns.  
