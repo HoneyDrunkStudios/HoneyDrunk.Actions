@@ -18,7 +18,7 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | actions/setup-python | v5, v6 | none | Current | none | v5 remains in existing helpers/Actions tests. The new `job-terraform-validate.yml` uses v6 with Python 3.12, including its real-CLI smoke call from `actions-ci.yml`. |
 | actions/upload-artifact | v6 | none | Current | none | Bumped to default Node 24 successor for ADR-0012 packet 09. |
 | anthropics/claude-code-action | v1 | unknown | Current | none | none |
-| azure/login | v2, v3 | v2 lifecycle not verified by this source review | Mixed | v3 is used by existing workflows | The new development App Service workflow currently uses v2; other workflows use the v3 successor from ADR-0012 packet 09. This inventory records both actual pins without implying live deployment validation. |
+| azure/login | v2, v3 | No v2 end date stated in the support policy | v3 supported; v2 security-fix maintenance | v3 | The development App Service workflow uses v2; other workflows use v3. [Azure's support policy](https://github.com/Azure/login#supported-versions) confirms v2 still receives security fixes. This inventory records the actual pins, not live deployment validation. |
 | azure/webapps-deploy | v3 | unknown | Current | none | none |
 | docker/login-action | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | docker/setup-buildx-action | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
