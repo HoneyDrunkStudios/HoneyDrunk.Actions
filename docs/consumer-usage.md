@@ -49,11 +49,12 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 - [PR Core Workflow](#pr-core-workflow)
 - [Node Workspace Job](#node-workspace-job)
 - [Rust Workspace Job](#rust-workspace-job)
-- [Bicep Lint Workflow](#bicep-lint-workflow)
-- [Deploy Bicep Workflow](#deploy-bicep-workflow)
+- [Terraform validation workflow](#terraform-validation-workflow)
+- [Bicep lint compatibility](#bicep-lint-workflow)
+- [Bicep deploy compatibility](#deploy-bicep-workflow)
 - [SonarQube Cloud Quality Gate](#sonarqube-cloud-quality-gate)
 - [PR SDK Workflow](#pr-sdk-workflow)
-- [Grid Review Request Workflow](#grid-review-request-workflow)
+- [Legacy PR review retirement](#legacy-pr-review-retirement)
 - [Discord Operator-Alert Notification](#discord-operator-alert-notification)
 - [Release Workflow](#release-workflow)
 - [Deploy Container to Azure App Service](#deploy-container-to-azure-app-service)
@@ -401,101 +402,56 @@ jobs:
 `pr-core.yml` callers need an explicit top-level or job-level permissions block that grants `contents: read`, `checks: write`, `pull-requests: write`, `security-events: write`, and `issues: write`. `issues: write` is part of the baseline because PR metadata/size checks maintain labels and comments. Under `workflow_call`, the callee declaration is documentary, so missing or under-granted caller permissions fail at workflow-load time and later surface through grid-health as Stale. Extra scopes are allowed only when another job in the same workflow needs them; prefer least privilege.
 
 
-## Bicep Lint Workflow
+## Terraform validation workflow
 
-**Purpose:** Enforce ADR-0077 D3's Bicep linter gate at PR time. Runs `az bicep lint` against every changed `.bicep` file and `az bicep build-params` against every changed `.bicepparam` file, then fails the PR on any error-severity linter finding or any parameter-file validation error.
+Use [`job-terraform-validate.yml`](../.github/workflows/job-terraform-validate.yml)
+for the current [Infrastructure source](https://github.com/HoneyDrunkStudios/HoneyDrunk.Infrastructure). The
+[full contract](terraform-validation.md) defines the root manifest, module layout,
+provider lock, mocked test files and caller ownership tests. It needs only
+`contents: read`; no Azure login or state backend is initialized.
 
-**When to Use:** Any repo that holds Bicep templates. The gate is **opt-in by inclusion** — a repo with no Bicep files does not wire it. The canonical consumer is `HoneyDrunk.Infrastructure`, where all Grid Bicep content lives (`modules/`, `platform/`, `nodes/`) per the ADR-0077 2026-06-02 amendment. The naming/tagging linter rules live in the consuming repo's root `bicepconfig.json` (resolved by Bicep's filesystem search); this workflow just runs the CLI and adjudicates pass/fail from the SARIF output.
-
-### Minimal Caller
+Copy the current reviewed immutable pin from
+[Infrastructure's caller](https://github.com/HoneyDrunkStudios/HoneyDrunk.Infrastructure/blob/main/.github/workflows/pr.yml), using
+the same SHA in `uses` and `actions-ref`. Example at the merged migration's pin:
 
 ```yaml
-# .github/workflows/pr.yml (in the consuming repo)
+permissions:
+  contents: read
 jobs:
-  bicep-lint:
-    name: Bicep Lint
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-bicep-lint.yml@main
+  terraform:
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-terraform-validate.yml@6d3a24de668ea46165ca791e871ea00910d08240
+    with:
+      actions-ref: 6d3a24de668ea46165ca791e871ea00910d08240
 ```
 
-That single block is the whole opt-in. On a `pull_request` event the workflow resolves the diff base from `github.event.pull_request.base.sha` automatically.
+`working-directory` defaults to `.` and may select a relative directory within
+the caller checkout. The pinned job checks formatting, backend-disabled/read-only
+lock initialization, schema validation, counted mocked plan tests and the caller's
+Python ownership checks. Keep secret scanning and existing required checks too.
+Infrastructure's required `Bicep Lint / Bicep Lint` name is a fail-closed aggregate
+of Terraform and secret checks; it is not an instruction to restore Bicep.
 
-### Inputs
+## Bicep Lint Workflow
 
-| Input | Default | Description |
-|-------|---------|-------------|
-| `paths` | `**/*.bicep,**/*.bicepparam` | Comma-separated glob patterns to consider. |
-| `fail-on-warnings` | `false` | Treat warning-severity findings as failures. Tighten per-repo once the template set is clean. |
-| `bicep-version` | `latest` | Bicep CLI version to install (e.g. `v0.37.4`). Pin for deterministic CI. |
-| `base-ref` | `''` | Explicit diff base. PR runs can omit it (auto-resolved from `pull_request.base.sha`). **Required** on non-PR triggers (manual dispatch, scheduled run, release tag), where the PR base is absent — pass a branch like `main` or an explicit commit SHA. |
-
-### Behavior
-
-- **Fast skip:** a PR that touches no `.bicep` / `.bicepparam` files exits `0` in seconds — the gate adds zero cost to non-IaC PRs.
-- **Two CLI surfaces:** `bicep lint` runs on `.bicep` files only (the CLI rejects `.bicepparam`); `.bicepparam` files are validated with `bicep build-params`, which type-checks the parameter file against its referenced template.
-- **Verdict:** any `error`-severity lint finding or any `build-params` failure fails the PR. `warning`-severity findings are surfaced in the step summary but pass unless `fail-on-warnings: true`.
-- A per-file findings table (file · source · severity · rule · message) is written to the job step summary.
-
-### Permissions
-
-`contents: read` only. The lint job runs against source files and needs no Azure authentication — it never touches the cloud.
+**Historical compatibility only.** [`job-bicep-lint.yml`](../.github/workflows/job-bicep-lint.yml)
+still exists for separately managed legacy callers, but Infrastructure no longer
+uses it. The former `.bicep`/`.bicepparam` consumer example is superseded by
+[Terraform validation](#terraform-validation-workflow). Inspect the workflow source
+for the retained legacy contract; do not add it to new Infrastructure callers.
 
 ## Deploy Bicep Workflow
 
-**Purpose:** Apply a Bicep template from `HoneyDrunk.Infrastructure` to Azure (ADR-0077 D4, as amended). Runs a `bicep build` + `bicep lint` + `az deployment ... what-if` preflight, then `az deployment {group|sub} create`. The deploy *pipeline* lives in Actions per ADR-0012; the Bicep *content* lives in `HoneyDrunk.Infrastructure` and is checked out by the caller.
+**Historical compatibility only.** [`job-deploy-bicep.yml`](../.github/workflows/job-deploy-bicep.yml)
+remains source for legacy callers, not a current Infrastructure deploy path.
+Infrastructure removed its Bicep dispatcher and templates. The old
+`nodes/identity/main.bicep` and parameter-file examples are obsolete.
 
-**When to Use:** From `HoneyDrunk.Infrastructure`'s deploy workflows, one call per environment per template. Modules resolve by **local relative path** within the infra checkout — there is no Bicep registry, no `az acr login`, no `br:` references (the cross-repo registry was dropped by the 2026-06-02 amendment).
-
-### Minimal Caller
-
-```yaml
-# .github/workflows/deploy.yml (in HoneyDrunk.Infrastructure)
-jobs:
-  deploy-identity-dev:
-    name: Deploy Identity (dev)
-    environment: dev            # ADR-0033 approval gate — declared by the CALLER
-    permissions:
-      id-token: write           # OIDC federation
-      contents: read            # checkout
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-deploy-bicep.yml@main
-    with:
-      env: dev
-      template-path: nodes/identity/main.bicep
-      parameters-path: nodes/identity/parameters.dev.bicepparam
-      deployment-scope: resourceGroup
-      resource-group: rg-hd-identity-dev
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-```
-
-### Inputs
-
-| Input | Required | Description |
-|-------|----------|-------------|
-| `env` | yes | Target environment (`dev`, `staging`, `prod`). Used for the deployment name + logging. |
-| `template-path` | yes | Bicep template path relative to the caller checkout. Used for the build/lint preflight. |
-| `parameters-path` | yes | `.bicepparam` path relative to the caller checkout. Drives what-if + apply via its `using` directive. |
-| `deployment-scope` | no (`resourceGroup`) | `resourceGroup` or `subscription`. |
-| `resource-group` | when scope=`resourceGroup` | Target resource group. |
-| `location` | when scope=`subscription` | Region for deployment metadata. |
-| `azure-client-id` / `azure-tenant-id` / `azure-subscription-id` | yes | OIDC federated identity. The deploy identity provisions resources; it does **not** read secret values (invariant 8 / ADR-0077 D7). |
-| `bicep-version` | no (`latest`) | Bicep CLI version to install (e.g. `v0.37.4`). Pin for deterministic CI. |
-| `what-if-only` | no (`false`) | Plan only — run the build/lint + what-if preflight and STOP without applying. Reviewable dry run. |
-| `additional-parameters` | no (`''`) | Inline `key=value` overrides appended after the `.bicepparam` file (space-separated). Applied last, so they win over the file. Use for one-off **non-secret** pass toggles without a second param file — e.g. `bootstrap=true` for the system-MI Container App bootstrap pass (first revision on a public placeholder image so it goes healthy before its AcrPull/Key Vault RBAC exists, then re-deploy with the real private image). **Never pass secret values here** — overrides appear in plaintext in deployment history and CI logs; secret-shaped Bicep params must flow through Key Vault references / secure parameters (D7 / invariant 91). Tokens are validated as `key=value` (no flags/spaces); a bad token fails the deploy with the value redacted. |
-
-### Behavior and contract
-
-- **Scope-pure.** The reusable workflow does **not** declare the `environment:` gate — the **caller** does (ADR-0033). This keeps the approval policy with the consumer.
-- **`.bicepparam` only on apply.** The template is resolved from the param file's `using` directive; the workflow passes `--parameters <file>.bicepparam` with **no** `--template-file` (the CLI rejects both together).
-- **what-if before apply.** The diff is printed to the job log — this is the safety surface for the D6 grandfather/import path (an unexpected delete shows up before the apply runs).
-- **No secrets.** OIDC only; no `AZURE_CREDENTIALS`. No secret values enter the workflow or its logs.
-
-### Permissions
-
-Callers need `id-token: write` (OIDC) and `contents: read` (checkout) — a superset of the reusable workflow's declared permissions (invariant 39).
+There is no replacement Terraform apply/import workflow to invoke. Follow the
+[migration/adoption runbook](https://github.com/HoneyDrunkStudios/HoneyDrunk.Infrastructure/blob/main/docs/terraform-migration.md) and
+[state/authentication design](https://github.com/HoneyDrunkStudios/HoneyDrunk.Infrastructure/blob/main/docs/terraform-state.md) for
+separately approved operational work. Never convert the source-validation job
+into a live plan/apply mode or print state/saved plans into PR logs. Runtime image
+delivery is a different concern; see [App Service development](app-service-development.md).
 
 ## Legacy PR review retirement
 

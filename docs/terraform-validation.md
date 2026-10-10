@@ -39,7 +39,7 @@ Deployment/state operations need a separately approved protected-environment
 workflow; do not add a mode switch to this PR-safe validation job.
 
 The existing Bicep reusable workflows remain for compatibility with other
-consumers pending their separately coordinated migration. Actions PR #218
-(`377f0431f4b9f69d982565be88ed9d7c135ab6f8`) remains an unmerged App Service
-release/formatter dependency, unchanged by this work. Terraform validation does
-not depend on its application deploy capability.
+consumers; they are not current Infrastructure callers.
+[App Service runtime delivery](app-service-development.md) is a separate
+capability from the merged Terraform source-validation workflow. Neither
+workflow documentation nor a source merge configures access or authorizes deployment.
