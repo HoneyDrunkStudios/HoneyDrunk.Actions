@@ -60,6 +60,12 @@ on:
         required: false
         type: string
         default: ''
+
+      fail-on-formatting-issues:
+        description: 'Fail on formatting differences; formatter execution errors always fail'
+        required: false
+        type: boolean
+        default: false
       
       enable-secret-scan:
         description: 'Run secret scanning on PR diff'
@@ -221,14 +227,14 @@ jobs:
   # Job 2: Static Analysis
   static-analysis:
     name: Static Analysis
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-static-analysis.yml@main
+    uses: ./.github/workflows/job-static-analysis.yml
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       runs-on: ${{ inputs.runs-on }}
       working-directory: ${{ inputs.working-directory }}
       project-path: ${{ inputs.project-path }}
       check-formatting: true
-      fail-on-formatting-issues: false  # Warn only in PR
+      fail-on-formatting-issues: ${{ inputs.fail-on-formatting-issues }}
       validate-test-naming: true
       actions-ref: ${{ inputs.actions-ref }}
     permissions:

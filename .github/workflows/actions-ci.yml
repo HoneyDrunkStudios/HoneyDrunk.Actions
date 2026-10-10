@@ -113,6 +113,9 @@ jobs:
       - name: Regression test Container App deployment contract
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_container_app_deployment.py -v'
 
+      - name: Regression test formatter with the real .NET SDK
+        run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_static_analysis.py -v'
+
       - name: Regression test direct-request PR metadata
         run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
 
