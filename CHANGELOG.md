@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - Script coverage import
+
+- Accept an optional measured Sonar generic coverage report beside .NET OpenCover artifacts. Missing requested reports fail before scanner upload; existing callers and quality gates are unchanged.
+
 ## Unreleased — Terraform validation
 
 - Add pinned, credential-free Terraform format/schema/mocked-plan validation

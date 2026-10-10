@@ -108,6 +108,12 @@ on:
         type: string
         default: ''
 
+      generic-coverage-report-path:
+        description: 'Optional existing Sonar generic coverage XML file, relative to working-directory. Supply measured non-.NET coverage in the downloaded artifact; missing requested files fail analysis.'
+        required: false
+        type: string
+        default: ''
+
       sonar-exclusions:
         description: 'Comma-separated SonarQube Cloud source exclusions. Defaults exclude consumer workflow wrapper YAML; workflow security is reviewed in HoneyDrunk.Actions.'
         required: false
@@ -203,6 +209,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.sonar-token }}
           GITHUB_TOKEN: ${{ secrets.github-token || github.token }}
           SONAR_TSQL: ${{ inputs.sonar-tsql }}
+          GENERIC_COVERAGE_REPORT: ${{ inputs.generic-coverage-report-path }}
         shell: bash
         run: |
           # SonarScanner for .NET reads sonar.* configuration via `/d:` CLI flags or
@@ -219,8 +226,17 @@ jobs:
             sql_arguments+=(/d:sonar.tsql.file.suffixes=.sql,.tsql)
             sql_arguments+=(/d:sonar.plsql.file.suffixes=.plsql,.pks,.pkb)
           fi
+          coverage_arguments=()
+          if [[ -n "${GENERIC_COVERAGE_REPORT}" ]]; then
+            if [[ ! -f "${GENERIC_COVERAGE_REPORT}" ]]; then
+              echo '::error::The requested generic coverage report is missing.'
+              exit 1
+            fi
+            coverage_arguments+=("/d:sonar.coverageReportPaths=${GENERIC_COVERAGE_REPORT}")
+          fi
           "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" begin \
             "${sql_arguments[@]}" \
+            "${coverage_arguments[@]}" \
             /k:"${{ inputs.sonar-project-key }}" \
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
