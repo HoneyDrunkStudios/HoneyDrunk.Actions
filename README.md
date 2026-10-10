@@ -2,6 +2,9 @@
 
 Central library of reusable GitHub Actions workflows and composite actions for the HoneyDrunk Grid.
 
+For Azure IaC consumers, see the [Terraform validation contract](docs/terraform-validation.md).
+It provides pinned, credential-free schema and mocked-plan checks without live state access.
+
 For Node, TypeScript, and RN-web consumers, see the [Node quality contract](docs/node-quality.md)
 and [fast PR/manual browser example](examples/node-quality.yml). The existing
 `job-node-workspace.yml` now supports optional typecheck, accessibility/E2E commands,
