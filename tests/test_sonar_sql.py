@@ -26,12 +26,14 @@ class SonarSqlTests(unittest.TestCase):
             scanner.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$ARGUMENT_FILE"\n', encoding='utf-8')
             scanner.chmod(0o755)
             arguments = root / 'arguments.txt'
-            values = {'sonar-project-key': 'fixture', 'sonar-organization': 'fixture',
+            values = {'sonar-tsql': tsql, 'sonar-project-key': 'fixture', 'sonar-organization': 'fixture',
                       'sonar-host-url': 'https://invalid.example', 'sonar-exclusions': '.github/workflows/**'}
-            script = re.sub(r'\$\{\{ inputs\.([\w-]+) \}\}', lambda match: values[match[1]], STEP['run'])
+            def render(value):
+                return re.sub(r'\$\{\{ inputs\.([\w-]+) \}\}', lambda match: values[match[1]], value)
+            script = render(STEP['run'])
             environment = {**os.environ, 'GITHUB_WORKSPACE': root.as_posix(),
                            'ARGUMENT_FILE': arguments.as_posix(), 'SONAR_TOKEN': 'fixture-not-a-token',
-                           'SONAR_TSQL': tsql, 'MSYS_NO_PATHCONV': '1'}
+                           'SONAR_TSQL': render(STEP['env']['SONAR_TSQL']), 'MSYS_NO_PATHCONV': '1'}
             result = subprocess.run([BASH, '-eu', '-c', script], env=environment,
                                     text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
