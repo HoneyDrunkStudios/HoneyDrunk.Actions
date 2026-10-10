@@ -11,6 +11,13 @@ permissions:
   contents: read
 
 jobs:
+  terraform-smoke:
+    name: Terraform real CLI smoke
+    uses: ./.github/workflows/job-terraform-validate.yml
+    with:
+      actions-ref: ${{ github.sha }}
+      working-directory: tests/fixtures/terraform
+
   lint:
     name: Lint workflows and secret policy
     runs-on: ubuntu-latest
@@ -124,6 +131,11 @@ jobs:
 
       - name: Regression test direct-request PR metadata
         run: python3 -m unittest discover -s tests -p 'test_pr_metadata.py' -v
+
+      - name: Regression test credential-free Terraform validation
+        run: |
+          python3 -m pip install -r .github/config/terraform-requirements.txt
+          python3 -m unittest discover -s tests -p 'test_terraform_validation.py' -v
 
       - name: Regression test coverage baseline ratchet
         run: python3 -m unittest discover -s tests -p 'test_coverage_baseline_ratchet.py' -v

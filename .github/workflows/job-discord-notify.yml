@@ -12,7 +12,7 @@
 #   Orchestrate the tested redaction+formatting helper and POST one operator
 #   alert to exactly one Discord channel's webhook.
 #
-# Separation of concerns (per .github/copilot-instructions.md): the redaction
+# Separation of concerns (per docs/engineering-guide.md): the redaction
 # pattern set, the fail-closed scan, and embed formatting live in the focused,
 # unit-tested helper `.github/scripts/discord_notify.py` (tests:
 # `.github/scripts/test_discord_notify.py`, run by actions-ci.yml). This workflow
