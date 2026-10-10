@@ -237,6 +237,14 @@ project's GitHub binding and App access when that required check is absent.
 Keep inspecting the exact analyzed head's new issues and security hotspots,
 because a passing project gate does not imply zero findings.
 
+For SQL Server repositories, set `sonar-tsql: true` on the
+`job-sonarcloud.yml` caller. Sonar otherwise assigns `.sql` files to Oracle
+PL/SQL. This opt-in assigns `.sql`/`.tsql` to T-SQL and retains
+`.plsql`/`.pks`/`.pkb` for PL/SQL; it does not exclude SQL files or suppress
+rules. Leave the default `false` for other dialects. Verify the actual analyzer
+and indexed files in a consumer run before claiming SQL coverage. See
+[Sonar's T-SQL configuration](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/languages/t-sql).
+
 `pr-core.yml` can optionally poll SonarQube Cloud PR new-code metrics after `job-sonarcloud.yml` has uploaded analysis data. This exists because the free SonarQube Cloud "Sonar way" gate cannot be customized to fail on every new issue, so HoneyDrunk enforces ADR-0011 D11 thresholds in Actions while using SonarQube Cloud as the data source.
 
 Default posture is off and warn-only:

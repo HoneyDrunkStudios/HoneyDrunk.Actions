@@ -28,8 +28,8 @@
 #   - Median PR run target: under 60 seconds
 #   - Coverage report reused from `job-build-and-test.yml` artifact (no second
 #     `dotnet test` run)
-#   - SonarQube Cloud OSS plan: free for unlimited public LOC; private LOC is
-#     paid per LOC and is intentionally out of scope (ADR-0011 D11 Gap 5)
+#   - Confirm the organization's current plan and private LOC capacity before
+#     onboarding. Free includes private capacity; do not infer a paid requirement.
 #
 # Secret:
 #   SONAR_TOKEN — provisioned as a GitHub org secret with `Selected repositories`
@@ -114,6 +114,12 @@ on:
         type: string
         default: '.github/workflows/**'
 
+      sonar-tsql:
+        description: 'Analyze .sql and .tsql as Microsoft T-SQL; retain .plsql/.pks/.pkb for Oracle PL/SQL. Opt in only for SQL Server repositories.'
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       sonar-token:
         description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Studio/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
@@ -196,6 +202,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.sonar-token }}
           GITHUB_TOKEN: ${{ secrets.github-token || github.token }}
+          SONAR_TSQL: ${{ inputs.sonar-tsql }}
         shell: bash
         run: |
           # SonarScanner for .NET reads sonar.* configuration via `/d:` CLI flags or
@@ -205,7 +212,15 @@ jobs:
           # imports the OpenCover report produced by the conversion step below.
           # Per-repo overrides are possible via MSBuild `<SonarQubeSetting>` items
           # in Directory.Build.props if a repo needs to diverge from the default.
+          sql_arguments=()
+          if [[ "${SONAR_TSQL}" == 'true' ]]; then
+            # Sonar defaults .sql to Oracle PL/SQL. Associate it with exactly
+            # one dialect; this changes the parser, not the analysis scope.
+            sql_arguments+=(/d:sonar.tsql.file.suffixes=.sql,.tsql)
+            sql_arguments+=(/d:sonar.plsql.file.suffixes=.plsql,.pks,.pkb)
+          fi
           "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" begin \
+            "${sql_arguments[@]}" \
             /k:"${{ inputs.sonar-project-key }}" \
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.host.url="${{ inputs.sonar-host-url }}" \
