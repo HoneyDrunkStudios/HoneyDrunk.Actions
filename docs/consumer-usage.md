@@ -8,6 +8,10 @@ This document provides sample workflows for consuming repos to adopt the HoneyDr
 
 > Authoritative per ADR-0012 D9 (Decision: caller-workflow scaffolding is documented here). The canonical baselines below are the source of truth for invariant 39 (caller-workflow `permissions:` superset rule).
 
+## Script coverage
+
+Mixed-language consumers of `job-sonarcloud.yml` can pass `generic-coverage-report-path: TestResults/script-coverage.xml` for measured [Sonar generic coverage](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/test-coverage/generic-test-data). Collect execution coverage with the language's test tool, convert its real line/branch counts, and include that XML in the artifact selected by `coverage-artifact-name` alongside the existing OpenCover files. The artifact downloads under the caller's `TestResults` directory. An explicitly requested missing report fails before upload; no report is synthesized, no tests are excluded, and server/new-code gates remain unchanged. For push-to-main, the caller must also produce its script report before analysis; the built-in fallback runs only .NET tests.
+
 ## Caller permissions — the load-bearing rule
 
 Every caller workflow that consumes a reusable workflow from `HoneyDrunk.Actions` must declare a top-level `permissions:` block. Under `workflow_call`, the callee's `permissions:` block is purely documentary — the effective job token permissions are determined by the **caller**. A caller that omits `permissions:` inherits the repository's default token scope (`contents: read`, all writes `none` in the default GitHub Actions configuration), and any reusable workflow that requests a `write` scope fails at workflow-load time with a validation error, before a single step runs.

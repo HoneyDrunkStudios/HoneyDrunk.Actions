@@ -18,7 +18,7 @@ BASH = os.environ.get('BASH_EXE', 'bash')
 
 
 class SonarSqlTests(unittest.TestCase):
-    def arguments(self, tsql):
+    def arguments(self, tsql, report='', exists=True):
         with tempfile.TemporaryDirectory(prefix='sonar sql ') as directory:
             root = Path(directory)
             scanner = root / '.sonar/scanner/dotnet-sonarscanner'
@@ -27,15 +27,25 @@ class SonarSqlTests(unittest.TestCase):
             scanner.chmod(0o755)
             arguments = root / 'arguments.txt'
             values = {'sonar-tsql': tsql, 'sonar-project-key': 'fixture', 'sonar-organization': 'fixture',
-                      'sonar-host-url': 'https://invalid.example', 'sonar-exclusions': '.github/workflows/**'}
+                      'sonar-host-url': 'https://invalid.example', 'sonar-exclusions': '.github/workflows/**',
+                      'generic-coverage-report-path': report}
             def render(value):
                 return re.sub(r'\$\{\{ inputs\.([\w-]+) \}\}', lambda match: values[match[1]], value)
             script = render(STEP['run'])
             environment = {**os.environ, 'GITHUB_WORKSPACE': root.as_posix(),
                            'ARGUMENT_FILE': arguments.as_posix(), 'SONAR_TOKEN': 'fixture-not-a-token',
-                           'SONAR_TSQL': render(STEP['env']['SONAR_TSQL']), 'MSYS_NO_PATHCONV': '1'}
+                           'SONAR_TSQL': render(STEP['env']['SONAR_TSQL']),
+                           'GENERIC_COVERAGE_REPORT': render(STEP['env']['GENERIC_COVERAGE_REPORT']),
+                           'MSYS_NO_PATHCONV': '1'}
+            if report and exists:
+                (root / report).write_text('<coverage version="1"/>', encoding='utf-8')
             result = subprocess.run([BASH, '-eu', '-c', script], env=environment,
-                                    text=True, capture_output=True, check=False)
+                                    text=True, capture_output=True, check=False, cwd=root)
+            if report and not exists:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('The requested generic coverage report is missing.', result.stdout)
+                self.assertFalse(arguments.exists())
+                return []
             self.assertEqual(result.returncode, 0, result.stderr)
             return arguments.read_text(encoding='utf-8').splitlines()
 
@@ -46,6 +56,7 @@ class SonarSqlTests(unittest.TestCase):
         self.assertIn('/d:sonar.qualitygate.wait=true', arguments)
         self.assertIn('/d:sonar.cs.opencover.reportsPaths=**/coverage.opencover.xml', arguments)
         self.assertNotIn('', arguments)
+        self.assertFalse(any('sonar.coverageReportPaths=' in item for item in arguments))
 
     def test_sql_server_opt_in_is_exclusive_and_preserves_scope(self):
         arguments = self.arguments('true')
@@ -55,6 +66,16 @@ class SonarSqlTests(unittest.TestCase):
                          ['/d:sonar.exclusions=.github/workflows/**'])
         self.assertIn('/d:sonar.qualitygate.wait=true', arguments)
         self.assertEqual(arguments.count('/k:fixture'), 1)
+
+    def test_generic_coverage_is_literal_and_keeps_dotnet_coverage_and_gate(self):
+        report = 'coverage $(echo literal).xml'
+        arguments = self.arguments('false', report)
+        self.assertIn('/d:sonar.coverageReportPaths=' + report, arguments)
+        self.assertIn('/d:sonar.cs.opencover.reportsPaths=**/coverage.opencover.xml', arguments)
+        self.assertIn('/d:sonar.qualitygate.wait=true', arguments)
+
+    def test_requested_missing_coverage_fails_before_scanner_upload(self):
+        self.arguments('false', 'missing.xml', exists=False)
 
 
 if __name__ == '__main__':
