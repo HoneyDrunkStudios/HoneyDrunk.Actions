@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased - Terraform directory provider coverage
+
+- Validate AzureRM, AzureAD, AzAPI and Microsoft Graph with exact provider-source allowlisting, transitive mock coverage and per-root subsets of the reviewed checksum lock. Live operations and authentication remain disabled.
+
+
 ## Unreleased - Script coverage import
 
 - Accept an optional measured Sonar generic coverage report beside .NET OpenCover artifacts. Missing requested reports fail before scanner upload; existing callers and quality gates are unchanged.

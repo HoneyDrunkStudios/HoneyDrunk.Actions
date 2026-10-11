@@ -4,12 +4,19 @@ Run in a disposable checkout: the shared lock is staged into each root.
 """
 import json
 import os
+import re
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
 import hcl2
+
+ALLOWED_PROVIDERS = {
+    "azurerm": "hashicorp/azurerm",
+    "azuread": "hashicorp/azuread",
+    "azapi": "Azure/azapi",
+    "msgraph": "Microsoft/msgraph",
+}
 
 
 def targets(repository):
@@ -31,17 +38,17 @@ def targets(repository):
     return result
 
 
-def require_mocked_plans(path):
+def require_mocked_plans(path, expected_providers=None):
     test = path / 'tests' / 'safety.tftest.hcl'
     if list((path / 'tests').glob('*.tftest.*')) != [test] or list(path.glob('*.tftest.*')):
         raise ValueError(f'{path}: exactly one safety.tftest.hcl test file is required')
     with test.open(encoding='utf-8') as stream:
         document = hcl2.load(stream)
     mocks = {name for item in document.get('mock_provider', []) for name in item}
-    if mocks != {'azurerm'} or document.get('provider'):
-        raise ValueError(f'{test}: only the mocked AzureRM provider is allowed')
+    if mocks != (expected_providers or {'azurerm'}) or document.get('provider'):
+        raise ValueError(f'{test}: every required provider must be mocked exactly once')
     if any('alias' in body for item in document['mock_provider'] for body in item.values()):
-        raise ValueError(f'{test}: the default AzureRM provider must be mocked')
+        raise ValueError(f'{test}: default providers must be mocked without aliases')
     runs = document.get('run', [])
     if not runs:
         raise ValueError(f'{test}: at least one test is required')
@@ -53,18 +60,23 @@ def require_mocked_plans(path):
 
 
 def require_azurerm_only(path, allowed_paths):
+    # Retain the helper name for existing test callers; coverage now includes the
+    # explicitly reviewed Azure directory providers as well as AzureRM.
     if list(path.glob('*.tf.json')):
         raise ValueError('JSON configurations need an explicit validator contract extension')
+    used = set()
     for file in path.glob('*.tf'):
         with file.open(encoding='utf-8') as stream:
             document = hcl2.load(stream)
         for block in document.get('terraform', []):
             for providers in block.get('required_providers', []):
-                if set(providers) != {'azurerm'} or providers['azurerm']['source'] != 'hashicorp/azurerm':
-                    raise ValueError(f'{file}: only the mocked HashiCorp AzureRM provider is supported')
+                if not providers or any(name not in ALLOWED_PROVIDERS or body.get('source') != ALLOWED_PROVIDERS[name] for name, body in providers.items()):
+                    raise ValueError(f'{file}: provider source is outside the reviewed allowlist')
+                used.update(providers)
         for block in document.get('provider', []):
-            if set(block) != {'azurerm'} or 'alias' in block['azurerm']:
+            if any(name not in ALLOWED_PROVIDERS or 'alias' in body for name, body in block.items()):
                 raise ValueError(f'{file}: provider aliases need explicit mock coverage')
+            used.update(block)
         for block in document.get('module', []):
             for module in block.values():
                 source = module.get('source', '')
@@ -72,10 +84,13 @@ def require_azurerm_only(path, allowed_paths):
                     raise ValueError(f'{file}: module must be a validated local target with the default mocked provider')
         for kind in ('resource', 'data'):
             for block in document.get(kind, []):
-                if any(not name.startswith('azurerm_') for name in block):
+                prefixes = {name.split('_', 1)[0] for name in block}
+                used.update(prefixes)
+                if not prefixes <= ALLOWED_PROVIDERS.keys():
                     raise ValueError(f'{file}: resource/data source needs mock coverage')
                 if any('provider' in body for resources in block.values() for body in resources.values()):
                     raise ValueError(f'{file}: resource provider overrides need explicit mock coverage')
+    return used
 
 
 def verify_test_result(output, expected):
@@ -90,12 +105,45 @@ def verify_test_result(output, expected):
     print(f'{expected} mocked plan tests passed', flush=True)
 
 
+def stage_provider_lock(lock, target, providers):
+    """Keep exact reviewed checksums, excluding dependencies unused by this root."""
+    contents = lock.read_text(encoding='utf-8')
+    # Key by registry address; retain the complete original block verbatim.
+    blocks = {address.lower(): block for block, address in
+              re.findall(r'(?ms)^(provider "([^"]+)" \{.*?^\})', contents)}
+    selected = []
+    for provider in sorted(providers):
+        address = 'registry.terraform.io/' + ALLOWED_PROVIDERS[provider].lower()
+        if address not in blocks:
+            raise ValueError(f'Missing reviewed provider lock: {address}')
+        selected.append(blocks[address])
+    target.write_text('# Exact subset of the reviewed repository provider lock.\n\n' + '\n\n'.join(selected) + '\n', encoding='utf-8')
+
+
 def validate(repository, terraform='terraform', run=subprocess.run):
     repository = Path(repository).resolve()
     paths = targets(repository)
+    providers = {path: require_azurerm_only(path, set(paths)) for path in paths}
+    # Root mocks must cover providers reached through local modules too. Merely
+    # validating the child independently would leave its data reads unmocked.
+    dependencies = {}
     for path in paths:
-        require_azurerm_only(path, set(paths))
-    counts = {path: require_mocked_plans(path) for path in paths}
+        dependencies[path] = set()
+        for file in path.glob('*.tf'):
+            with file.open(encoding='utf-8') as stream:
+                document = hcl2.load(stream)
+            for item in document.get('module', []):
+                dependencies[path].update((path / body['source']).resolve() for body in item.values())
+    changed = True
+    while changed:
+        changed = False
+        for path, children in dependencies.items():
+            required = providers[path].union(*(providers[child] for child in children))
+            if required != providers[path]:
+                providers[path] = required
+                changed = True
+    providers = {path: names or {'azurerm'} for path, names in providers.items()}
+    counts = {path: require_mocked_plans(path, providers[path]) for path in paths}
     env = os.environ.copy()
     env.update(TF_IN_AUTOMATION='1', TF_INPUT='0', ARM_USE_CLI='false', ARM_USE_MSI='false', ARM_USE_OIDC='false')
     run([terraform, f'-chdir={repository}', 'fmt', '-check', '-recursive'], check=True, env=env)
@@ -104,7 +152,7 @@ def validate(repository, terraform='terraform', run=subprocess.run):
         raise ValueError('Commit the reviewed shared provider lock file')
     for path in paths:
         print(f'Validating {path.relative_to(repository)}', flush=True)
-        shutil.copyfile(lock, path / '.terraform.lock.hcl')
+        stage_provider_lock(lock, path / '.terraform.lock.hcl', providers[path])
         for command in (
             ['init', '-backend=false', '-input=false', '-lockfile=readonly', '-no-color'],
             ['validate', '-no-color'],

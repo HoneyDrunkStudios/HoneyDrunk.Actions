@@ -1752,3 +1752,7 @@ For questions, issues, or feature requests:
 - **Repository:** https://github.com/HoneyDrunkStudios/HoneyDrunk.Actions
 - **Issues:** https://github.com/HoneyDrunkStudios/HoneyDrunk.Actions/issues
 - **Documentation:** This file and workflow headers
+
+### Terraform directory providers
+
+The credential-free Terraform validator accepts the reviewed AzureRM, AzureAD, AzAPI, and Microsoft Graph provider sources. Every provider used by a root or its local child modules must have a default mock. Aliases, external modules, and provider overrides remain rejected. Each target receives only its required providers from the shared lock, with the original versions and checksums preserved. No live plan or backend authentication runs in this workflow.
