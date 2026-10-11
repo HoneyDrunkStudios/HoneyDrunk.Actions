@@ -1,0 +1,65 @@
+name: NuGet trusted publish
+description: Exchange the calling repository's OIDC identity for a short-lived NuGet token
+inputs:
+  user:
+    description: NuGet account username that owns the trust policy
+    required: true
+  verify-only:
+    description: Verify OIDC exchange without publishing packages
+    default: 'false'
+  package-directory:
+    description: Directory of packages downloaded from this workflow run
+    default: artifacts
+  expected-version:
+    description: Exact version produced by the release prepare job
+    default: ''
+  expected-packages:
+    description: Newline-separated package IDs expected in the artifact
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Require reviewed default-branch ancestry
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" != refs/heads/main ]]; then
+          echo '::error::Manual publishing and trust verification must run from main.'
+          exit 1
+        fi
+        if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch && ( "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/tags/* ) ]]; then
+          echo '::error::Publishing requires a version tag or a manual main-branch run.'
+          exit 1
+        fi
+        git merge-base --is-ancestor HEAD origin/main
+    - name: Validate release artifacts before acquiring credentials
+      if: inputs.verify-only != 'true'
+      shell: bash
+      env:
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+        EXPECTED_VERSION: ${{ inputs.expected-version }}
+        EXPECTED_PACKAGES: ${{ inputs.expected-packages }}
+      run: python3 "$GITHUB_ACTION_PATH/validate_packages.py"
+    - name: Exchange GitHub identity with NuGet
+      id: nuget-login
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: ${{ inputs.user }}
+    - name: Publish validated packages
+      if: inputs.verify-only != 'true'
+      shell: bash
+      env:
+        EPHEMERAL_NUGET_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        packages=("$PACKAGE_DIRECTORY"/*.nupkg)
+        [[ ${#packages[@]} -gt 0 && -n "$EPHEMERAL_NUGET_KEY" ]]
+        for package in "${packages[@]}"; do
+          dotnet nuget push "$package" --source https://api.nuget.org/v3/index.json --api-key "$EPHEMERAL_NUGET_KEY"
+        done
+    - name: Report successful trust verification
+      if: inputs.verify-only == 'true'
+      shell: bash
+      run: echo 'NuGet accepted this repository/workflow/environment identity. No packages were published.'

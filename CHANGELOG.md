@@ -3,6 +3,7 @@
 ## Unreleased - Terraform directory provider coverage
 
 - Validate AzureRM, AzureAD, AzAPI and Microsoft Graph with exact provider-source allowlisting, transitive mock coverage and per-root subsets of the reviewed checksum lock. Live operations and authentication remain disabled.
+- Exercise all four real provider schemas through the reusable CLI workflow, with separate AzureRM and combined directory fixtures selecting different checksum-lock subsets.
 
 
 ## Unreleased - Script coverage import

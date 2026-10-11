@@ -21,9 +21,11 @@ outside that allowlist require a reviewed contract change.
 `working-directory` defaults to the caller repository root. A nested caller may
 select a relative directory inside that checkout; absolute paths, traversal and
 symlink escapes are rejected. Actions CI calls this same workflow at its own
-revision against `tests/fixtures/terraform`, exercising the real CLI, AzureRM
-schema, backend-disabled initialization, shared-lock subsets and JSON test results
-on every PR. The fixture includes both a successful plan and a rejected tier.
+revision against `tests/fixtures/terraform`, exercising the real CLI and all four
+provider schemas on every PR. Its AzureRM plan and combined AzureAD/AzAPI/Graph
+root select different subsets of the same reviewed lock, with backend-disabled
+initialization and JSON test results. The fixture includes both successful plans
+and a rejected tier; every provider is mocked and all targets are synthetic.
 Each target must mock exactly the provider set used by its configuration and all
 reachable local child modules. Every test run must use `command = plan`.
 Root duplication/path traversal, real test providers, alternate test modules,

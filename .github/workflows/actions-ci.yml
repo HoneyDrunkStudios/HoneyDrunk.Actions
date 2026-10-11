@@ -86,7 +86,9 @@ jobs:
           AZURE_SP_PATTERN='AZURE[_-]CLIENT[_-]SECRET|azure-client[-_]secret|client[-_]secret|client[S]ecret'
           LEGACY_TOKEN_PATTERN='NUGET_(API[_-]KEY|AUTH[_-]TOKEN)|(^|[^A-Z0-9_])(GH_PAT|GITHUB_PAT|PERSONAL_ACCESS_TOKEN|[A-Z0-9_]+_PAT_TOKEN)([^A-Z0-9_]|$)'
           BANNED_REGEX="${AZURE_SP_PATTERN}|AZURE[_-]CREDENTIALS|${LEGACY_TOKEN_PATTERN}"
-          if grep -nE "$BANNED_REGEX" "${FILES[@]}" > banned-patterns.txt; then
+          # Only this pinned login action's ephemeral output is allowed; stored secrets remain banned.
+          TRUSTED_OUTPUT='^(\./)?\.github/actions/nuget/trusted-publish/action.yml:[0-9]+:        EPHEMERAL_NUGET_KEY: \$\{\{ steps.nuget-login.outputs.NUGET_API_KEY \}\}$'
+          if grep -nE "$BANNED_REGEX" "${FILES[@]}" | grep -vE "$TRUSTED_OUTPUT" > banned-patterns.txt; then
             echo "::error::Banned direct-secret pattern found in workflow/action YAML. Use OIDC inputs or Key Vault resolution instead."
             cat banned-patterns.txt
             exit 1
@@ -119,6 +121,9 @@ jobs:
 
       - name: Regression test Container App deployment contract
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_container_app_deployment.py -v'
+
+      - name: Regression test trusted publishing boundaries
+        run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_trusted_publishing.py -v'
 
       - name: Regression test Sonar SQL dialect arguments
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_sonar_sql.py -v'
