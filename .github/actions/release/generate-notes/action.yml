@@ -15,7 +15,7 @@ inputs:
   changelog-paths:
     description: |
       Optional override. If omitted, auto-discovers all CHANGELOG.md files in the repo
-      (excluding node_modules, .actions, bin, obj, artifacts, TestResults).
+      (excluding node_modules, .actions, .github/actions-repo, bin, obj, artifacts, TestResults).
       When provided, takes a newline-separated list of paths.
       Use 'Label:path/to/CHANGELOG.md' syntax to override the sub-heading label.
     required: false
@@ -93,9 +93,12 @@ runs:
           fi
 
           local notes
-          notes=$(extract_version "$fpath" "$VERSION")
+          if ! notes=$(extract_version "$fpath" "$VERSION"); then
+            echo "::notice::Version $VERSION not found in $fpath — skipping"
+            return
+          fi
 
-          if [ $? -ne 0 ] || [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
+          if [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
             echo "::notice::Version $VERSION not found in $fpath — skipping"
             return
           fi
@@ -133,7 +136,7 @@ runs:
           echo "::notice::Auto-discovering CHANGELOG.md files under $SEARCH_ROOT"
 
           REPO_LEVEL_FILES=""
-          SLNX_FILES=$(find "$SEARCH_ROOT" -name "*.slnx" -type f 2>/dev/null | sort)
+          SLNX_FILES=$(find "$SEARCH_ROOT" -name "*.slnx" -type f ! -path "*/.github/actions-repo/*" ! -path "*/.actions/*" 2>/dev/null | sort)
 
           if [ -n "$SLNX_FILES" ]; then
             while IFS= read -r slnx; do
@@ -162,6 +165,7 @@ runs:
             FOUND_FILES=$(find "$SEARCH_ROOT" -name "CHANGELOG.md" -type f \
               ! -path "*/node_modules/*" \
               ! -path "*/.actions/*" \
+              ! -path "*/.github/actions-repo/*" \
               ! -path "*/bin/*" \
               ! -path "*/obj/*" \
               ! -path "*/artifacts/*" \
