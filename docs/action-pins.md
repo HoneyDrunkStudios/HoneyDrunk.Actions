@@ -11,8 +11,8 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | actions/cache | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | actions/checkout | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | actions/create-github-app-token | v3.2.0 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
-| actions/download-artifact | v7 | none | Current | none | Bumped to default Node 24 successor for ADR-0012 packet 09. |
-| actions/setup-dotnet | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| actions/download-artifact | v6, v7 | none | Current | v7 | Hosted Node smoke uses v7. The separate legacy NuGet push preserves the caller migration's v6 artifact contract at `018cc2cf5baa6db3ef3c5f8a56943fffe632ef53`. |
+| actions/setup-dotnet | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. The separate legacy NuGet push pins `26b0ec14cb23fa6904739307f278c14f94c95bf1`. |
 | actions/setup-java | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | actions/setup-node | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | actions/setup-python | v5, v6 | none | Current | none | v5 remains in existing helpers/Actions tests. The new `job-terraform-validate.yml` uses v6 with Python 3.12, including its real-CLI smoke call from `actions-ci.yml`. |
@@ -26,6 +26,7 @@ Any PR that adds, removes, or changes a `uses:` pin updates this file in the sam
 | github/codeql-action/analyze | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | github/codeql-action/init | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
 | github/codeql-action/upload-sarif | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09. |
+| NuGet/login | `8d196754b4036150537f80ac539e15c2f1028841` (v1.2.0) | unknown | Current | none | Official [NuGet login action](https://github.com/NuGet/login) exchanges the caller-owned OIDC identity for a masked, short-lived token. Used only by the trusted-publishing composite; no credential output escapes the composite. |
 | peter-evans/create-or-update-comment | v5 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | peter-evans/create-pull-request | v8 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
 | peter-evans/find-comment | v4 | none | Current | none | Bumped to Node 24 successor for ADR-0012 packet 09 follow-up. |
