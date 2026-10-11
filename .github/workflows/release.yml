@@ -71,6 +71,12 @@ on:
         required: false
         type: boolean
         default: false
+
+      enable-nuget-pack:
+        description: 'Build NuGet artifacts without publishing; caller owns trusted publishing and its GitHub Release'
+        required: false
+        type: boolean
+        default: false
       
       nuget-source:
         description: 'NuGet feed URL'
@@ -470,8 +476,8 @@ jobs:
           if-no-files-found: ignore
   
   publish-nuget:
-    name: Publish NuGet Packages
-    if: ${{ inputs.enable-nuget-publish }}
+    name: Pack NuGet Packages
+    if: ${{ inputs.enable-nuget-publish || inputs.enable-nuget-pack }}
     needs: [build-and-test, security-compliance]
     runs-on: ${{ inputs.runs-on }}
     
@@ -517,6 +523,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
       
       - name: Push to NuGet
+        if: ${{ inputs.enable-nuget-publish }}
         uses: ./.github/actions-repo/.github/actions/nuget/push
         with:
           package-path: './artifacts/*.nupkg'
@@ -531,6 +538,7 @@ jobs:
           name: nuget-packages
           path: ${{ inputs.working-directory }}/artifacts/*.nupkg
           retention-days: 365
+          if-no-files-found: error
   
   publish-app:
     name: Publish Deployable Apps

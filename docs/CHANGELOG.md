@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional NuGet pack-only mode and a caller-owned trusted-publishing composite,
+  with exact artifact validation and login-only verification. Existing API-key
+  callers remain compatible. See [migration guidance](nuget-trusted-publishing.md).
+
 ### Changed
 
 - `job-review-request.yml`: added configurable explicit bypass labels for ADR-0086 Grid review queueing. The default now honors both the existing `skip-review` label and the clearer `skip-grid-review` alias; bypass remains a visible operator decision, not a docs-only or file-type shortcut.
