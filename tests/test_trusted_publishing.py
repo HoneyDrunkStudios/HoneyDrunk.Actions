@@ -78,7 +78,7 @@ class TrustedPublishingTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
         self.assertEqual(workflow['permissions'], {'contents': 'read'})
         for name, release_job in workflow['jobs'].items():
-            if name not in ('build-and-scan-container', 'github-release'):
+            if name not in ('build-and-scan-container', 'github-release', 'push-legacy-nuget'):
                 self.assertEqual(release_job.get('permissions', workflow['permissions']), {'contents': 'read'})
         self.assertEqual(workflow['jobs']['build-and-scan-container']['permissions'], {
             'contents': 'read', 'packages': 'write', 'id-token': 'write', 'security-events': 'write'})
@@ -87,9 +87,30 @@ class TrustedPublishingTests(unittest.TestCase):
         self.assertFalse(inputs['enable-nuget-publish']['default'])
         job = workflow['jobs']['publish-nuget']
         self.assertEqual(job['needs'], ['build-and-test', 'security-compliance'])
-        push = next(step for step in job['steps'] if step['name'] == 'Push to NuGet')
+        push = workflow['jobs']['push-legacy-nuget']
         self.assertEqual(push['if'], '${{ inputs.enable-nuget-publish }}')
+        self.assertEqual(push['needs'], ['publish-nuget'])
+        self.assertEqual(push['permissions'], {'contents': 'read', 'packages': 'write'})
+        self.assertIn('push-legacy-nuget', workflow['jobs']['github-release']['needs'])
+        self.assertIn('*.snupkg', job['steps'][-1]['with']['path'])
         self.assertEqual(job['steps'][-1]['with']['if-no-files-found'], 'error')
+
+    def test_symbol_companions_match_primary_packages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            def package(filename, package_id='Example', version='1.0.0'):
+                with ZipFile(Path(temp) / filename, 'w') as archive:
+                    archive.writestr('Example.nuspec', f'<package><metadata><id>{package_id}</id><version>{version}</version></metadata></package>')
+            package('Example.1.0.0.nupkg')
+            package('Example.1.0.0.snupkg')
+            module.validate(temp, '1.0.0', 'Example')
+            for package_id, version in [('Other', '1.0.0'), ('Example', '2.0.0')]:
+                package('Example.1.0.0.snupkg', package_id, version)
+                with self.assertRaisesRegex(ValueError, 'Symbol package'):
+                    module.validate(temp, '1.0.0', 'Example')
+            package('Example.1.0.0.snupkg')
+            package('Orphan.1.0.0.snupkg')
+            with self.assertRaisesRegex(ValueError, 'Symbol package'):
+                module.validate(temp, '1.0.0', 'Example')
 
 
 if __name__ == '__main__':

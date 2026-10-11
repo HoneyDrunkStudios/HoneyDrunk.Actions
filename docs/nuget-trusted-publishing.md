@@ -19,7 +19,9 @@ in a job defined in the package repository itself.
 5. Download this run's `nuget-packages` artifact, set up .NET, and call
    `.github/actions/nuget/trusted-publish` with the NuGet username, expected version
    and exact newline-separated package IDs. This validates the complete artifact
-   set before login, then uses the short-lived token only for the push.
+   set before login, including optional matching `.snupkg` companions, then uses
+   the short-lived token only for the push. Upload both package formats so the
+   NuGet client can co-publish symbols with their primary packages.
 6. Generate release notes and create the GitHub Release only after push succeeds.
    Preserve the caller's title, tag, prerelease and package metadata.
 
@@ -34,9 +36,13 @@ automatic fallback to the old key, which would hide a broken trust policy.
 The action exposes no credential outputs. The sole API-key reference is the
 official NuGet login action's masked, short-lived output, passed to the push via
 an environment variable. No stored NuGet secret is needed by migrated callers.
-Legacy API-key callers remain compatible during migration.
+Legacy API-key callers remain compatible during migration. Their push executes
+in a separate job with `packages: write` for GitHub Packages support. Build,
+test, security and pack jobs remain read-only; pack-only callers skip that push.
 
-Use a unique concurrency group for each caller workflow with cancellation off.
+Use a concurrency group per caller workflow, release version and mode with
+cancellation off. Separate verification from publishing so a login check cannot
+replace a pending release, and separate versions so distinct releases remain queued.
 Do not rerun a partially published multi-package release blindly: duplicate
 versions intentionally fail. Inspect which immutable versions were accepted and
 complete recovery through a reviewed release operation.

@@ -519,24 +519,48 @@ jobs:
           output-directory: ./artifacts
           working-directory: ${{ inputs.working-directory }}
       
-      - name: Push to NuGet
-        if: ${{ inputs.enable-nuget-publish }}
-        uses: ./.github/actions-repo/.github/actions/nuget/push
-        with:
-          package-path: './artifacts/*.nupkg'
-          source: ${{ inputs.nuget-source }}
-          api-key: ${{ secrets.nuget-api-key }}
-          skip-duplicate: 'false'  # Releases should fail if version exists
-          working-directory: ${{ inputs.working-directory }}
-      
       - name: Upload packages
         uses: actions/upload-artifact@v6
         with:
           name: nuget-packages
-          path: ${{ inputs.working-directory }}/artifacts/*.nupkg
+          path: |
+            ${{ inputs.working-directory }}/artifacts/*.nupkg
+            ${{ inputs.working-directory }}/artifacts/*.snupkg
           retention-days: 365
           if-no-files-found: error
   
+  push-legacy-nuget:
+    name: Publish NuGet Packages with Existing Credential
+    if: ${{ inputs.enable-nuget-publish }}
+    needs: [publish-nuget]
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      - name: Download validated build artifacts
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: nuget-packages
+          path: artifacts
+      - name: Push to configured feed
+        shell: bash
+        env:
+          NUGET_SOURCE: ${{ inputs.nuget-source }}
+          LEGACY_FEED_KEY: ${{ secrets.nuget-api-key }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(artifacts/*.nupkg)
+          [[ ${#packages[@]} -gt 0 && -n "$LEGACY_FEED_KEY" ]]
+          for package in "${packages[@]}"; do
+            dotnet nuget push "$package" --source "$NUGET_SOURCE" --api-key "$LEGACY_FEED_KEY"
+          done
+
   publish-app:
     name: Publish Deployable Apps
     if: ${{ inputs.enable-app-publish }}
@@ -790,7 +814,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     if: ${{ always() && inputs.create-github-release && !failure() && !cancelled() }}
-    needs: [build-and-test, security-compliance, publish-nuget, publish-app, build-and-scan-container]
+    needs: [build-and-test, security-compliance, publish-nuget, push-legacy-nuget, publish-app, build-and-scan-container]
     runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: write
@@ -870,7 +894,7 @@ jobs:
   
   release-summary:
     name: Release Summary
-    needs: [build-and-test, security-compliance, publish-nuget, publish-app, build-and-scan-container, github-release]
+    needs: [build-and-test, security-compliance, publish-nuget, push-legacy-nuget, publish-app, build-and-scan-container, github-release]
     if: always()
     runs-on: ${{ inputs.runs-on }}
     
@@ -889,7 +913,7 @@ jobs:
           echo "- Build and Test: ${{ needs.build-and-test.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Security and Compliance: ${{ needs.security-compliance.result }}" >> $GITHUB_STEP_SUMMARY
           if [ "${{ inputs.enable-nuget-publish }}" == "true" ]; then
-            echo "- NuGet Publish: ${{ needs.publish-nuget.result }}" >> $GITHUB_STEP_SUMMARY
+            echo "- NuGet Publish: ${{ needs.push-legacy-nuget.result }}" >> $GITHUB_STEP_SUMMARY
           fi
           if [ "${{ inputs.enable-app-publish }}" == "true" ]; then
             echo "- App Publish: ${{ needs.publish-app.result }}" >> $GITHUB_STEP_SUMMARY
