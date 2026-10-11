@@ -253,9 +253,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write  # Required for OIDC federation and SBOM attestation
-  security-events: write  # For SARIF upload from container scan
 
 jobs:
   build-and-test:
@@ -619,6 +616,11 @@ jobs:
   
   build-and-scan-container:
     name: Build and Scan Container
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write
     if: ${{ inputs.enable-container-build }}
     needs: [build-and-test, security-compliance]
     runs-on: ${{ inputs.runs-on }}

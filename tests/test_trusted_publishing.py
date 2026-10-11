@@ -76,6 +76,12 @@ class TrustedPublishingTests(unittest.TestCase):
 
     def test_pack_only_preserves_existing_publish_contract(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        for name, release_job in workflow['jobs'].items():
+            if name not in ('build-and-scan-container', 'github-release'):
+                self.assertEqual(release_job.get('permissions', workflow['permissions']), {'contents': 'read'})
+        self.assertEqual(workflow['jobs']['build-and-scan-container']['permissions'], {
+            'contents': 'read', 'packages': 'write', 'id-token': 'write', 'security-events': 'write'})
         inputs = workflow.get('on', workflow.get(True))['workflow_call']['inputs']
         self.assertFalse(inputs['enable-nuget-pack']['default'])
         self.assertFalse(inputs['enable-nuget-publish']['default'])
