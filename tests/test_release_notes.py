@@ -13,6 +13,61 @@ ACTION = Path(__file__).resolve().parents[1] / ".github/actions/release/generate
 
 
 class ReleaseNotesTests(unittest.TestCase):
+    def extract(self, files):
+        action = ACTION.read_text(encoding="utf-8")
+        block = action.split("      id: extract-all\n", 1)[1].split("    - name: Assemble release body", 1)[0]
+        script = textwrap.dedent(block.split("      run: |\n", 1)[1])
+        values = {"inputs.version": "0.1.0-alpha.4", "inputs.changelog-paths": "", "inputs.search-root": "."}
+        script = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda match: values[match[1]], script)
+        with tempfile.TemporaryDirectory(prefix="release-discovery-test-") as directory:
+            root = Path(directory)
+            repo = root / "repository"
+            repo.mkdir()
+            for name, content in files.items():
+                path = repo / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            script_path = root / "extract.sh"
+            script_path.write_text(script, encoding="utf-8", newline="\n")
+            output = root / "output.txt"
+            result = subprocess.run(
+                [os.environ.get("BASH_EXE", "bash"), "--noprofile", "--norc", "-e", "-o", "pipefail", script_path.as_posix()],
+                cwd=repo, env={**os.environ, "RUNNER_TEMP": root.as_posix(), "GITHUB_OUTPUT": output.as_posix()},
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            return result, output.read_text(encoding="utf-8") if output.exists() else "", (root / "changelog-entries.txt").read_text(encoding="utf-8")
+
+    def test_missing_version_does_not_abort_later_matching_changelog(self):
+        result, output, entries = self.extract({
+            "a/CHANGELOG.md": "## [0.0.1]\nUnrelated version.\n",
+            "z/CHANGELOG.md": "## [0.1.0-alpha.4]\nIdentity release.\n",
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("has-changelog=true", output)
+        self.assertIn("Identity release.", entries)
+        self.assertNotIn("Unrelated version.", entries)
+
+    def test_no_matching_version_allows_generated_notes_fallback(self):
+        result, output, entries = self.extract({"CHANGELOG.md": "## [0.0.1]\nOld release.\n"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("has-changelog=false", output)
+        self.assertEqual(entries, "")
+
+    def test_actions_checkout_changelogs_and_solutions_are_excluded(self):
+        for with_solution in (False, True):
+            with self.subTest(with_solution=with_solution):
+                files = {
+                    "CHANGELOG.md": "## [0.1.0-alpha.4]\nIdentity release.\n",
+                    ".github/actions-repo/CHANGELOG.md": "## [0.1.0-alpha.4]\nWrong repository.\n",
+                }
+                if with_solution:
+                    files[".github/actions-repo/Actions.slnx"] = "<Solution />"
+                result, output, entries = self.extract(files)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("entry-count=1", output)
+                self.assertIn("Identity release.", entries)
+                self.assertNotIn("Wrong repository.", entries)
+
     def assemble(self, tags=(), *, previous_implementation=False, initialize_git=True):
         action = ACTION.read_text(encoding="utf-8")
         script = textwrap.dedent(action.split("      id: assemble\n", 1)[1].split("      run: |\n", 1)[1])
