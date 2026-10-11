@@ -8,19 +8,30 @@ it never executes a mutable `main` helper behind a pinned workflow.
 The caller supplies `.terraform-version` (currently `1.16.5`), one reviewed root
 `.terraform.lock.hcl`, a `terraform-roots.json` array, and `tests/safety.tftest.hcl`
 in every root and two-level concern module. The helper checks all declared roots
-and `modules/*/*`, copies the shared lock, and runs format, backend-disabled
+and `modules/*/*`, stages each target's required subset of the shared lock, and runs format, backend-disabled
 initialization with a read-only lock, schema validation and mocked plan tests.
+Provider versions and complete checksum blocks are retained verbatim; unused
+provider entries are excluded because Terraform's read-only initialization rejects
+an out-of-date dependency set. Missing required lock entries fail validation.
+
+The reviewed provider sources are `hashicorp/azurerm`, `hashicorp/azuread`,
+`Azure/azapi` and `Microsoft/msgraph`, under their standard local names. Sources
+outside that allowlist require a reviewed contract change.
 
 `working-directory` defaults to the caller repository root. A nested caller may
 select a relative directory inside that checkout; absolute paths, traversal and
 symlink escapes are rejected. Actions CI calls this same workflow at its own
-revision against `tests/fixtures/terraform`, exercising the real CLI, AzureRM
-schema, backend-disabled initialization, shared-lock copies and JSON test results
-on every PR. The fixture includes both a successful plan and a rejected tier.
-Every test must explicitly use the mocked AzureRM provider and `command = plan`.
+revision against `tests/fixtures/terraform`, exercising the real CLI and all four
+provider schemas on every PR. Its AzureRM plan and combined AzureAD/AzAPI/Graph
+root select different subsets of the same reviewed lock, with backend-disabled
+initialization and JSON test results. The fixture includes both successful plans
+and a rejected tier; every provider is mocked and all targets are synthetic.
+Each target must mock exactly the provider set used by its configuration and all
+reachable local child modules. Every test run must use `command = plan`.
 Root duplication/path traversal, real test providers, alternate test modules,
-and test applies fail before invoking Terraform. New provider kinds require a
-reviewed contract change. Initialization still downloads checksummed providers;
+provider aliases/overrides, unvalidated modules and test applies fail before
+invoking Terraform. A module-only root inherits its children's provider set
+without acquiring an unused AzureRM dependency. Initialization still downloads checksummed providers;
 "credential-free" does not mean network-free.
 
 The runner requires exactly one `tests/safety.tftest.hcl` per target and checks

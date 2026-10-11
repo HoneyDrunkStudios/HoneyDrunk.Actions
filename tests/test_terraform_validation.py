@@ -24,7 +24,8 @@ class TerraformValidationTests(unittest.TestCase):
         (self.root / 'tests').mkdir(parents=True)
         (self.root / 'main.tf').write_text('')
         (self.repo / 'terraform-roots.json').write_text('["platform"]')
-        (self.repo / '.terraform.lock.hcl').write_text('# test lock')
+        (self.repo / '.terraform.lock.hcl').write_text(
+            'provider "registry.terraform.io/hashicorp/azurerm" {\n  version = "5.9.0"\n  hashes = ["h1:test"]\n}\n')
         self.test = self.root / 'tests/safety.tftest.hcl'
         self.test.write_text('mock_provider "azurerm" {}\nrun "check" { command = plan }\n')
 
@@ -86,10 +87,65 @@ class TerraformValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validator.require_azurerm_only(self.root, {self.root})
 
+    def test_directory_providers_require_exact_mock_coverage(self):
+        for name, source in validator.ALLOWED_PROVIDERS.items():
+            (self.root / 'main.tf').write_text(
+                f'terraform {{ required_providers {{ {name} = {{ source = "{source}" }} }} }}\n'
+                f'data "{name}_fixture" "existing" {{}}\n')
+            required = validator.require_azurerm_only(self.root, {self.root})
+            self.assertEqual(required, {name})
+            self.test.write_text(f'mock_provider "{name}" {{}}\nrun "check" {{ command = plan }}')
+            self.assertEqual(validator.require_mocked_plans(self.root, required), 1)
+            self.test.write_text('mock_provider "unrelated" {}\nrun "check" { command = plan }')
+            with self.assertRaises(ValueError):
+                validator.require_mocked_plans(self.root, required)
+
+    def test_rejects_provider_source_substitution(self):
+        (self.root / 'main.tf').write_text(
+            'terraform { required_providers { azuread = { source = "untrusted/azuread" } } }')
+        with self.assertRaises(ValueError):
+            validator.require_azurerm_only(self.root, {self.root})
+
+    def test_lock_subset_preserves_checksums_and_rejects_missing_provider(self):
+        lock = self.repo / '.terraform.lock.hcl'
+        original = lock.read_text()
+        lock.write_text(original + 'provider "registry.terraform.io/hashicorp/azuread" {\n  version = "3.10.0"\n  hashes = ["h1:directory"]\n}\n')
+        target = self.root / '.terraform.lock.hcl'
+        validator.stage_provider_lock(lock, target, {'azurerm'})
+        self.assertIn(original, target.read_text())
+        self.assertNotIn('azuread', target.read_text())
+        with self.assertRaisesRegex(ValueError, 'Missing reviewed provider lock'):
+            validator.stage_provider_lock(lock, target, {'azapi'})
+
+    def test_child_directory_provider_must_be_mocked_by_parent(self):
+        child = self.repo / 'modules/identity/directory'
+        (child / 'tests').mkdir(parents=True)
+        (child / 'main.tf').write_text('data "azuread_application" "existing" {}')
+        (child / 'tests/safety.tftest.hcl').write_text(
+            'mock_provider "azuread" {}\nrun "check" { command = plan }')
+        (self.root / 'main.tf').write_text(
+            'module "directory" { source = "../modules/identity/directory" }')
+        with self.assertRaisesRegex(ValueError, 'every required provider'):
+            validator.validate(self.repo, run=lambda *args, **kwargs: self.fail('Unmocked child reached Terraform'))
+
     def test_rejects_aliased_mock_that_leaves_default_provider_real(self):
         self.test.write_text('mock_provider "azurerm" { alias = "fake" }\nrun "check" { command = plan }')
         with self.assertRaises(ValueError):
             validator.require_mocked_plans(self.root)
+
+    def test_module_only_parent_uses_its_child_provider_without_phantom_azurerm(self):
+        child = self.repo / 'modules/identity/directory'
+        (child / 'tests').mkdir(parents=True)
+        (child / 'main.tf').write_text('data "azuread_application" "existing" {}')
+        mocked = 'mock_provider "azuread" {}\nrun "check" { command = plan }'
+        (child / 'tests/safety.tftest.hcl').write_text(mocked)
+        self.test.write_text(mocked)
+        (self.root / 'main.tf').write_text('module "directory" { source = "../modules/identity/directory" }')
+        lock = self.repo / '.terraform.lock.hcl'
+        lock.write_text(lock.read_text() + 'provider "registry.terraform.io/hashicorp/azuread" {\n  version = "3.10.0"\n  hashes = ["h1:directory"]\n}\n')
+        result = SimpleNamespace(stdout=json.dumps({'type':'test_summary','test_summary':{'status':'pass','passed':1,'failed':0,'errored':0,'skipped':0}}))
+        validator.validate(self.repo, run=lambda *args, **kwargs: result)
+        self.assertNotIn('azurerm', (self.root / '.terraform.lock.hcl').read_text())
 
     def test_rejects_remote_or_unvalidated_module(self):
         for source in ['registry.example/module', '../unvalidated']:
