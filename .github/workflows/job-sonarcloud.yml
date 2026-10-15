@@ -126,6 +126,12 @@ on:
         type: boolean
         default: false
 
+      collect-failure-findings:
+        description: 'Collect zero-threshold PR findings after a failed scanner only when this run completed analysis. Same-repository PRs on sonarcloud.io only; scanner failure remains blocking.'
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       sonar-token:
         description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Studio/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
@@ -149,6 +155,9 @@ jobs:
     # If a caller wires this workflow into a feature-branch push or a tag,
     # this guard reports a skipped job rather than spending a SonarQube Cloud run.
     if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+    outputs:
+      analysis-completed: ${{ steps.completion.outputs.analysis-completed }}
 
     steps:
       - name: Checkout repository
@@ -203,6 +212,21 @@ jobs:
           path: ${{ inputs.working-directory }}/TestResults
         continue-on-error: true
 
+      - name: Prepare analysis completion evidence
+        id: analysis-metadata
+        if: inputs.collect-failure-findings && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+        shell: bash
+        run: |
+          # Never follow a host supplied by scanner metadata with credentials.
+          if [[ "${SONAR_HOST_URL}" != 'https://sonarcloud.io' ]]; then
+            echo '::error::Failure findings require https://sonarcloud.io.'
+            exit 1
+          fi
+          directory="$(mktemp -d "${RUNNER_TEMP}/sonar-completion.XXXXXX")"
+          echo "report-path=${directory}/report-task.txt" >> "$GITHUB_OUTPUT"
+
       - name: Begin SonarQube Cloud analysis
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -210,6 +234,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.github-token || github.token }}
           SONAR_TSQL: ${{ inputs.sonar-tsql }}
           GENERIC_COVERAGE_REPORT: ${{ inputs.generic-coverage-report-path }}
+          SONAR_REPORT_PATH: ${{ steps.analysis-metadata.outputs.report-path }}
         shell: bash
         run: |
           # SonarScanner for .NET reads sonar.* configuration via `/d:` CLI flags or
@@ -219,6 +244,10 @@ jobs:
           # imports the OpenCover report produced by the conversion step below.
           # Per-repo overrides are possible via MSBuild `<SonarQubeSetting>` items
           # in Directory.Build.props if a repo needs to diverge from the default.
+          metadata_arguments=()
+          if [[ -n "${SONAR_REPORT_PATH:-}" ]]; then
+            metadata_arguments+=("/d:sonar.scanner.metadataFilePath=${SONAR_REPORT_PATH}")
+          fi
           sql_arguments=()
           if [[ "${SONAR_TSQL}" == 'true' ]]; then
             # Sonar defaults .sql to Oracle PL/SQL. Associate it with exactly
@@ -235,6 +264,7 @@ jobs:
             coverage_arguments+=("/d:sonar.coverageReportPaths=${GENERIC_COVERAGE_REPORT}")
           fi
           "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" begin \
+            "${metadata_arguments[@]}" \
             "${sql_arguments[@]}" \
             "${coverage_arguments[@]}" \
             /k:"${{ inputs.sonar-project-key }}" \
@@ -365,9 +395,119 @@ jobs:
           fi
 
       - name: End SonarQube Cloud analysis
+        id: scanner-end
         working-directory: ${{ inputs.working-directory }}
         env:
           SONAR_TOKEN: ${{ secrets.sonar-token }}
+          SONAR_REPORT_PATH: ${{ steps.analysis-metadata.outputs.report-path }}
         shell: bash
         run: |
+          # Remove any file left by build/test code before the scanner upload.
+          if [[ -n "${SONAR_REPORT_PATH:-}" ]]; then
+            rm -f -- "$SONAR_REPORT_PATH"
+          fi
+          echo "started-at=$(date +%s)" >> "$GITHUB_OUTPUT"
+          set +e
           "${GITHUB_WORKSPACE}/.sonar/scanner/dotnet-sonarscanner" end /d:sonar.token="${SONAR_TOKEN}"
+          result=$?
+          echo "finished-at=$(date +%s)" >> "$GITHUB_OUTPUT"
+          exit "$result"
+
+      - name: Verify completed analysis after scanner failure
+        id: completion
+        if: ${{ !cancelled() && inputs.collect-failure-findings && steps.scanner-end.outcome == 'failure' && steps.analysis-metadata.outcome == 'success' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.sonar-token }}
+          SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+          SONAR_PROJECT_KEY: ${{ inputs.sonar-project-key }}
+          SONAR_REPORT_PATH: ${{ steps.analysis-metadata.outputs.report-path }}
+          SCANNER_STARTED_AT: ${{ steps.scanner-end.outputs.started-at }}
+          SCANNER_FINISHED_AT: ${{ steps.scanner-end.outputs.finished-at }}
+        shell: bash
+        run: |
+          python3 <<'PYTHON'
+          from datetime import datetime
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import urllib.parse
+          import urllib.request
+
+          # One bounded read, not a second processing wait. Pending, timeout,
+          # malformed or absent evidence cannot enable PR metric queries.
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def completed():
+              host = os.environ['SONAR_HOST_URL']
+              if host != 'https://sonarcloud.io':
+                  return False
+              started = int(os.environ['SCANNER_STARTED_AT'])
+              finished = int(os.environ['SCANNER_FINISHED_AT'])
+              if not 0 < started <= finished:
+                  return False
+              report = Path(os.environ['SONAR_REPORT_PATH'])
+              if report.is_symlink() or not report.is_file():
+                  return False
+              if not started <= report.stat().st_mtime < finished + 1:
+                  return False
+              if report.stat().st_size > 16384:
+                  return False
+              metadata = {}
+              for line in report.read_text(encoding='utf-8').splitlines():
+                  key, separator, value = line.partition('=')
+                  if not separator or key in metadata:
+                      return False
+                  metadata[key] = value
+              task_id = metadata.get('ceTaskId', '')
+              if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', task_id):
+                  return False
+              project = os.environ['SONAR_PROJECT_KEY']
+              if metadata.get('serverUrl') != host or metadata.get('projectKey') != project:
+                  return False
+              url = host + '/api/ce/task?' + urllib.parse.urlencode({'id': task_id})
+              if metadata.get('ceTaskUrl') != url:
+                  return False
+              request = urllib.request.Request(url, headers={
+                  'Authorization': 'Bearer ' + os.environ['SONAR_TOKEN'],
+                  'Accept': 'application/json',
+              })
+              with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
+                  payload = json.loads(response.read(65537))
+              task = payload['task']
+              if (task['id'] != task_id or task['componentKey'] != project
+                      or task['status'] != 'SUCCESS'
+                      or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', task.get('analysisId', ''))):
+                  return False
+              submitted = datetime.fromisoformat(task['submittedAt'].replace('Z', '+00:00'))
+              executed = datetime.fromisoformat(task['executedAt'].replace('Z', '+00:00'))
+              if submitted.tzinfo is None or executed.tzinfo is None:
+                  return False
+              return started <= submitted.timestamp() <= executed.timestamp() < finished + 1
+
+          try:
+              verified = completed()
+          except (OSError, ValueError, KeyError, TypeError, AttributeError):
+              verified = False
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('analysis-completed=' + str(verified).lower() + '\n')
+          print('::notice::Current scanner analysis completion verified: ' + str(verified).lower())
+          PYTHON
+
+  failure-findings:
+    name: Findings after failed quality gate
+    needs: sonarcloud
+    if: ${{ always() && !cancelled() && inputs.collect-failure-findings && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sonarcloud.result == 'failure' && needs.sonarcloud.outputs.analysis-completed == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/job-sonarcloud-quality-gate.yml
+    with:
+      runs-on: ${{ inputs.runs-on }}
+      sonar-organization: ${{ inputs.sonar-organization }}
+      sonar-project-key: ${{ inputs.sonar-project-key }}
+      sonar-host-url: ${{ inputs.sonar-host-url }}
+      mode: enforce
+    secrets:
+      sonar-token: ${{ secrets.sonar-token }}

@@ -18,7 +18,7 @@ BASH = os.environ.get('BASH_EXE', 'bash')
 
 
 class SonarSqlTests(unittest.TestCase):
-    def arguments(self, tsql, report='', exists=True):
+    def arguments(self, tsql, report='', exists=True, metadata_path=''):
         with tempfile.TemporaryDirectory(prefix='sonar sql ') as directory:
             root = Path(directory)
             scanner = root / '.sonar/scanner/dotnet-sonarscanner'
@@ -36,7 +36,7 @@ class SonarSqlTests(unittest.TestCase):
                            'ARGUMENT_FILE': arguments.as_posix(), 'SONAR_TOKEN': 'fixture-not-a-token',
                            'SONAR_TSQL': render(STEP['env']['SONAR_TSQL']),
                            'GENERIC_COVERAGE_REPORT': render(STEP['env']['GENERIC_COVERAGE_REPORT']),
-                           'MSYS_NO_PATHCONV': '1'}
+                           'MSYS_NO_PATHCONV': '1', 'SONAR_REPORT_PATH': metadata_path}
             if report and exists:
                 (root / report).write_text('<coverage version="1"/>', encoding='utf-8')
             result = subprocess.run([BASH, '-eu', '-c', script], env=environment,
@@ -72,6 +72,12 @@ class SonarSqlTests(unittest.TestCase):
         arguments = self.arguments('false', report)
         self.assertIn('/d:sonar.coverageReportPaths=' + report, arguments)
         self.assertIn('/d:sonar.cs.opencover.reportsPaths=**/coverage.opencover.xml', arguments)
+        self.assertIn('/d:sonar.qualitygate.wait=true', arguments)
+
+    def test_explicit_metadata_path_is_one_literal_argument(self):
+        path = '/tmp/scanner metadata/report-task.txt'
+        arguments = self.arguments('false', metadata_path=path)
+        self.assertIn('/d:sonar.scanner.metadataFilePath=' + path, arguments)
         self.assertIn('/d:sonar.qualitygate.wait=true', arguments)
 
     def test_requested_missing_coverage_fails_before_scanner_upload(self):
