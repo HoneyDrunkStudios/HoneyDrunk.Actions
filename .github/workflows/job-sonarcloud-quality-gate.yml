@@ -229,6 +229,7 @@ jobs:
 
           values = {}
           unavailable = []
+          observed_breaches = {}
           last_error = ""
           fatal_error = ""
 
@@ -287,6 +288,10 @@ jobs:
                   with urllib.request.urlopen(request, timeout=10) as response:
                       payload = json.loads(response.read().decode("utf-8"))
                   values, unavailable = metric_values(payload)
+                  for metric, limit in metrics:
+                      actual = values.get(metric)
+                      if actual is not None and actual > limit:
+                          observed_breaches[metric] = max(actual, observed_breaches.get(metric, 0))
                   if not unavailable:
                       break
                   last_error = "missing or invalid metrics: " + ", ".join(unavailable)
@@ -314,12 +319,16 @@ jobs:
               print(f"::error::{message}")
               finish("configuration failed", True, 0, "", message, 1)
 
+          # An incomplete final attempt cannot erase a confirmed finding.
+          # A complete response remains authoritative; partial reports never
+          # accumulate into evidence sufficient to pass the gate.
+          evaluation_values = observed_breaches if unavailable else values
           failures = []
           observed = []
           for metric, limit in metrics:
-              if metric not in values:
+              if metric not in evaluation_values:
                   continue
-              actual = values[metric]
+              actual = evaluation_values[metric]
               observed.append(f"{metric}={actual}")
               if actual > limit:
                   failures.append((metric, actual, limit))

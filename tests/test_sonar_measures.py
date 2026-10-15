@@ -156,6 +156,29 @@ class SonarMeasuresTests(unittest.TestCase):
         self.assertEqual(self.request_count, 6)
         self.assertIn('gate_failed=true\n', output)
 
+    def test_incomplete_retries_preserve_observed_breaches(self):
+        partial = json.dumps({'component': {'measures': [
+            {'metric': 'new_violations', 'period': {'value': '3'}}]}}).encode()
+        for mode in ('warn', 'enforce'):
+            for later in (b'{"component":{"measures":[]}}', urllib.error.URLError('timeout')):
+                with self.subTest(mode=mode, later=later):
+                    code, output, summary = self.run_gate(mode=mode, responses=[partial] + [later] * 5)
+                    self.assertEqual(code, 0 if mode == 'warn' else 1)
+                    self.assertEqual(self.request_count, 6)
+                    self.assertIn('gate_failed=true\n', output)
+                    self.assertIn('breached_count=1\n', output)
+                    self.assertIn('new_violations=3 (threshold 0)', summary)
+                    self.assertNotIn('verdict=passed\n', output)
+
+    def test_complete_response_supersedes_earlier_partial_breach(self):
+        partial = json.dumps({'component': {'measures': [
+            {'metric': 'new_violations', 'period': {'value': '3'}}]}}).encode()
+        complete = json.dumps({'component': {'measures': zero_measures()}}).encode()
+        code, output, _ = self.run_gate(responses=[partial, complete])
+        self.assertEqual(code, 0)
+        self.assertIn('verdict=passed\n', output)
+        self.assertIn('gate_failed=false\n', output)
+
     def test_partial_reports_cannot_accumulate_into_a_pass(self):
         partials = [json.dumps({'component': {'measures': [measure]}}).encode()
                     for measure in zero_measures()]
