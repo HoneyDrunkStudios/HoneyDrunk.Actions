@@ -81,7 +81,7 @@ on:
         default: true
       
       fail-on-high-severity:
-        description: 'Fail the workflow if high or critical issues found'
+        description: 'Also fail on high severity; critical and dependency findings always block'
         required: false
         type: boolean
         default: false
@@ -124,79 +124,59 @@ jobs:
           ref: ${{ inputs.actions-ref }}
       
       - name: Setup .NET SDK
+        id: setup
         uses: ./.github/actions-repo/.github/actions/dotnet/setup
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
       
       - name: Restore dependencies
+        id: restore
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/dotnet/restore
         with:
           working-directory: ${{ inputs.working-directory }}
           project-path: ${{ inputs.project-path }}
-      
+
       - name: Run comprehensive vulnerability scan
+        id: vulnerability-scan
+        if: always() && steps.setup.outcome == 'success'
+        continue-on-error: true
         uses: ./.github/actions-repo/.github/actions/security/vulnerability-scan
         with:
           working-directory: ${{ inputs.working-directory }}
           project-path: ${{ inputs.project-path }}
-          fail-on-severity: ${{ inputs.fail-on-high-severity && 'high' || 'critical' }}
-      
-      - name: Generate detailed vulnerability report
-        id: vuln-report
+          # Preserve the effective NU1901–NU1904 warnings-as-errors policy.
+          # Findings are collected first and enforced by the final gate.
+          fail-on-severity: low
+
+      - name: Record dependency execution status
+        if: always()
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
+        env:
+          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+          SCAN_OUTCOME: ${{ steps.vulnerability-scan.outcome }}
+          REPORT_DIRECTORY: ${{ inputs.working-directory }}/security-reports
         run: |
-          mkdir -p ./security-reports
-          SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          mkdir -p "$REPORT_DIRECTORY"
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['REPORT_DIRECTORY']) / 'execution.json'
+          path.write_text(json.dumps({
+              'restore': os.environ['RESTORE_OUTCOME'],
+              'scan': os.environ['SCAN_OUTCOME'],
+          }) + '\n', encoding='utf-8')
+          PYTHON
 
-          PROJECT="${{ inputs.project-path }}"
-          if [ -z "$PROJECT" ]; then
-            PROJECT=$(find . -maxdepth 2 \( -name '*.slnx' -o -name '*.sln' \) | head -1)
-          fi
-
-          echo "Scanning $PROJECT for vulnerable packages (including transitive)..."
-
-          # Capture both vulnerable and deprecated packages
-          VULN_OUTPUT=$(dotnet list "$PROJECT" package --vulnerable --include-transitive --format json 2>/dev/null || echo '{}')
-          DEPRECATED_OUTPUT=$(dotnet list "$PROJECT" package --deprecated --include-transitive --format json 2>/dev/null || echo '{}')
-
-          # Write raw outputs
-          echo "$VULN_OUTPUT" > ./security-reports/vulnerable-packages.json
-          echo "$DEPRECATED_OUTPUT" > ./security-reports/deprecated-packages.json
-
-          # Count findings
-          VULN_COUNT=$(echo "$VULN_OUTPUT" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          total = 0
-          for project in data.get('projects', []):
-              for framework in project.get('frameworks', []):
-                  total += len(framework.get('topLevelPackages', []))
-                  total += len(framework.get('transitivePackages', []))
-          print(total)
-          " 2>/dev/null || echo "0")
-
-          echo "vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
-          echo "Found $VULN_COUNT vulnerable packages"
-
-          # Build consolidated report
-          cat > ./security-reports/vulnerabilities.json <<EOF
-          {
-            "scan_date": "$SCAN_DATE",
-            "repository": "${{ github.repository }}",
-            "vulnerability_count": $VULN_COUNT,
-            "vulnerable_packages": $VULN_OUTPUT,
-            "deprecated_packages": $DEPRECATED_OUTPUT
-          }
-          EOF
-      
       - name: Upload vulnerability report
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: vulnerability-report
           path: ${{ inputs.working-directory }}/security-reports/**/*
+          if-no-files-found: error
           retention-days: 90
-  
+
   sast-analysis:
     name: Deep SAST Analysis
     if: ${{ inputs.enable-sast }}
@@ -242,12 +222,19 @@ jobs:
       - name: Build for CodeQL analysis
         shell: bash
         working-directory: ${{ inputs.working-directory }}
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
         run: |
-          PROJECT="${{ inputs.project-path }}"
+          mkdir -p security-reports
+          PROJECT="$PROJECT_PATH"
           if [ -z "$PROJECT" ]; then
             PROJECT=$(find . -maxdepth 2 \( -name '*.slnx' -o -name '*.sln' \) | head -1)
           fi
-          dotnet build "$PROJECT" --no-incremental
+          # Keep audit diagnostics visible while allowing CodeQL extraction.
+          # The final gate blocks every dependency vulnerability severity.
+          dotnet build "$PROJECT" --no-incremental \
+            '-p:WarningsNotAsErrors=NU1901%3BNU1902%3BNU1903%3BNU1904' \
+            2>&1 | tee security-reports/codeql-build.log
 
       - name: Check workflow-run metadata permission
         id: workflow-run-permission
@@ -337,7 +324,8 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: sast-report
-          path: ${{ inputs.working-directory }}/security-reports/**/*.sarif
+          path: ${{ inputs.working-directory }}/security-reports/**/*
+          if-no-files-found: error
           retention-days: 90
   
   secret-scan:
@@ -404,30 +392,7 @@ jobs:
             --report-path ./security-reports/secrets-scan.sarif \
             --redact \
             --exit-code 0 \
-            --log-level info
-
-          # Gitleaks does not always emit a SARIF file when findings are zero;
-          # write a valid empty-results SARIF so downstream upload/evaluate steps
-          # have a consistent input. Only reached if gitleaks succeeded (set -e above).
-          if [ ! -f ./security-reports/secrets-scan.sarif ]; then
-            cat > ./security-reports/secrets-scan.sarif <<'SARIF'
-          {
-            "version": "2.1.0",
-            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            "runs": [
-              {
-                "tool": {
-                  "driver": {
-                    "name": "gitleaks",
-                    "informationUri": "https://github.com/gitleaks/gitleaks"
-                  }
-                },
-                "results": []
-              }
-            ]
-          }
-          SARIF
-          fi
+            --log-level info 2>&1 | tee ./security-reports/gitleaks.log
 
       - name: Upload secrets SARIF to GitHub Security
         if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
@@ -437,38 +402,19 @@ jobs:
           sarif_file: ./security-reports/secrets-scan.sarif
           category: nightly-secrets
 
-      - name: Evaluate findings
-        if: always()
-        id: findings
-        shell: bash
-        run: |
-          if [ -f "./security-reports/secrets-scan.sarif" ]; then
-            FINDING_COUNT=$(python3 -c "
-          import json
-          with open('./security-reports/secrets-scan.sarif') as f:
-              sarif = json.load(f)
-          total = sum(len(r.get('results', [])) for r in sarif.get('runs', []))
-          print(total)
-          " 2>/dev/null || echo "0")
-          else
-            FINDING_COUNT=0
-          fi
-          echo "secret_count=$FINDING_COUNT" >> $GITHUB_OUTPUT
-          echo "Found $FINDING_COUNT secrets in full history scan"
-          if [ "$FINDING_COUNT" -gt 0 ]; then
-            echo "::warning::Found $FINDING_COUNT potential secrets in repository history"
-          fi
-
       - name: Upload secret scan report
-        if: always() && hashFiles('./security-reports/secrets-scan.sarif') != ''
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: secret-scan-report
-          path: ./security-reports/secrets-scan.sarif
+          path: ./security-reports/**/*
+          if-no-files-found: error
           retention-days: 90
   
   iac-security-scan:
     name: Infrastructure as Code Security Scan
+    outputs:
+      has-iac: ${{ steps.detect.outputs.has_iac }}
     if: ${{ inputs.enable-iac-scan }}
     runs-on: ${{ inputs.runs-on }}
     
@@ -480,35 +426,29 @@ jobs:
         id: detect
         shell: bash
         run: |
-          echo "Detecting Infrastructure as Code files..."
-          
-          # Look for common IaC patterns
-          IAC_COUNT=0
-          if find . \( -name "*.tf" -o -name "*.tfvars" \) | grep -q .; then
-            echo "Terraform files detected"
-            IAC_COUNT=$((IAC_COUNT + 1))
-          fi
-          if find . \( -name "*.bicep" -o -name "*.json" \) | xargs grep -l "Microsoft.Resources" 2>/dev/null | grep -q .; then
-            echo "Azure Bicep/ARM templates detected"
-            IAC_COUNT=$((IAC_COUNT + 1))
-          fi
-          if find . \( -name "docker-compose*.yml" -o -name "Dockerfile*" \) | grep -q .; then
-            echo "Docker files detected"
-            IAC_COUNT=$((IAC_COUNT + 1))
-          fi
-          if find . \( -name "*.yaml" -o -name "*.yml" \) | xargs grep -l "apiVersion:" 2>/dev/null | grep -q .; then
-            echo "Kubernetes manifests detected"
-            IAC_COUNT=$((IAC_COUNT + 1))
-          fi
-          
-          if [ $IAC_COUNT -gt 0 ]; then
-            echo "has_iac=true" >> $GITHUB_OUTPUT
-            echo "Found IaC files, will proceed with scan"
-          else
-            echo "has_iac=false" >> $GITHUB_OUTPUT
-            echo "No IaC files detected, skipping scan"
-          fi
-      
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+
+          def fail_detection(error):
+              raise error
+
+          found = False
+          for root, directories, files in os.walk('.', onerror=fail_detection):
+              directories[:] = [name for name in directories if name != '.git']
+              for name in files:
+                  path = Path(root) / name
+                  if path.suffix in {'.tf', '.tfvars', '.bicep'} or name.startswith(('Dockerfile', 'docker-compose')):
+                      found = True
+                  elif path.suffix in {'.json', '.yaml', '.yml'}:
+                      content = path.read_text(encoding='utf-8')
+                      if 'Microsoft.Resources' in content or (path.suffix != '.json' and 'apiVersion:' in content):
+                          found = True
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'has_iac={str(found).lower()}\n')
+          print('IaC targets detected' if found else 'No IaC targets detected')
+          PYTHON
+
       - name: Run IaC security scan
         if: steps.detect.outputs.has_iac == 'true'
         id: iac-scan
@@ -524,25 +464,7 @@ jobs:
             --format sarif \
             --output /workspace/security-reports/iac-trivy.sarif \
             --severity MEDIUM,HIGH,CRITICAL \
-            --exit-code 0
-
-          # Count findings
-          FINDING_COUNT=0
-          if [ -f "./security-reports/iac-trivy.sarif" ]; then
-            FINDING_COUNT=$(python3 -c "
-          import json
-          with open('./security-reports/iac-trivy.sarif') as f:
-              sarif = json.load(f)
-          total = sum(len(r.get('results', [])) for r in sarif.get('runs', []))
-          print(total)
-          " 2>/dev/null || echo "0")
-          fi
-
-          echo "iac_finding_count=$FINDING_COUNT" >> $GITHUB_OUTPUT
-          echo "Found $FINDING_COUNT IaC misconfigurations"
-          if [ "$FINDING_COUNT" -gt 0 ]; then
-            echo "::warning::Found $FINDING_COUNT IaC misconfigurations"
-          fi
+            --exit-code 0 2>&1 | tee ./security-reports/trivy.log
 
       - name: Upload IaC SARIF to GitHub Security
         if: steps.detect.outputs.has_iac == 'true'
@@ -553,11 +475,12 @@ jobs:
           category: nightly-iac
       
       - name: Upload IaC scan report
-        if: steps.detect.outputs.has_iac == 'true'
+        if: always() && steps.detect.outputs.has_iac == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: iac-security-report
-          path: ./security-reports/iac-trivy.sarif
+          path: ./security-reports/**/*
+          if-no-files-found: error
           retention-days: 90
   
   consolidate-and-report:
@@ -570,163 +493,54 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
       
+      - name: Checkout HoneyDrunk.Actions
+        uses: actions/checkout@v5
+        with:
+          repository: HoneyDrunkStudios/HoneyDrunk.Actions
+          path: .github/actions-repo
+          ref: ${{ inputs.actions-ref }}
+
       - name: Download all security reports
+        if: always()
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           path: ./all-security-reports
-      
+
       - name: Consolidate security findings
+        if: always()
         id: consolidate
         shell: bash
         env:
-          # Use github.token (not the PAT) for the API query — the workflow's
-          # caller-granted security-events: write scope is used here, whereas
-          # the PAT is scoped for issue creation in the next step.
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          TOTAL_ISSUES=0
+          DEPENDENCY_RESULT: ${{ needs.dependency-scan.result }}
+          SAST_RESULT: ${{ needs.sast-analysis.result }}
+          SECRET_RESULT: ${{ needs.secret-scan.result }}
+          IAC_RESULT: ${{ needs.iac-security-scan.result }}
+          ENABLE_SAST: ${{ inputs.enable-sast }}
+          ENABLE_SECRET_SCAN: ${{ inputs.enable-secret-scan }}
+          ENABLE_IAC_SCAN: ${{ inputs.enable-iac-scan }}
+          IAC_HAS_TARGETS: ${{ needs.iac-security-scan.outputs.has-iac }}
+          FAIL_ON_HIGH_SEVERITY: ${{ inputs.fail-on-high-severity }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+        run: python3 .github/actions-repo/.github/scripts/security-report.py consolidate
 
-          # Count vulnerability findings (from `dotnet list --vulnerable`, not uploaded
-          # to Code Scanning — so raw count is the right source of truth here).
-          VULN_COUNT=0
-          if [ -f "./all-security-reports/vulnerability-report/vulnerabilities.json" ]; then
-            VULN_COUNT=$(python3 -c "
-          import json
-          with open('./all-security-reports/vulnerability-report/vulnerabilities.json') as f:
-              d = json.load(f)
-          print(d.get('vulnerability_count', 0))
-          " 2>/dev/null || echo "0")
-          fi
-
-          # Count SAST/Secret/IaC findings from the GitHub Code Scanning API with
-          # state=open. This honors CodeQL query-filter exclusions (from a repo's
-          # .github/codeql/codeql-config.yml) AND user dismissals in the Security
-          # tab, so the summary reports what still needs attention rather than raw
-          # scanner output. Upload-sarif waits for processing by default, so the
-          # API reflects the just-uploaded state by the time we query here.
-          API_BASE="/repos/${{ github.repository }}/code-scanning/alerts?state=open&per_page=100"
-
-          count_open_alerts() {
-            local tool="$1"
-            local raw count
-            # --paginate so repos with >100 open alerts per tool aren't undercounted.
-            if ! raw=$(gh api --paginate "${API_BASE}&tool_name=${tool}" 2>&1); then
-              echo "::warning::Failed to query Code Scanning API for ${tool} alerts: $raw" >&2
-              echo "0"
-              return
-            fi
-            # gh outputs one JSON array per page; `jq -s 'map(.[]) | length'` slurps
-            # all pages, flattens into a single array, and counts.
-            if ! count=$(printf '%s' "$raw" | jq -s 'map(.[]) | length' 2>&1); then
-              echo "::warning::Failed to parse ${tool} alerts JSON: $count" >&2
-              echo "0"
-              return
-            fi
-            echo "$count"
-          }
-
-          SAST_COUNT=$(count_open_alerts CodeQL)
-          SECRET_COUNT=$(count_open_alerts gitleaks)
-          IAC_COUNT=$(count_open_alerts Trivy)
-
-          TOTAL_ISSUES=$((VULN_COUNT + SAST_COUNT + SECRET_COUNT + IAC_COUNT))
-
-          cat > ./consolidated-security-report.json <<EOF
-          {
-            "scan_date": "$SCAN_DATE",
-            "repository": "${{ github.repository }}",
-            "summary": {
-              "total_issues": $TOTAL_ISSUES,
-              "vulnerabilities": $VULN_COUNT,
-              "sast_findings": $SAST_COUNT,
-              "secrets_detected": $SECRET_COUNT,
-              "iac_misconfigurations": $IAC_COUNT
-            },
-            "job_results": {
-              "dependency_scan": "${{ needs.dependency-scan.result }}",
-              "sast_analysis": "${{ needs.sast-analysis.result }}",
-              "secret_scan": "${{ needs.secret-scan.result }}",
-              "iac_security_scan": "${{ needs.iac-security-scan.result }}"
-            }
-          }
-          EOF
-
-          echo "total_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
-          echo "vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
-          echo "sast_count=$SAST_COUNT" >> $GITHUB_OUTPUT
-          echo "secret_count=$SECRET_COUNT" >> $GITHUB_OUTPUT
-          echo "iac_count=$IAC_COUNT" >> $GITHUB_OUTPUT
-      
-      - name: Generate summary
-        shell: bash
-        run: |
-          TOTAL="${{ steps.consolidate.outputs.total_issues }}"
-          VULN="${{ steps.consolidate.outputs.vuln_count }}"
-          SAST="${{ steps.consolidate.outputs.sast_count }}"
-          SECRETS="${{ steps.consolidate.outputs.secret_count }}"
-          IAC="${{ steps.consolidate.outputs.iac_count }}"
-
-          {
-            echo "# 🔒 Nightly Security Scan Results"
-            echo ""
-            echo "**Repository:** \`${{ github.repository }}\`"
-            echo "**Scan Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            echo "**Total Issues:** $TOTAL"
-            echo ""
-            echo "## Scan Summary"
-            echo ""
-            echo "| Scanner | Status | Findings |"
-            echo "|---------|--------|----------|"
-            echo "| Dependency Scan | ${{ needs.dependency-scan.result }} | $VULN vulnerable packages |"
-            echo "| SAST (CodeQL) | ${{ needs.sast-analysis.result }} | $SAST findings |"
-            echo "| Secret Scan (gitleaks) | ${{ needs.secret-scan.result }} | $SECRETS secrets |"
-            echo "| IaC Scan (Trivy) | ${{ needs.iac-security-scan.result }} | $IAC misconfigurations |"
-            echo ""
-            if [ "$TOTAL" -gt 0 ]; then
-              echo "> ⚠️ **$TOTAL total issues found.** Download artifacts for detailed reports."
-            else
-              echo "> ✅ **No issues found.** All scans passed cleanly."
-            fi
-          } >> $GITHUB_STEP_SUMMARY
-      
       - name: Create GitHub issue for findings
-        if: ${{ inputs.create-issues && steps.consolidate.outputs.total_issues > 0 }}
+        if: ${{ inputs.create-issues && steps.consolidate.outputs.known_issues > 0 }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.github-token || github.token }}
         run: |
-          TOTAL="${{ steps.consolidate.outputs.total_issues }}"
-          VULN="${{ steps.consolidate.outputs.vuln_count }}"
-          SAST="${{ steps.consolidate.outputs.sast_count }}"
-          SECRETS="${{ steps.consolidate.outputs.secret_count }}"
-          IAC="${{ steps.consolidate.outputs.iac_count }}"
+          TOTAL="${{ steps.consolidate.outputs.known_issues }}"
           SCAN_DATE=$(date -u +"%Y-%m-%d")
-          TITLE="🔒 Nightly Security Scan - $SCAN_DATE - $TOTAL issues found"
+          TITLE="🔒 Nightly Security Scan - $SCAN_DATE - $TOTAL known findings"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          BODY="## Nightly Security Scan Results
+          BODY="$(cat security-summary.md)
 
-          **Date:** $SCAN_DATE
-          **Total Issues:** $TOTAL
           **Run:** $RUN_URL
 
-          ### Breakdown
-
-          | Scanner | Findings |
-          |---------|----------|
-          | Vulnerable Dependencies | $VULN |
-          | SAST (CodeQL) | $SAST |
-          | Secrets (gitleaks) | $SECRETS |
-          | IaC Misconfigurations (Trivy) | $IAC |
-
-          ### Next Steps
-          1. Download artifacts from the [workflow run]($RUN_URL) for detailed reports
-          2. Triage and prioritize findings
-          3. Address critical and high severity items first
-
-          ---
-          *This issue was created automatically by the nightly security scan.*"
+          Download this run's artifacts for complete findings and execution logs."
 
           # Check for existing open issue with the security label
           EXISTING=$(gh issue list --label "security,automated" --state open --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo "")
@@ -746,8 +560,17 @@ jobs:
           fi
       
       - name: Upload consolidated report
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: consolidated-security-report
-          path: ./consolidated-security-report.*
+          path: |
+            ./consolidated-security-report.*
+            ./security-summary.md
           retention-days: 90
+
+
+      - name: Enforce final security result
+        if: always()
+        shell: bash
+        run: python3 .github/actions-repo/.github/scripts/security-report.py gate

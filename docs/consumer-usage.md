@@ -1215,7 +1215,7 @@ jobs:
       enable-sast: true
       enable-iac-scan: true
       enable-secret-scan: true
-      fail-on-high-severity: false  # Don't fail, just report
+      fail-on-high-severity: false  # Critical scanner findings still fail; dependencies always block
       create-issues: true
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1232,6 +1232,14 @@ permissions:
 ### Permissions
 
 `nightly-security.yml` callers need `actions: read`, `contents: read`, `security-events: write`, and `issues: write`. `actions: read` lets CodeQL read workflow-run metadata while finalizing analysis; `security-events: write` uploads SARIF to GitHub Code Scanning when Code Security is enabled; `issues: write` lets the workflow maintain tracking issues. The reusable workflow does not grant caller permissions on its own, so callers should carry the full permission baseline. During rollout, callers missing `actions: read` get runtime CodeQL finalization degradation with a warning only when CodeQL has already exported SARIF; other missing baseline permissions remain caller defects and may still surface as failed or stale scheduled runs in grid-health. The filtered SAST SARIF upload is best-effort for repositories without Code Security; failed uploads emit a warning and job-summary entry, and the workflow still uploads the SARIF artifact report.
+
+### Completion and failure policy
+
+Independent dependency, SAST, secret and IaC jobs run separately. Reports and available logs are uploaded even after scanner/build failures; consolidation and the final gate always run. Enabled scans with failed, cancelled, skipped, missing or invalid evidence fail the final gate. Disabled scans are explicitly marked disabled, and IaC with a successful detection of no targets is marked not applicable.
+
+Dependency scanning checks every package project in the selected solution, including transitive packages. Every dependency vulnerability severity blocks the nightly gate, preserving the effective NU1901–NU1904 warnings-as-errors policy. CodeQL builds keep those audit warnings visible while allowing extraction; they do not waive the final dependency gate. Other build/tool failures remain failures. The standalone vulnerability action retains its configurable severity threshold.
+
+The consolidated counts come from validated reports produced by this run, including filtered CodeQL SARIF, rather than potentially stale repository-wide Code Scanning alerts. GitHub alert dismissals therefore do not change these current-run counts. Best-effort SARIF uploads may still be degraded as described above, but a valid local scan report is required. Critical scanner findings block by default; `fail-on-high-severity: true` also blocks high findings. Secret findings are treated as critical. Unknown counts are shown as unknown, never zero or clean.
 
 ### Node and Rust Audit Jobs
 
@@ -1756,3 +1764,4 @@ For questions, issues, or feature requests:
 ### Terraform directory providers
 
 The credential-free Terraform validator accepts the reviewed AzureRM, AzureAD, AzAPI, and Microsoft Graph provider sources. Every provider used by a root or its local child modules must have a default mock. Aliases, external modules, and provider overrides remain rejected. Each target receives only its required providers from the shared lock, with the original versions and checksums preserved. No live plan or backend authentication runs in this workflow.
+
