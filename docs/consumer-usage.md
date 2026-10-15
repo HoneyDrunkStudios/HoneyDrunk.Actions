@@ -242,6 +242,38 @@ project's GitHub binding and App access when that required check is absent.
 Keep inspecting the exact analyzed head's new issues and security hotspots,
 because a passing project gate does not imply zero findings.
 
+Set `collect-failure-findings: true` on the **scanner** caller to retain
+new-code diagnostics when its awaited quality gate fails after analysis completes.
+This opt-in is limited to same-repository PRs using `https://sonarcloud.io`.
+It runs the existing zero-threshold findings workflow in enforce mode as a nested
+job; keep the standalone success-only findings job for successful scans. The
+original scanner remains failed, including processing errors and timeouts, and
+must remain in the consumer's final required status check.
+
+The scanner explicitly configures `sonar.scanner.metadataFilePath` to a fresh
+runner-temporary path and removes any build/test-created file just before `end`.
+After a failed `end`, one bounded, nonredirecting CE API read verifies the task ID,
+project key, `SUCCESS`, analysis ID and submission/completion times within that
+scanner invocation. Missing, stale, malformed, pending or failed evidence never
+starts findings polling. It does not extend the scanner's 300-second wait.
+Metadata URLs are validated against the fixed Cloud host before credentials are
+used; raw metadata is neither uploaded nor passed to another job.
+
+The internal ordinary-job output is consumed inside the same reusable workflow;
+no public output from a failed reusable workflow is assumed. GitHub's
+[runner evaluates ordinary job outputs during finalization regardless of job result](https://github.com/actions/runner/blob/main/src/Runner.Worker/JobExtension.cs),
+and the nested relative workflow resolves from the same commit. No extra token
+or GitHub permission is needed. This is execution evidence within the existing
+trusted same-repository CI boundary, not attestation against malicious code with
+access to that runner and its existing secrets. PR metric polling still does not
+independently prove the metric response's head SHA; retain the exact-head Sonar
+check and normal concurrency controls.
+
+The metadata override is a documented
+[scanner parameter](https://docs.sonarsource.com/sonarqube-server/9.9/analyzing-source-code/analysis-parameters).
+The current [.NET scanner forwards user settings to its engine](https://github.com/SonarSource/sonar-scanner-msbuild/blob/2f124beee20449b86b45e4d2232487381644bcd2/src/SonarScanner.MSBuild.Shim/ScannerEngineInput.cs);
+this contract does not guess a working-directory-relative `report-task.txt` path.
+
 For SQL Server repositories, set `sonar-tsql: true` on the
 `job-sonarcloud.yml` caller. Sonar otherwise assigns `.sql` files to Oracle
 PL/SQL. This opt-in assigns `.sql`/`.tsql` to T-SQL and retains

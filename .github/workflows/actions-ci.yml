@@ -128,6 +128,9 @@ jobs:
       - name: Regression test Sonar SQL dialect arguments
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_sonar_sql.py -v'
 
+      - name: Regression test Sonar completion evidence
+        run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_sonar_completion.py -v'
+
       - name: Regression test Sonar PR measures
         run: '"$RUNNER_TEMP/node-workflow-tests/bin/python" -m unittest discover -s tests -p test_sonar_measures.py -v'
 
