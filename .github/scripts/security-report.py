@@ -114,7 +114,12 @@ def referenced_component(tool, reference):
         component = matches[0]
     else:
         component = tool['driver']
+    require(isinstance(component.get('name'), str) and component['name'].strip(),
+            'Missing or invalid SARIF tool component name')
     validate_guid(component)
+    if 'guid' in component:
+        require(sum(same_identity(item.get('guid'), component['guid'], 'guid')
+                    for item in [tool['driver'], *extensions]) == 1, 'Ambiguous SARIF tool component GUID')
     for key in ('name', 'guid'):
         if key in reference:
             require(isinstance(reference[key], str) and bool(reference[key]) and
@@ -159,6 +164,9 @@ def referenced_rule(tool, result):
     if rule is None:
         return {}
     validate_guid(rule)
+    if 'guid' in rule:
+        require(sum(same_identity(item.get('guid'), rule['guid'], 'guid') for item in rules) == 1,
+                'Ambiguous SARIF rule GUID')
     require(isinstance(rule.get('id'), str), 'Missing or invalid SARIF descriptor identity')
     if 'id' in reference:
         descriptor_id = rule.get('id')
