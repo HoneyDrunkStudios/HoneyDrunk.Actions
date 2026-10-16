@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -82,9 +83,18 @@ def severity_for(result, rule, scanner):
     return {'error': 'high', 'warning': 'moderate', 'note': 'low', 'none': 'low'}.get(level, 'unknown')
 
 
+def validate_guid(source):
+    if 'guid' in source:
+        guid = source['guid']
+        require(isinstance(guid, str) and re.fullmatch(
+            r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}', guid),
+            'Invalid SARIF GUID')
+
+
 def referenced_component(tool, reference):
     """Resolve SARIF 2.1.0 section 3.54 without crossing component namespaces."""
     require(isinstance(reference, dict), 'Invalid SARIF tool component reference')
+    validate_guid(reference)
     extensions = tool.get('extensions', [])
     require(isinstance(extensions, list) and all(isinstance(item, dict) for item in extensions),
             'Invalid SARIF tool extensions')
@@ -98,6 +108,7 @@ def referenced_component(tool, reference):
         component = matches[0]
     else:
         component = tool['driver']
+    validate_guid(component)
     for key in ('name', 'guid'):
         if key in reference:
             require(isinstance(reference[key], str) and bool(reference[key]) and
@@ -109,6 +120,7 @@ def referenced_rule(tool, result):
     """Resolve nested and legacy rule references, rejecting conflicting metadata."""
     reference = result.get('rule', {})
     require(isinstance(reference, dict), 'Invalid SARIF rule reference')
+    validate_guid(reference)
     reference = reference.copy()
     for source, key in ((reference, 'index'), (result, 'ruleIndex')):
         if key in source:
@@ -140,6 +152,7 @@ def referenced_rule(tool, result):
         rule = matches[0] if matches else None
     if rule is None:
         return {}
+    validate_guid(rule)
     require(isinstance(rule.get('id'), str), 'Missing or invalid SARIF descriptor identity')
     if 'id' in reference:
         descriptor_id = rule.get('id')

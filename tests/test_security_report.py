@@ -112,14 +112,14 @@ class SecurityReportTests(unittest.TestCase):
                     reporter.check_gate(report)
 
     def test_extension_rule_resolution_forms_and_component_isolation(self):
-        for reference in ({'index': 0}, {'name': 'extension', 'index': 0}, {'guid': 'component-guid'}):
-            for rule_reference in ({'id': 'R1'}, {'index': 0}, {'guid': 'rule-guid'}):
+        for reference in ({'index': 0}, {'name': 'extension', 'index': 0}, {'guid': '11111111-1111-4111-8111-111111111111'}):
+            for rule_reference in ({'id': 'R1'}, {'index': 0}, {'guid': '22222222-2222-4222-8222-222222222222'}):
                 with self.subTest(component=reference, rule=rule_reference):
                     data = copy.deepcopy(self.sarif)
                     tool = data['runs'][0]['tool']
                     tool['driver']['rules'] = [{'id': 'R1', 'defaultConfiguration': {'level': 'note'}}]
-                    tool['extensions'] = [{'name': 'extension', 'guid': 'component-guid', 'rules': [
-                        {'id': 'R1', 'guid': 'rule-guid', 'properties': {'security-severity': '9.1'}}]}]
+                    tool['extensions'] = [{'name': 'extension', 'guid': '11111111-1111-4111-8111-111111111111', 'rules': [
+                        {'id': 'R1', 'guid': '22222222-2222-4222-8222-222222222222', 'properties': {'security-severity': '9.1'}}]}]
                     data['runs'][0]['results'] = [{'message': {'text': 'Finding'},
                         'rule': dict(rule_reference, toolComponent=reference)}]
                     self.write('sast-report/results.sarif', data)
@@ -135,12 +135,12 @@ class SecurityReportTests(unittest.TestCase):
                 self.assertEqual(reporter.referenced_rule(tool, result), tool['driver']['rules'][0])
 
     def test_hierarchical_rule_ids_preserve_index_and_guid_resolution(self):
-        rule = {'id': 'abc/def', 'guid': 'rule-guid', 'properties': {'security-severity': '8'}}
+        rule = {'id': 'abc/def', 'guid': '22222222-2222-4222-8222-222222222222', 'properties': {'security-severity': '8'}}
         tool = {'driver': {'name': 'scanner', 'rules': [rule]}}
         for result in ({'ruleId': 'abc/def/ghi', 'ruleIndex': 0},
                        {'ruleId': 'abc/def/', 'ruleIndex': 0},
                        {'rule': {'id': 'abc/def/ghi', 'index': 0}},
-                       {'rule': {'id': 'abc/def/ghi', 'guid': 'rule-guid'}}):
+                       {'rule': {'id': 'abc/def/ghi', 'guid': '22222222-2222-4222-8222-222222222222'}}):
             with self.subTest(result=result):
                 self.assertEqual(reporter.referenced_rule(tool, result), rule)
         for rule_id in ('abc/defg', 'abc/def/ghi/jkl'):
@@ -187,9 +187,36 @@ class SecurityReportTests(unittest.TestCase):
             with self.subTest(extensions=extensions), self.assertRaises(ValueError):
                 reporter.referenced_rule(dict(tool, extensions=extensions),
                                          {'rule': {'index': 0, 'toolComponent': {'index': 0}}})
-        tool['extensions'] = [{'guid': 'duplicate'}, {'guid': 'duplicate'}]
+        tool['extensions'] = [{'guid': '33333333-3333-4333-8333-333333333333'}, {'guid': '33333333-3333-4333-8333-333333333333'}]
         with self.assertRaises(ValueError):
-            reporter.referenced_rule(tool, {'rule': {'toolComponent': {'guid': 'duplicate'}}})
+            reporter.referenced_rule(tool, {'rule': {'toolComponent': {'guid': '33333333-3333-4333-8333-333333333333'}}})
+
+    def test_malformed_guids_cannot_resolve_low_severity_metadata(self):
+        self.env['FAIL_ON_HIGH_SEVERITY'] = 'false'
+        invalid_guids = ('not-a-uuid', '', '22222222222242228222222222222222',
+                         '22222222-2222-0222-8222-222222222222',
+                         '22222222-2222-4222-0222-222222222222', None, 42, [])
+        for invalid in invalid_guids:
+            for target in ('rule', 'component'):
+                for reference_has_guid in (True, False):
+                    with self.subTest(guid=invalid, target=target, reference=reference_has_guid):
+                        data = copy.deepcopy(self.sarif)
+                        rule = {'id': 'R1', 'properties': {'security-severity': '1.0'}}
+                        component = {'name': 'extension', 'rules': [rule]}
+                        reference = {'id': 'R1', 'index': 0, 'toolComponent': {'index': 0}}
+                        definition = rule if target == 'rule' else component
+                        identity = reference if target == 'rule' else reference['toolComponent']
+                        definition['guid'] = invalid
+                        if reference_has_guid:
+                            identity['guid'] = invalid
+                            del identity['index']
+                        data['runs'][0]['tool']['extensions'] = [component]
+                        data['runs'][0]['results'] = [{'message': {'text': 'Finding'}, 'rule': reference}]
+                        self.write('sast-report/results.sarif', data)
+                        report = self.report()
+                        self.assertTrue(report['blocked'])
+                        self.assertEqual(report['scans']['sast']['status'], 'error')
+                        self.assertIsNone(report['summary']['total_issues'])
 
     def test_extension_unknown_and_malformed_severity_remain_blocking(self):
         self.env['FAIL_ON_HIGH_SEVERITY'] = 'false'
