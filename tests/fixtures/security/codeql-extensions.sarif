@@ -1,0 +1,851 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "rules": []
+        },
+        "extensions": [
+          {
+            "name": "codeql/csharp-queries",
+            "rules": [
+              {
+                "id": "cs/web/broad-cookie-domain"
+              },
+              {
+                "id": "cs/web/xss"
+              },
+              {
+                "id": "cs/path-injection"
+              },
+              {
+                "id": "cs/zipslip"
+              },
+              {
+                "id": "cs/session-reuse"
+              },
+              {
+                "id": "cs/web/disabled-header-checking"
+              },
+              {
+                "id": "cs/web/debug-binary"
+              },
+              {
+                "id": "cs/assembly-path-injection"
+              },
+              {
+                "id": "cs/unvalidated-local-pointer-arithmetic"
+              },
+              {
+                "id": "cs/information-exposure-through-exception"
+              },
+              {
+                "id": "cs/exposure-of-sensitive-information"
+              },
+              {
+                "id": "cs/xml/xpath-injection"
+              },
+              {
+                "id": "cs/code-injection"
+              },
+              {
+                "id": "cs/web/directory-browse-enabled"
+              },
+              {
+                "id": "cs/redos"
+              },
+              {
+                "id": "cs/regex-injection"
+              },
+              {
+                "id": "cs/ecb-encryption"
+              },
+              {
+                "id": "cs/web/unvalidated-url-redirection"
+              },
+              {
+                "id": "cs/xml/insecure-dtd-handling"
+              },
+              {
+                "id": "cs/web/broad-cookie-path"
+              },
+              {
+                "id": "cs/insufficient-key-size"
+              },
+              {
+                "id": "cs/web/missing-token-validation"
+              },
+              {
+                "id": "cs/insecure-randomness"
+              },
+              {
+                "id": "cs/cleartext-storage-of-sensitive-information"
+              },
+              {
+                "id": "cs/web/missing-global-error-handler"
+              },
+              {
+                "id": "cs/web/persistent-cookie"
+              },
+              {
+                "id": "cs/web/cookie-httponly-not-set"
+              },
+              {
+                "id": "cs/unsafe-deserialization-untrusted-input"
+              },
+              {
+                "id": "cs/deserialized-delegate"
+              },
+              {
+                "id": "cs/sql-injection"
+              },
+              {
+                "id": "cs/uncontrolled-format-string"
+              },
+              {
+                "id": "cs/web/request-validation-disabled"
+              },
+              {
+                "id": "cs/command-line-injection"
+              },
+              {
+                "id": "cs/log-forging"
+              },
+              {
+                "id": "cs/xml-injection"
+              },
+              {
+                "id": "cs/web/missing-x-frame-options"
+              },
+              {
+                "id": "cs/resource-injection"
+              },
+              {
+                "id": "cs/user-controlled-bypass"
+              },
+              {
+                "id": "cs/sensitive-data-transmission"
+              },
+              {
+                "id": "cs/ldap-injection"
+              },
+              {
+                "id": "cs/xml/missing-validation"
+              },
+              {
+                "id": "cs/weak-encryption"
+              },
+              {
+                "id": "cs/inadequate-rsa-padding"
+              },
+              {
+                "id": "cs/web/requiressl-not-set"
+              },
+              {
+                "id": "cs/web/cookie-secure-not-set"
+              },
+              {
+                "id": "cs/web/file-upload"
+              },
+              {
+                "id": "cs/web/insecure-direct-object-reference"
+              },
+              {
+                "id": "cs/insecure-sql-connection",
+                "defaultConfiguration": {
+                  "enabled": true,
+                  "level": "error"
+                },
+                "properties": {
+                  "tags": [
+                    "security",
+                    "external/cwe/cwe-327"
+                  ],
+                  "description": "Using an SQL Server connection without enforcing encryption is a security vulnerability.",
+                  "id": "cs/insecure-sql-connection",
+                  "kind": "path-problem",
+                  "name": "Insecure SQL connection",
+                  "precision": "medium",
+                  "problem.severity": "error",
+                  "security-severity": "7.5"
+                }
+              },
+              {
+                "id": "cs/web/missing-function-level-access-control"
+              },
+              {
+                "id": "cs/serialization-check-bypass"
+              },
+              {
+                "id": "cs/web/ambiguous-server-variable"
+              },
+              {
+                "id": "cs/web/ambiguous-client-variable"
+              },
+              {
+                "id": "cs/thread-unsafe-icryptotransform-captured-in-lambda"
+              },
+              {
+                "id": "cs/thread-unsafe-icryptotransform-field-in-class"
+              },
+              {
+                "id": "cs/empty-password-in-configuration"
+              },
+              {
+                "id": "cs/summary/lines-of-code"
+              },
+              {
+                "id": "cs/telemetry/unsupported-external-api"
+              },
+              {
+                "id": "cs/telemetry/supported-external-api"
+              },
+              {
+                "id": "cs/telemetry/supported-external-api-sources"
+              },
+              {
+                "id": "cs/telemetry/extraction-information"
+              },
+              {
+                "id": "cs/telemetry/external-libs"
+              },
+              {
+                "id": "cs/telemetry/supported-external-api-taint"
+              },
+              {
+                "id": "cs/telemetry/supported-external-api-sinks"
+              },
+              {
+                "id": "cs/string-concatenation-in-loop"
+              },
+              {
+                "id": "cs/inefficient-containskey"
+              },
+              {
+                "id": "cs/stringbuilder-creation-in-loop"
+              },
+              {
+                "id": "cs/gethashcode-is-not-defined"
+              },
+              {
+                "id": "cs/equals-on-arrays"
+              },
+              {
+                "id": "cs/reference-equality-on-valuetypes"
+              },
+              {
+                "id": "cs/unsafe-year-construction"
+              },
+              {
+                "id": "cs/invalid-dynamic-call"
+              },
+              {
+                "id": "cs/recursive-equals-call"
+              },
+              {
+                "id": "cs/empty-block"
+              },
+              {
+                "id": "cs/empty-lock-statement"
+              },
+              {
+                "id": "cs/misleading-indentation"
+              },
+              {
+                "id": "cs/empty-collection"
+              },
+              {
+                "id": "cs/test-for-negative-container-size"
+              },
+              {
+                "id": "cs/unused-collection"
+              },
+              {
+                "id": "cs/index-out-of-bounds"
+              },
+              {
+                "id": "cs/reference-equality-with-object"
+              },
+              {
+                "id": "cs/mishandling-japanese-era"
+              },
+              {
+                "id": "cs/equals-uses-as"
+              },
+              {
+                "id": "cs/stringbuilder-initialized-with-character"
+              },
+              {
+                "id": "cs/non-short-circuit"
+              },
+              {
+                "id": "cs/equality-on-floats"
+              },
+              {
+                "id": "cs/static-field-written-by-instance"
+              },
+              {
+                "id": "cs/nested-loops-with-same-variable"
+              },
+              {
+                "id": "cs/impossible-array-cast"
+              },
+              {
+                "id": "cs/loss-of-precision"
+              },
+              {
+                "id": "cs/recursive-operator-equals-call"
+              },
+              {
+                "id": "cs/unchecked-cast-in-equals"
+              },
+              {
+                "id": "cs/inconsistent-compareto-and-equals"
+              },
+              {
+                "id": "cs/equals-uses-is"
+              },
+              {
+                "id": "cs/self-assignment"
+              },
+              {
+                "id": "cs/equals-on-unrelated-types"
+              },
+              {
+                "id": "cs/dereferenced-value-is-always-null"
+              },
+              {
+                "id": "cs/comparison-of-identical-expressions"
+              },
+              {
+                "id": "cs/dereferenced-value-may-be-null"
+              },
+              {
+                "id": "cs/unsafe-sync-on-field"
+              },
+              {
+                "id": "cs/inconsistent-lock-sequence"
+              },
+              {
+                "id": "cs/unsynchronized-getter"
+              },
+              {
+                "id": "cs/locked-wait"
+              },
+              {
+                "id": "cs/unsynchronized-static-access"
+              },
+              {
+                "id": "cs/unsafe-double-checked-lock"
+              },
+              {
+                "id": "cs/lock-this"
+              },
+              {
+                "id": "cs/complex-block"
+              },
+              {
+                "id": "cs/complex-condition",
+                "defaultConfiguration": {
+                  "enabled": true,
+                  "level": "note"
+                },
+                "properties": {
+                  "tags": [
+                    "maintainability",
+                    "readability",
+                    "testability"
+                  ],
+                  "description": "Boolean expressions should not be too deeply nested. Naming intermediate results as local variables will make the logic easier to read and understand.",
+                  "id": "cs/complex-condition",
+                  "kind": "problem",
+                  "name": "Complex condition",
+                  "precision": "high",
+                  "problem.severity": "recommendation"
+                }
+              },
+              {
+                "id": "cs/useless-assignment-to-local"
+              },
+              {
+                "id": "cs/call-to-gc"
+              },
+              {
+                "id": "cs/class-missing-equals"
+              },
+              {
+                "id": "cs/inconsistent-equals-and-gethashcode"
+              },
+              {
+                "id": "cs/wrong-equals-signature"
+              },
+              {
+                "id": "cs/wrong-compareto-signature"
+              },
+              {
+                "id": "cs/dispose-not-called-on-throw"
+              },
+              {
+                "id": "cs/class-implements-icloneable"
+              },
+              {
+                "id": "cs/call-to-obsolete-method"
+              },
+              {
+                "id": "cs/local-not-disposed",
+                "defaultConfiguration": {
+                  "enabled": true,
+                  "level": "warning"
+                },
+                "properties": {
+                  "tags": [
+                    "quality",
+                    "reliability",
+                    "correctness",
+                    "efficiency",
+                    "external/cwe/cwe-404",
+                    "external/cwe/cwe-459",
+                    "external/cwe/cwe-460"
+                  ],
+                  "description": "Methods that create objects of type 'IDisposable' should call 'Dispose' on those\n              objects, otherwise unmanaged resources may not be released.",
+                  "id": "cs/local-not-disposed",
+                  "kind": "problem",
+                  "name": "Missing Dispose call on local IDisposable",
+                  "precision": "high",
+                  "problem.severity": "warning"
+                }
+              },
+              {
+                "id": "cs/null-argument-to-equals"
+              },
+              {
+                "id": "cs/invalid-string-formatting"
+              },
+              {
+                "id": "cs/missed-readonly-modifier"
+              },
+              {
+                "id": "cs/useless-upcast"
+              },
+              {
+                "id": "cs/type-test-of-this"
+              },
+              {
+                "id": "cs/rethrown-exception-variable"
+              },
+              {
+                "id": "cs/simplifiable-boolean-expression"
+              },
+              {
+                "id": "cs/catch-of-all-exceptions",
+                "defaultConfiguration": {
+                  "enabled": true,
+                  "level": "note"
+                },
+                "properties": {
+                  "tags": [
+                    "quality",
+                    "reliability",
+                    "error-handling",
+                    "external/cwe/cwe-396"
+                  ],
+                  "description": "Catching all exceptions with a generic catch clause may be overly\n              broad, which can make errors harder to diagnose.",
+                  "id": "cs/catch-of-all-exceptions",
+                  "kind": "problem",
+                  "name": "Generic catch clause",
+                  "precision": "high",
+                  "problem.severity": "recommendation"
+                }
+              },
+              {
+                "id": "cs/chained-type-tests"
+              },
+              {
+                "id": "cs/unused-property-value"
+              },
+              {
+                "id": "cs/cast-of-this-to-type-parameter"
+              },
+              {
+                "id": "cs/useless-cast-to-self"
+              },
+              {
+                "id": "cs/coalesce-of-identical-expressions"
+              },
+              {
+                "id": "cs/useless-type-test"
+              },
+              {
+                "id": "cs/nested-if-statements"
+              },
+              {
+                "id": "cs/downcast-of-this"
+              },
+              {
+                "id": "cs/missed-ternary-operator"
+              },
+              {
+                "id": "cs/missed-using-statement"
+              },
+              {
+                "id": "cs/asp/response-write"
+              },
+              {
+                "id": "cs/linq/missed-cast"
+              },
+              {
+                "id": "cs/linq/missed-where",
+                "defaultConfiguration": {
+                  "enabled": true,
+                  "level": "note"
+                },
+                "properties": {
+                  "tags": [
+                    "quality",
+                    "maintainability",
+                    "readability",
+                    "language-features"
+                  ],
+                  "description": "The intent of a foreach loop that implicitly filters its target sequence can often be better expressed using LINQ's 'Where' method.",
+                  "id": "cs/linq/missed-where",
+                  "kind": "problem",
+                  "name": "Missed opportunity to use Where",
+                  "precision": "high",
+                  "problem.severity": "recommendation"
+                }
+              },
+              {
+                "id": "cs/linq/inconsistent-enumeration"
+              },
+              {
+                "id": "cs/linq/useless-select"
+              },
+              {
+                "id": "cs/linq/missed-all"
+              },
+              {
+                "id": "cs/linq/missed-select"
+              },
+              {
+                "id": "cs/linq/missed-oftype"
+              },
+              {
+                "id": "cs/xmldoc/missing-summary"
+              },
+              {
+                "id": "cs/useless-gethashcode-call"
+              },
+              {
+                "id": "cs/unused-label"
+              },
+              {
+                "id": "cs/useless-tostring-call"
+              },
+              {
+                "id": "cs/call-to-object-tostring"
+              },
+              {
+                "id": "cs/useless-if-statement"
+              },
+              {
+                "id": "cs/coupled-types"
+              },
+              {
+                "id": "cs/call-to-unmanaged-code"
+              },
+              {
+                "id": "cs/class-name-comparison"
+              },
+              {
+                "id": "cs/virtual-call-in-constructor"
+              },
+              {
+                "id": "cs/empty-catch-block"
+              },
+              {
+                "id": "cs/constant-condition"
+              },
+              {
+                "id": "cs/class-name-matches-base-class"
+              },
+              {
+                "id": "cs/field-masks-base-field"
+              },
+              {
+                "id": "cs/local-shadows-member"
+              },
+              {
+                "id": "cs/too-many-ref-parameters"
+              },
+              {
+                "id": "cs/expose-implementation"
+              },
+              {
+                "id": "cs/cast-from-abstract-to-concrete-collection"
+              },
+              {
+                "id": "cs/catch-nullreferenceexception"
+              },
+              {
+                "id": "cs/path-combine",
+                "defaultConfiguration": {
+                  "enabled": true,
+                  "level": "note"
+                },
+                "properties": {
+                  "tags": [
+                    "quality",
+                    "reliability",
+                    "correctness"
+                  ],
+                  "description": "'Path.Combine' may silently drop its earlier arguments\n              if its later arguments are absolute paths.",
+                  "id": "cs/path-combine",
+                  "kind": "problem",
+                  "name": "Call to 'System.IO.Path.Combine' may silently drop its earlier arguments",
+                  "precision": "very-high",
+                  "problem.severity": "recommendation"
+                }
+              },
+              {
+                "id": "cs/unmanaged-code"
+              }
+            ]
+          },
+          {
+            "name": "codeql/csharp-all",
+            "rules": []
+          },
+          {
+            "name": "codeql/threat-models",
+            "rules": []
+          }
+        ]
+      },
+      "results": [
+        {
+          "ruleId": "cs/insecure-sql-connection",
+          "rule": {
+            "id": "cs/insecure-sql-connection",
+            "index": 47,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/complex-condition",
+          "rule": {
+            "id": "cs/complex-condition",
+            "index": 106,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/local-not-disposed",
+          "rule": {
+            "id": "cs/local-not-disposed",
+            "index": 116,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/catch-of-all-exceptions",
+          "rule": {
+            "id": "cs/catch-of-all-exceptions",
+            "index": 124,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/catch-of-all-exceptions",
+          "rule": {
+            "id": "cs/catch-of-all-exceptions",
+            "index": 124,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/linq/missed-where",
+          "rule": {
+            "id": "cs/linq/missed-where",
+            "index": 137,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        },
+        {
+          "ruleId": "cs/path-combine",
+          "rule": {
+            "id": "cs/path-combine",
+            "index": 162,
+            "toolComponent": {
+              "index": 0
+            }
+          },
+          "message": {
+            "text": "Redacted fixture finding"
+          }
+        }
+      ]
+    }
+  ]
+}

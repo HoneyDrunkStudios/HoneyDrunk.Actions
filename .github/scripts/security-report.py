@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -82,6 +83,104 @@ def severity_for(result, rule, scanner):
     return {'error': 'high', 'warning': 'moderate', 'note': 'low', 'none': 'low'}.get(level, 'unknown')
 
 
+def validate_guid(source):
+    if 'guid' in source:
+        guid = source['guid']
+        require(isinstance(guid, str) and re.fullmatch(
+            r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}', guid),
+            'Invalid SARIF GUID')
+
+
+def same_identity(actual, expected, key):
+    if key == 'guid':
+        return isinstance(actual, str) and isinstance(expected, str) and actual.lower() == expected.lower()
+    return actual == expected
+
+
+def referenced_component(tool, reference):
+    """Resolve SARIF 2.1.0 section 3.54 without crossing component namespaces."""
+    require(isinstance(reference, dict), 'Invalid SARIF tool component reference')
+    validate_guid(reference)
+    extensions = tool.get('extensions', [])
+    require(isinstance(extensions, list) and all(isinstance(item, dict) for item in extensions),
+            'Invalid SARIF tool extensions')
+    if 'index' in reference:
+        index = reference['index']
+        require(type(index) is int and 0 <= index < len(extensions), 'Invalid SARIF tool component index')
+        component = extensions[index]
+    elif 'guid' in reference:
+        matches = [item for item in [tool['driver'], *extensions] if same_identity(item.get('guid'), reference['guid'], 'guid')]
+        require(len(matches) == 1, 'Unresolved or ambiguous SARIF tool component')
+        component = matches[0]
+    else:
+        component = tool['driver']
+    require(isinstance(component.get('name'), str) and component['name'].strip(),
+            'Missing or invalid SARIF tool component name')
+    validate_guid(component)
+    if 'guid' in component:
+        require(sum(same_identity(item.get('guid'), component['guid'], 'guid')
+                    for item in [tool['driver'], *extensions]) == 1, 'Ambiguous SARIF tool component GUID')
+    for key in ('name', 'guid'):
+        if key in reference:
+            require(isinstance(reference[key], str) and bool(reference[key]) and
+                    same_identity(component.get(key), reference[key], key), 'SARIF tool component identity mismatch')
+    return component
+
+
+def referenced_rule(tool, result):
+    """Resolve nested and legacy rule references, rejecting conflicting metadata."""
+    reference = result.get('rule', {})
+    require(isinstance(reference, dict), 'Invalid SARIF rule reference')
+    validate_guid(reference)
+    reference = reference.copy()
+    for source, key in ((reference, 'index'), (result, 'ruleIndex')):
+        if key in source:
+            require(type(source[key]) is int and source[key] >= 0, 'Invalid SARIF rule index')
+    for nested, legacy in (('id', 'ruleId'), ('index', 'ruleIndex')):
+        if legacy in result:
+            require(nested not in reference or reference[nested] == result[legacy],
+                    'SARIF rule reference mismatch')
+            reference[nested] = result[legacy]
+    require('rule' not in result or 'index' in reference or 'guid' in reference,
+            'SARIF rule reference requires index or GUID')
+    for key in ('id', 'guid'):
+        if key in reference:
+            require(isinstance(reference[key], str) and (key == 'id' or bool(reference[key])),
+                    'Invalid SARIF rule identity')
+    component = referenced_component(tool, reference.get('toolComponent', {}))
+    rules = component.get('rules', [])
+    require(isinstance(rules, list) and all(isinstance(rule, dict) for rule in rules), 'Invalid SARIF rules')
+    if 'index' in reference:
+        index = reference['index']
+        require(type(index) is int and 0 <= index < len(rules), 'Invalid SARIF rule index')
+        rule = rules[index]
+    else:
+        identities = ['guid'] if 'guid' in reference else ['id'] if 'id' in reference else []
+        matches = [rule for rule in rules if identities and
+                   all(same_identity(rule.get(key), reference[key], key) for key in identities)]
+        require(len(matches) <= 1, 'Ambiguous SARIF rule identity')
+        # A result can carry its own severity without an embedded descriptor.
+        # An explicit rule reference, however, promises that descriptor exists.
+        require(matches or 'rule' not in result, 'Unresolved SARIF rule reference')
+        rule = matches[0] if matches else None
+    if rule is None:
+        return {}
+    validate_guid(rule)
+    if 'guid' in rule:
+        require(sum(same_identity(item.get('guid'), rule['guid'], 'guid') for item in rules) == 1,
+                'Ambiguous SARIF rule GUID')
+    require(isinstance(rule.get('id'), str), 'Missing or invalid SARIF descriptor identity')
+    if 'id' in reference:
+        descriptor_id = rule.get('id')
+        # SARIF permits one extra result-specific hierarchical ID component.
+        parent_id, separator, _ = reference['id'].rpartition('/')
+        require(reference['id'] == descriptor_id or
+                bool(separator and parent_id == descriptor_id), 'SARIF rule identity mismatch')
+    if 'guid' in reference:
+        require(same_identity(rule.get('guid'), reference['guid'], 'guid'), 'SARIF rule identity mismatch')
+    return rule
+
+
 def sarif_counts(root, scanner):
     directory = {'sast': 'sast-report', 'secret': 'secret-scan-report', 'iac': 'iac-security-report'}[scanner]
     paths = sorted((root / directory).rglob('*.sarif'))
@@ -105,7 +204,6 @@ def sarif_counts(root, scanner):
                         'SARIF invocation failed or lacks success status')
             rules = driver.get('rules', [])
             require(isinstance(rules, list) and all(isinstance(rule, dict) for rule in rules), 'Invalid SARIF rules')
-            by_id = {rule['id']: rule for rule in rules if isinstance(rule.get('id'), str)}
             results = run.get('results')
             require(isinstance(results, list), 'Missing SARIF results')
             for result in results:
@@ -113,11 +211,7 @@ def sarif_counts(root, scanner):
                 message = result.get('message')
                 require(isinstance(message, dict) and any(isinstance(message.get(key), str) and message[key]
                         for key in ('text', 'markdown', 'id')), 'Missing SARIF result message')
-                rule = by_id.get(result.get('ruleId'), {})
-                if 'ruleIndex' in result:
-                    index = result['ruleIndex']
-                    require(type(index) is int and 0 <= index < len(rules), 'Invalid SARIF rule index')
-                    rule = rules[index]
+                rule = referenced_rule(tool, result)
                 severities.append(severity_for(result, rule, scanner))
     return counts_for(severities)
 
@@ -269,3 +363,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+
