@@ -141,6 +141,8 @@ def referenced_rule(tool, result):
             require(nested not in reference or reference[nested] == result[legacy],
                     'SARIF rule reference mismatch')
             reference[nested] = result[legacy]
+    require('rule' not in result or 'index' in reference or 'guid' in reference,
+            'SARIF rule reference requires index or GUID')
     for key in ('id', 'guid'):
         if key in reference:
             require(isinstance(reference[key], str) and (key == 'id' or bool(reference[key])),

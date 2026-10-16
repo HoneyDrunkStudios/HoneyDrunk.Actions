@@ -113,7 +113,7 @@ class SecurityReportTests(unittest.TestCase):
 
     def test_extension_rule_resolution_forms_and_component_isolation(self):
         for reference in ({'index': 0}, {'name': 'extension', 'index': 0}, {'guid': '11111111-1111-4111-8111-111111111111'}):
-            for rule_reference in ({'id': 'R1'}, {'index': 0}, {'guid': '22222222-2222-4222-8222-222222222222'}):
+            for rule_reference in ({'id': 'R1', 'index': 0}, {'index': 0}, {'guid': '22222222-2222-4222-8222-222222222222'}):
                 with self.subTest(component=reference, rule=rule_reference):
                     data = copy.deepcopy(self.sarif)
                     tool = data['runs'][0]['tool']
@@ -129,7 +129,7 @@ class SecurityReportTests(unittest.TestCase):
 
     def test_legacy_and_nested_driver_references(self):
         tool = {'driver': {'name': 'scanner', 'rules': [{'id': 'R1', 'properties': {'security-severity': '8'}}]}}
-        for result in ({'ruleId': 'R1'}, {'ruleIndex': 0}, {'rule': {'id': 'R1'}},
+        for result in ({'ruleId': 'R1'}, {'ruleIndex': 0}, {'rule': {'id': 'R1', 'index': 0}},
                        {'rule': {'index': 0}}, {'ruleId': 'R1', 'ruleIndex': 0, 'rule': {'id': 'R1', 'index': 0}}):
             with self.subTest(result=result):
                 self.assertEqual(reporter.referenced_rule(tool, result), tool['driver']['rules'][0])
@@ -190,6 +190,28 @@ class SecurityReportTests(unittest.TestCase):
         tool['extensions'] = [{'guid': '33333333-3333-4333-8333-333333333333'}, {'guid': '33333333-3333-4333-8333-333333333333'}]
         with self.assertRaises(ValueError):
             reporter.referenced_rule(tool, {'rule': {'toolComponent': {'guid': '33333333-3333-4333-8333-333333333333'}}})
+
+    def test_explicit_rule_needs_locator_even_when_id_matches(self):
+        self.env['FAIL_ON_HIGH_SEVERITY'] = 'false'
+        for extension in (True, False):
+            with self.subTest(extension=extension):
+                data = copy.deepcopy(self.sarif)
+                component = {'name': 'scanner', 'rules': [{'id': 'LOW', 'properties': {'security-severity': '1.0'}}]}
+                reference = {'id': 'LOW'}
+                if extension:
+                    data['runs'][0]['tool']['extensions'] = [component]
+                    reference['toolComponent'] = {'index': 0}
+                else:
+                    data['runs'][0]['tool']['driver'] = component
+                data['runs'][0]['results'] = [{'message': {'text': 'Finding'}, 'rule': reference}]
+                self.write('sast-report/results.sarif', data)
+                report = self.report()
+                self.assertTrue(report['blocked'])
+                self.assertEqual(report['scans']['sast']['status'], 'error')
+                # A legacy top-level index can supply the nested reference's locator.
+                data['runs'][0]['results'][0]['ruleIndex'] = 0
+                self.write('sast-report/results.sarif', data)
+                reporter.check_gate(self.report())
 
     def test_index_cannot_bypass_duplicate_guid_ambiguity(self):
         self.env['FAIL_ON_HIGH_SEVERITY'] = 'false'
