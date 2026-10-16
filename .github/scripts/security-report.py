@@ -91,6 +91,12 @@ def validate_guid(source):
             'Invalid SARIF GUID')
 
 
+def same_identity(actual, expected, key):
+    if key == 'guid':
+        return isinstance(actual, str) and isinstance(expected, str) and actual.lower() == expected.lower()
+    return actual == expected
+
+
 def referenced_component(tool, reference):
     """Resolve SARIF 2.1.0 section 3.54 without crossing component namespaces."""
     require(isinstance(reference, dict), 'Invalid SARIF tool component reference')
@@ -103,7 +109,7 @@ def referenced_component(tool, reference):
         require(type(index) is int and 0 <= index < len(extensions), 'Invalid SARIF tool component index')
         component = extensions[index]
     elif 'guid' in reference:
-        matches = [item for item in [tool['driver'], *extensions] if item.get('guid') == reference['guid']]
+        matches = [item for item in [tool['driver'], *extensions] if same_identity(item.get('guid'), reference['guid'], 'guid')]
         require(len(matches) == 1, 'Unresolved or ambiguous SARIF tool component')
         component = matches[0]
     else:
@@ -112,7 +118,7 @@ def referenced_component(tool, reference):
     for key in ('name', 'guid'):
         if key in reference:
             require(isinstance(reference[key], str) and bool(reference[key]) and
-                    reference[key] == component.get(key), 'SARIF tool component identity mismatch')
+                    same_identity(component.get(key), reference[key], key), 'SARIF tool component identity mismatch')
     return component
 
 
@@ -144,7 +150,7 @@ def referenced_rule(tool, result):
     else:
         identities = ['guid'] if 'guid' in reference else ['id'] if 'id' in reference else []
         matches = [rule for rule in rules if identities and
-                   all(rule.get(key) == reference[key] for key in identities)]
+                   all(same_identity(rule.get(key), reference[key], key) for key in identities)]
         require(len(matches) <= 1, 'Ambiguous SARIF rule identity')
         # A result can carry its own severity without an embedded descriptor.
         # An explicit rule reference, however, promises that descriptor exists.
@@ -161,7 +167,7 @@ def referenced_rule(tool, result):
         require(reference['id'] == descriptor_id or
                 bool(separator and parent_id == descriptor_id), 'SARIF rule identity mismatch')
     if 'guid' in reference:
-        require(reference['guid'] == rule.get('guid'), 'SARIF rule identity mismatch')
+        require(same_identity(rule.get('guid'), reference['guid'], 'guid'), 'SARIF rule identity mismatch')
     return rule
 
 

@@ -191,6 +191,33 @@ class SecurityReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             reporter.referenced_rule(tool, {'rule': {'toolComponent': {'guid': '33333333-3333-4333-8333-333333333333'}}})
 
+    def test_guid_resolution_ignores_hexadecimal_case(self):
+        component_guid = 'abcdefab-cdef-4abc-8abc-abcdefabcdef'
+        rule_guid = 'fedcbafe-dcba-4fed-9fed-fedcbafedcba'
+        rule = {'id': 'CaseSensitive', 'guid': rule_guid, 'properties': {'security-severity': '7.5'}}
+        component = {'name': 'CaseSensitive', 'guid': component_guid, 'rules': [rule]}
+        for driver in (True, False):
+            for indexed in (True, False):
+                with self.subTest(driver=driver, indexed=indexed):
+                    tool = {'driver': component} if driver else {'driver': {'name': 'scanner'}, 'extensions': [component]}
+                    reference = {'id': 'CaseSensitive', 'guid': rule_guid.upper(),
+                                 'toolComponent': {'name': 'CaseSensitive', 'guid': component_guid.upper()}}
+                    if indexed:
+                        reference['index'] = 0
+                        if not driver:
+                            reference['toolComponent']['index'] = 0
+                    self.assertEqual(reporter.referenced_rule(tool, {'rule': reference}), rule)
+                    reference['id'] = 'casesensitive'
+                    with self.assertRaises(ValueError):
+                        reporter.referenced_rule(tool, {'rule': reference})
+        duplicate = dict(component, guid=component_guid.upper())
+        with self.assertRaises(ValueError):
+            reporter.referenced_component({'driver': component, 'extensions': [duplicate]}, {'guid': component_guid})
+        duplicate_rule = dict(rule, guid=rule_guid.upper())
+        with self.assertRaises(ValueError):
+            reporter.referenced_rule({'driver': dict(component, rules=[rule, duplicate_rule])},
+                                     {'rule': {'guid': rule_guid}})
+
     def test_malformed_guids_cannot_resolve_low_severity_metadata(self):
         self.env['FAIL_ON_HIGH_SEVERITY'] = 'false'
         invalid_guids = ('not-a-uuid', '', '22222222222242228222222222222222',
