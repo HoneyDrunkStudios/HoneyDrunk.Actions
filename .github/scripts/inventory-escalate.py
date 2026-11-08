@@ -7,7 +7,7 @@ Tiers:
                  issue if it does not exist.
   imminent_T7 -> add `imminent` label + a comment (idempotent). Open if missing.
   expired_T0  -> create generated/incidents/{date}-{credential}-expired.md in the
-                 HoneyDrunk.Studio checkout via a PR (never direct to main,
+                 HoneyDrunk.Documentation checkout via a PR (never direct to main,
                  ADR-0054), and comment the incident path on the standing issue.
                  Idempotent: skips if today's incident file already exists.
 
@@ -22,7 +22,7 @@ import re
 import subprocess
 import sys
 
-REPO = "HoneyDrunkStudios/HoneyDrunk.Studio"
+REPO = "HoneyDrunkStudios/HoneyDrunk.Documentation"
 LABEL = "external-credential-rotation"
 WORKFLOW_URL = "https://github.com/HoneyDrunkStudios/HoneyDrunk.Actions/blob/main/.github/workflows/external-credentials-check.yml"
 

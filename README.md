@@ -686,7 +686,7 @@ Use the direct request or approved scope in the PR body. Independent CI, PR revi
 
 ## 🔔 Discord Operator-Alerts
 
-`job-discord-notify.yml` is the single CI-side seam for posting operator-alerts to Discord per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Studio/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md). Every GitHub-Actions emitter (CI failure on `main`, release/NuGet events, scheduled-workflow failures, credential-rotation escalations, agent/hive/security signals) routes through this workflow; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 — the reusable-workflow boundary is what allows redaction, formatting consistency, and a vendor-posture swap per ADR-0080 D2).
+`job-discord-notify.yml` is the single CI-side seam for posting operator-alerts to Discord per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Documentation/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md). Every GitHub-Actions emitter (CI failure on `main`, release/NuGet events, scheduled-workflow failures, credential-rotation escalations, agent/hive/security signals) routes through this workflow; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11 — the reusable-workflow boundary is what allows redaction, formatting consistency, and a vendor-posture swap per ADR-0080 D2).
 
 The workflow validates the channel/severity enums, runs a **fail-closed redaction pre-check** over the payload (no secret values, PII, or credentials reach a channel — ADR-0084 D8 / Invariant 8), decorates by severity, and POSTs a formatted embed to the channel's `DISCORD_WEBHOOK_*` org secret. The check runs twice — over the raw inputs and again over the final assembled JSON payload (so a JSON-escaped secret in `metadata` can't decode past it). Both passes share one pattern module, so they can't drift.
 
@@ -722,7 +722,7 @@ jobs:
     secrets: inherit
 ```
 
-Emitters hosted **outside** GitHub Actions are the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Studio/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner. They do not call this workflow — the runner posts from its own PowerShell path, resolving the channel's **runner** webhook (`Discord--{ChannelPascalCase}--RunnerWebhookUrl`) from the `kv-hd-automation-dev` Key Vault, applying the same redaction contract. (No `infrastructure/scripts/discord-notify.ps1` helper is used; the runner owns the non-Actions emitter path directly.)
+Emitters hosted **outside** GitHub Actions are the [ADR-0086](https://github.com/HoneyDrunkStudios/HoneyDrunk.Documentation/blob/main/adrs/ADR-0086-pull-based-local-worker-grid-review-runner.md) pull-based runner. They do not call this workflow — the runner posts from its own PowerShell path, resolving the channel's **runner** webhook (`Discord--{ChannelPascalCase}--RunnerWebhookUrl`) from the `kv-hd-automation-dev` Key Vault, applying the same redaction contract. (No `infrastructure/scripts/discord-notify.ps1` helper is used; the runner owns the non-Actions emitter path directly.)
 
 ### Workflows that emit to Discord
 

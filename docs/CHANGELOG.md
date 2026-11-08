@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Target HoneyDrunk.Documentation in the Grid health, credential inventory, agent checkout and label-seeding workflows. Preserve both former repository names as aliases for the same Grid node.
+
 - `job-review-request.yml`: added configurable explicit bypass labels for ADR-0086 Grid review queueing. The default now honors both the existing `skip-review` label and the clearer `skip-grid-review` alias; bypass remains a visible operator decision, not a docs-only or file-type shortcut.
 
 ### Removed
