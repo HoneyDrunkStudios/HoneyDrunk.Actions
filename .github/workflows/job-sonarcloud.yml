@@ -34,7 +34,7 @@
 # Secret:
 #   SONAR_TOKEN — provisioned as a GitHub org secret with `Selected repositories`
 #   scope. Provisioning lives in `infrastructure/walkthroughs/sonarcloud-organization-setup.md`
-#   in HoneyDrunk.Studio. Respect the token's actual expiry choice; inactivity
+#   in HoneyDrunk.Documentation. Respect the token's actual expiry choice; inactivity
 #   removal is separate from expiration. Never print or persist its value.
 #
 # Single Responsibility:
@@ -134,7 +134,7 @@ on:
 
     secrets:
       sonar-token:
-        description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Studio/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
+        description: 'SONAR_TOKEN — GitHub org secret scoped to HoneyDrunkStudios. Provisioning lives in HoneyDrunk.Documentation/infrastructure/walkthroughs/sonarcloud-organization-setup.md.'
         required: true
       github-token:
         description: 'GitHub token for PR decoration (falls back to github.token if not supplied)'

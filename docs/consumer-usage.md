@@ -16,7 +16,7 @@ Mixed-language consumers of `job-sonarcloud.yml` can pass `generic-coverage-repo
 
 Every caller workflow that consumes a reusable workflow from `HoneyDrunk.Actions` must declare a top-level `permissions:` block. Under `workflow_call`, the callee's `permissions:` block is purely documentary — the effective job token permissions are determined by the **caller**. A caller that omits `permissions:` inherits the repository's default token scope (`contents: read`, all writes `none` in the default GitHub Actions configuration), and any reusable workflow that requests a `write` scope fails at workflow-load time with a validation error, before a single step runs.
 
-This rule is invariant 39 in `HoneyDrunk.Studio/constitution/invariants.md` and is governed by ADR-0012 D5.
+This rule is invariant 39 in `HoneyDrunk.Documentation/constitution/invariants.md` and is governed by ADR-0012 D5.
 
 **Validation failure is silent until the next scheduled run.** If you add a new caller without `permissions:`, your PR may merge cleanly (the workflow-load check runs at trigger time, not at merge time). The grid-health aggregator (`grid-health-report.yml`) classifies the workflow as **Stale** when its scheduled trigger fails to produce a run, surfacing the bug within ~24 hours. The review agent's Request Changes rule (per `.claude/agents/review.md`) is the earlier safety net.
 
@@ -512,7 +512,7 @@ source ref; unrelated labels continue to be seeded.
 
 ## Discord Operator-Alert Notification
 
-**Purpose:** Post one operator-alert to a Discord channel via the canonical seam per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Studio/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md) D9. Every GitHub-Actions emitter routes through `job-discord-notify.yml`; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11).
+**Purpose:** Post one operator-alert to a Discord channel via the canonical seam per [ADR-0084](https://github.com/HoneyDrunkStudios/HoneyDrunk.Documentation/blob/main/adrs/ADR-0084-discord-operator-alerts-surface.md) D9. Every GitHub-Actions emitter routes through `job-discord-notify.yml`; ad-hoc `curl` to a Discord webhook URL elsewhere is forbidden (ADR-0084 D11).
 
 **When to Use:** Any workflow that needs to surface an operator-actionable event (CI failure on `main`, release/NuGet event, scheduled-workflow failure, credential-rotation escalation, agent/hive/security signal). Pick the channel + severity from the ADR-0084 D6 routing table.
 

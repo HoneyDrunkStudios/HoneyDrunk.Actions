@@ -2,7 +2,7 @@
 # Agent Run — Generic Reusable AI Agent Workflow
 # ==============================================================================
 # Purpose:
-#   Reusable workflow that checks out HoneyDrunk.Studio and invokes an
+#   Reusable workflow that checks out HoneyDrunk.Documentation and invokes an
 #   AI agent (Claude Code Action or Codex) against it. Accepts either a named
 #   agent definition (resolved to .claude/agents/{agent}.md in Studio)
 #   or a direct prompt string.
@@ -87,7 +87,7 @@ on:
         type: string
         default: ''
       architecture-ref:
-        description: 'Git ref of HoneyDrunk.Studio to checkout.'
+        description: 'Git ref of HoneyDrunk.Documentation to checkout.'
         required: false
         type: string
         default: 'main'
@@ -118,10 +118,10 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Studio
+      - name: Checkout HoneyDrunk Documentation
         uses: actions/checkout@v5
         with:
-          repository: HoneyDrunkStudios/HoneyDrunk.Studio
+          repository: HoneyDrunkStudios/HoneyDrunk.Documentation
           ref: ${{ inputs.architecture-ref }}
           token: ${{ secrets.github-token }}
 
