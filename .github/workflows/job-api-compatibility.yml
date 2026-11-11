@@ -38,7 +38,7 @@ on:
         default: ''
       
       api-compat-baseline:
-        description: 'Path to baseline API surface file'
+        description: 'Legacy text baseline path (unsupported; leave empty to compare the base git ref)'
         required: false
         type: string
         default: ''
@@ -94,6 +94,6 @@ jobs:
         with:
           working-directory: ${{ inputs.working-directory }}
           project-path: ${{ inputs.project-path }}
-          baseline-ref: ${{ github.event.pull_request.base.ref || 'main' }}
+          baseline-ref: ${{ github.event.pull_request.base.sha || 'refs/remotes/origin/main' }}
           baseline-path: ${{ inputs.api-compat-baseline }}
           fail-on-breaking: 'true'

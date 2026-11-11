@@ -1,0 +1,9 @@
+<Project>
+  <!-- Build-owned outputs only: never glob dependency or test DLLs. -->
+  <Target Name="HoneyDrunkCollectApi" AfterTargets="Build"
+          Condition="'$(TargetFramework)' != '' and '$(IsTestProject)' != 'true' and '$(OutputType)' == 'Library'">
+    <PropertyGroup><_ApiReferences>@(ReferencePath->'%(FullPath)', ',')</_ApiReferences></PropertyGroup>
+    <WriteLinesToFile File="$(ApiInventory)" Overwrite="false"
+      Lines="$(MSBuildProjectFullPath)|$(TargetFramework)|$(TargetPath)|$(_ApiReferences)" />
+  </Target>
+</Project>
