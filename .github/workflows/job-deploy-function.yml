@@ -43,10 +43,16 @@ on:
         default: 'function-app'
 
       package-path:
-        description: 'Path within the artifact to the publish output (directory or zip)'
+        description: 'Artifact download directory; deployed as a directory unless package-file is set'
         required: false
         type: string
         default: './publish'
+
+      package-file:
+        description: 'Optional ZIP basename in the downloaded artifact; deploys the existing archive unchanged'
+        required: false
+        type: string
+        default: ''
 
       functions-app:
         description: 'Azure Function App name'
@@ -176,6 +182,28 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.package-path }}
 
+      - name: Resolve deployment package
+        id: package
+        shell: bash
+        env:
+          PACKAGE_PATH: ${{ inputs.package-path }}
+          PACKAGE_FILE: ${{ inputs.package-file }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PACKAGE_FILE" ]; then
+            if [[ ! "$PACKAGE_FILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$ ]]; then
+              echo "::error::package-file must be a ZIP basename, without directories."
+              exit 1
+            fi
+            PACKAGE_PATH="$PACKAGE_PATH/$PACKAGE_FILE"
+            if [[ ! -f "$PACKAGE_PATH" || -L "$PACKAGE_PATH" ]]; then
+              echo "::error::The requested ZIP package is missing or is a symbolic link."
+              exit 1
+            fi
+            unzip -tq "$PACKAGE_PATH"
+          fi
+          echo "path=$PACKAGE_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Azure Login
         uses: azure/login@v3
         with:
@@ -247,7 +275,7 @@ jobs:
         with:
           app-name: ${{ inputs.functions-app }}
           resource-group: ${{ inputs.resource-group }}
-          package-path: ${{ inputs.package-path }}
+          package-path: ${{ steps.package.outputs.path }}
           slot-name: ${{ inputs.slot-name }}
           swap-to-production: ${{ inputs.swap-to-production }}
           health-check-url: ${{ inputs.health-check-url }}

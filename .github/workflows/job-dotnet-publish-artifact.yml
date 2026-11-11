@@ -64,6 +64,24 @@ on:
         type: boolean
         default: true
 
+      runtime-identifier:
+        description: 'Optional publish RID; requires no-build: false'
+        required: false
+        type: string
+        default: ''
+
+      self-contained:
+        description: 'Bundle the runtime for a Linux RID; requires package-file and no-build: false'
+        required: false
+        type: boolean
+        default: false
+
+      package-file:
+        description: 'Optional ZIP basename created before artifact upload to preserve Unix executable modes'
+        required: false
+        type: string
+        default: ''
+
       actions-ref:
         description: 'Git ref of HoneyDrunk.Actions to use'
         required: false
@@ -99,6 +117,37 @@ jobs:
           repository: HoneyDrunkStudios/HoneyDrunk.Actions
           path: .github/actions-repo
           ref: ${{ inputs.actions-ref }}
+
+      - name: Validate publish options
+        shell: bash
+        env:
+          RUNTIME_IDENTIFIER: ${{ inputs.runtime-identifier }}
+          SELF_CONTAINED: ${{ inputs.self-contained }}
+          PACKAGE_FILE: ${{ inputs.package-file }}
+          NO_BUILD: ${{ inputs.no-build }}
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$PACKAGE_FILE" && ! "$PACKAGE_FILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$ ]]; then
+            echo "::error::package-file must be a ZIP basename, without directories."
+            exit 1
+          fi
+          if [[ -n "$RUNTIME_IDENTIFIER" ]]; then
+            if [[ ! "$RUNTIME_IDENTIFIER" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ || "$NO_BUILD" != "false" ]]; then
+              echo "::error::A runtime-identifier must be a valid RID and requires no-build: false."
+              exit 1
+            fi
+          fi
+          if [[ "$SELF_CONTAINED" == "true" ]]; then
+            if [[ ! "$RUNTIME_IDENTIFIER" =~ ^linux-(x64|arm64)$ || -z "$PACKAGE_FILE" || "$NO_BUILD" != "false" ]]; then
+              echo "::error::Self-contained publishing requires a Linux RID, package-file, and no-build: false."
+              exit 1
+            fi
+          fi
+          if [[ -n "$PACKAGE_FILE" && "$RUNNER_OS_NAME" != "Linux" ]]; then
+            echo "::error::ZIP packaging requires a Linux runner to preserve Unix executable modes."
+            exit 1
+          fi
 
       - name: Setup .NET SDK
         uses: ./.github/actions-repo/.github/actions/dotnet/setup
@@ -137,12 +186,21 @@ jobs:
           PUBLISH_OUTPUT: ${{ inputs.publish-output }}
           CONFIGURATION: ${{ inputs.configuration }}
           NO_BUILD: ${{ inputs.no-build }}
+          RUNTIME_IDENTIFIER: ${{ inputs.runtime-identifier }}
+          SELF_CONTAINED: ${{ inputs.self-contained }}
         run: |
           set -euo pipefail
 
           ARGS=("$PUBLISH_PROJECT" --configuration "$CONFIGURATION" --output "$PUBLISH_OUTPUT")
           if [ "$NO_BUILD" = "true" ]; then
             ARGS+=(--no-build)
+          fi
+
+          if [ -n "$RUNTIME_IDENTIFIER" ]; then
+            ARGS+=(--runtime "$RUNTIME_IDENTIFIER")
+          fi
+          if [ "$SELF_CONTAINED" = "true" ]; then
+            ARGS+=(--self-contained true)
           fi
 
           dotnet publish "${ARGS[@]}"
@@ -153,6 +211,7 @@ jobs:
         env:
           WORKING_DIR: ${{ inputs.working-directory }}
           PUBLISH_OUTPUT: ${{ inputs.publish-output }}
+          PACKAGE_FILE: ${{ inputs.package-file }}
         run: |
           set -euo pipefail
           # actions/upload-artifact@v6 rejects path patterns containing any '.'
@@ -163,6 +222,14 @@ jobs:
           # exist) to derive a clean workspace-relative path for upload.
           abs="$(realpath -m -- "${GITHUB_WORKSPACE}/${WORKING_DIR}/${PUBLISH_OUTPUT}")"
           rel="$(realpath -m --relative-to="${GITHUB_WORKSPACE}" -- "${abs}")"
+          if [ -n "$PACKAGE_FILE" ]; then
+            # An inner ZIP survives upload/download-artifact's 0644 file-mode
+            # normalization. Archive outside publish output, including dotfiles,
+            # with host.json/apphost at the root. Deploy this exact ZIP unchanged.
+            archive_dir="$(mktemp -d "${GITHUB_WORKSPACE}/.dotnet-package-XXXXXX")"
+            (cd "$abs" && zip -r -q "$archive_dir/$PACKAGE_FILE" .)
+            rel="$(realpath --relative-to="$GITHUB_WORKSPACE" "$archive_dir/$PACKAGE_FILE")"
+          fi
           echo "path=${rel}" >> "$GITHUB_OUTPUT"
           echo "Resolved upload path: ${rel}"
 

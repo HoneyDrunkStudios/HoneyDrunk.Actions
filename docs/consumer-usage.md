@@ -1162,6 +1162,41 @@ permissions:
   id-token: write
 ```
 
+### Self-contained Linux Functions packages
+
+Existing callers still publish a directory without overriding the project's runtime
+mode. To bundle a runtime, opt in at the build job:
+
+```yaml
+with:
+  runtime-identifier: linux-x64
+  self-contained: true
+  no-build: false
+  package-file: function-app.zip
+```
+
+Set `package-file: function-app.zip` on each corresponding `job-deploy-function.yml`
+call. `package-path` remains the artifact download directory (`./publish` by
+default). The deploy job validates and passes the inner ZIP unchanged to the
+existing deployment action, which already accepts ZIP files. The build ZIP has
+publish files at its root, including `.azurefunctions` and executable Unix modes.
+Uploading loose files loses executable modes in `actions/upload-artifact`; do not
+unpack/repack the ZIP between build and deployment.
+
+`package-file` must be a simple `.zip` basename. ZIP packaging requires a Linux
+runner; self-contained mode requires `linux-x64` or `linux-arm64`, that ZIP option,
+and `no-build: false` so RID-specific assets are restored and built. Any explicit
+RID also requires `no-build: false`. Neither input changes existing build/test
+gates, Azure runtime configuration, deployment environments, or permissions.
+
+The consuming application must use an SDK/host that supports self-contained
+workers and verify the destination plan, architecture and runtime configuration.
+Bundled runtimes do **not** receive host runtime security patches automatically:
+the owner must update the SDK/runtime, rebuild, test and republish to service them.
+This option does not establish a servicing schedule or prove Azure host acceptance.
+See [.NET deployment](https://learn.microsoft.com/en-us/dotnet/core/deploying/)
+and [artifact permission loss](https://github.com/actions/upload-artifact#permission-loss).
+
 ### Deploy with Slot Swap
 
 ```yaml
