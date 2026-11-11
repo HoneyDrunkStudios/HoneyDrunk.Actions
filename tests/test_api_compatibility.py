@@ -148,6 +148,24 @@ class RealApiCompatibility(unittest.TestCase):
         finally:
             api.run(['git', 'reset', '--hard', 'HEAD~1'], self.repo)
 
+    def test_commented_and_unpinned_baselines_build_without_rewriting(self):
+        sources = ['{"test":{"runner":"VSTest"},"sdk":{"allowPrerelease":false}}',
+                   '{ // SDK comment\n "sdk": {"version":"11.0.100", /* exact */ "rollForward":"disable"}}']
+        for source in sources:
+            with self.subTest(source=source):
+                (self.project / 'Class.cs').write_text('public class Contract { public string Value(int input) => ""; }')
+                pin = self.repo / 'global.json'
+                pin.write_text(source)
+                api.run(['git', 'add', 'global.json', 'nested folder/Library/Class.cs'], self.repo)
+                api.run(['git', 'commit', '-m', 'Baseline global config'], self.repo)
+                try:
+                    result, report = self.invoke()
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertEqual('compatible', report['status'])
+                    self.assertEqual(source, pin.read_text())
+                finally:
+                    api.run(['git', 'reset', '--hard', 'HEAD~1'], self.repo)
+
     def test_missing_baseline_sdk_is_not_substituted(self):
         (self.repo / 'global.json').write_text('{"sdk":{"version":"99.0.100","rollForward":"disable"}}')
         api.run(['git', 'add', 'global.json'], self.repo)
@@ -226,6 +244,78 @@ class DetachedPullRequestBaseline(unittest.TestCase):
             workflow = SCRIPT.parents[3] / 'workflows/job-api-compatibility.yml'
             self.assertIn("baseline-ref: ${{ github.event.pull_request.base.sha || 'refs/remotes/origin/main' }}",
                           workflow.read_text())
+
+
+class BaselineGlobalJsonTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('prepare_sdk', SCRIPT.with_name('prepare-sdk.py'))
+        import sys
+        sys.path.insert(0, str(SCRIPT.parent))
+        cls.prepare = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.prepare)
+
+    def test_commented_pin_preserves_strings(self):
+        source = r'''{
+          // Historical SDK selection
+          "sdk": {"version": "10.0.404", /* exact */ "rollForward": "disable"},
+          "note": "https://example.invalid/a/*text*/?value=,} and \"quoted\""
+        }'''
+        data = self.prepare.parse_global_json(source)
+        self.assertEqual('10.0.404', data['sdk']['version'])
+        self.assertIn('https://example.invalid/a/*text*/', data['note'])
+        self.assertIn('"quoted"', data['note'])
+
+    def test_valid_unpinned_configs(self):
+        for data in ({}, {'test': {'runner': 'VSTest'}},
+                     {'msbuild-sdks': {'Example.Sdk': '1.0.0'}},
+                     {'sdk': {'allowPrerelease': False}}):
+            self.assertEqual(data, self.prepare.parse_global_json(json.dumps(data)))
+
+    def test_invalid_configs_still_fail(self):
+        for source in ('{"sdk":', '{/* unterminated', '{"sdk":{"version":null}}',
+                       '{"sdk":{"version":42}}', '{"sdk":{"version":""}}',
+                       '{"sdk":[]}', '[]', '{"a":1,,}', '{"sdk":{"version":"10.0.404",}}'):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                self.prepare.parse_global_json(source)
+
+    def test_preparation_matches_real_sdk_nearest_config(self):
+        with tempfile.TemporaryDirectory(prefix='sdk-json-fixture-') as temp:
+            root = Path(temp)
+            api.run(['git', 'init'], root)
+            api.run(['git', 'config', 'user.email', 'fixture@example.invalid'], root)
+            api.run(['git', 'config', 'user.name', 'Fixture'], root)
+            (root / 'global.json').write_text('{"sdk":{"version":"99.0.100"}}')
+            nested = root / 'nested space'
+            nested.mkdir()
+            pin = nested / 'global.json'
+            cases = [
+                ('{"test":{"runner":"VSTest"}}', None),
+                ('{"msbuild-sdks":{}}', None),
+                ('{"sdk":{"allowPrerelease":false}}', None),
+                ('{ // pin\n "sdk": {"version":"10.0.404", /* exact */ "rollForward":"disable"}}', '10.0.404'),
+            ]
+            for source, version in cases:
+                with self.subTest(source=source):
+                    pin.write_text(source)
+                    api.run(['git', 'add', '.'], root)
+                    api.run(['git', 'commit', '-m', 'SDK config fixture'], root)
+                    output = root / 'output'
+                    output.unlink(missing_ok=True)
+                    result = subprocess.run(['python3', str(SCRIPT.with_name('prepare-sdk.py'))],
+                                            cwd=nested, capture_output=True, text=True,
+                                            env={**os.environ, 'API_BASELINE_REF': 'HEAD',
+                                                 'RUNNER_TEMP': temp, 'GITHUB_OUTPUT': str(output)})
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    resolved = api.run(['dotnet', '--version'], nested).stdout.strip()
+                    if version:
+                        self.assertEqual(version, resolved)
+                        prepared = Path(output.read_text().strip().removeprefix('global-json='))
+                        self.assertEqual(version, json.loads(prepared.read_text())['sdk']['version'])
+                    else:
+                        self.assertFalse(output.exists(), 'Do not install an ancestor SDK pin')
+                        self.assertRegex(resolved, r'^11\.0\.')
+                    self.assertEqual(source, pin.read_text(), 'Do not rewrite baseline configuration')
 
 
 if __name__ == '__main__':
