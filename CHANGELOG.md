@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - Isolated private CodeQL permissions
+
+- Add minimal Actions read access through the PR Core/CodeQL chain, with same-revision nested resolution. Adopt only via an approved immutable pin; shared-ref rollout requires coordinating all callers first. Security findings gates are unchanged.
+
 ## Unreleased - Terraform directory provider coverage
 
 - Validate AzureRM, AzureAD, AzAPI and Microsoft Graph with exact provider-source allowlisting, transitive mock coverage and per-root subsets of the reviewed checksum lock. Live operations and authentication remain disabled.

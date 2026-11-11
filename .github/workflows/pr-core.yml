@@ -268,7 +268,8 @@ jobs:
   codeql:
     name: CodeQL
     if: ${{ inputs.enable-codeql }}
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-codeql.yml@main
+    # Keep the CodeQL permission fix at the same reviewed revision as PR Core.
+    uses: ./.github/workflows/job-codeql.yml
     with:
       dotnet-version: ${{ inputs.dotnet-version }}
       runs-on: ${{ inputs.runs-on }}
@@ -278,6 +279,7 @@ jobs:
       fail-on-severity: ${{ inputs.codeql-fail-on-severity }}
       actions-ref: ${{ inputs.actions-ref }}
     permissions:
+      actions: read
       contents: read
       security-events: write
 

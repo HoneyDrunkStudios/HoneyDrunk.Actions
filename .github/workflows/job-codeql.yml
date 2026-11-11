@@ -95,6 +95,7 @@ on:
         value: ${{ jobs.codeql.outputs.note-count }}
 
 permissions:
+  actions: read # CodeQL resolves workflow-run metadata for private repositories.
   contents: read
   security-events: write
 
