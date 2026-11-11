@@ -1,4 +1,4 @@
-"""Exercise the shipped traffic guard and workflow shell with Azure stubbed."""
+"""Exercise shipped revision, health and traffic boundaries with Azure/HTTP stubbed."""
 
 import importlib.util
 import json
@@ -20,10 +20,243 @@ SPEC.loader.exec_module(TRAFFIC)
 APP = 'ca-hd-example-dev'
 PREVIOUS = APP + '--healthy'
 NEW = APP + '--candidate'
+APP_FQDN = APP + '.example.azurecontainerapps.io'
+NEW_FQDN = NEW + '.example.azurecontainerapps.io'
+REVISION_ACTION = yaml.safe_load((ROOT / '.github/actions/azure/deploy-container-app/action.yml').read_text())
+REVISION_SCRIPT = REVISION_ACTION['runs']['steps'][0]['run']
 
 
 def target(revision=PREVIOUS, weight=100, **extra):
     return dict(revisionName=revision, weight=weight, **extra)
+
+
+def revision(state='Running', fqdn=NEW_FQDN, name=NEW):
+    return dict(name=name, properties=dict(runningState=state, fqdn=fqdn))
+
+
+class RevisionShellTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.work = Path(self.temp.name)
+        self.calls = self.work / 'calls'
+        self.output = self.work / 'output'
+        self.sleeps = self.work / 'sleeps'
+        self.urls = self.work / 'urls'
+        self.responses = self.work / 'responses.json'
+        self.responses.write_text(json.dumps([revision()]))
+        (self.work / '.actions').symlink_to(ROOT, target_is_directory=True)
+        self.env = dict(os.environ, APP_NAME=APP, RESOURCE_GROUP='rg-test',
+                        IMAGE='registry.example/collector@sha256:' + 'a' * 64,
+                        REVISION_SUFFIX='candidate', STARTUP_WAIT='0', READY_TIMEOUT='10',
+                        PATH=str(self.work) + os.pathsep + os.environ['PATH'],
+                        GITHUB_OUTPUT=str(self.output), AZ_CALLS=str(self.calls),
+                        RESPONSES=str(self.responses), POLL_COUNT=str(self.work / 'count'),
+                        SLEEPS=str(self.sleeps), PROBE_URLS=str(self.urls),
+                        APP_FQDN=APP_FQDN,
+                        HEALTH_CHECK_URL='/health', HEALTH_CHECK_TIMEOUT='10', HTTP_CODE='200',
+                        NEW_REVISION=NEW, CURRENT_REVISION=PREVIOUS,
+                        EXPECTED_REVISION=PREVIOUS, TRAFFIC_SHIFT_MODE='full')
+        self.write_command('az', '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+with Path(os.environ['AZ_CALLS']).open('a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+if args[:3] == ['containerapp', 'revision', 'copy']:
+    sys.exit(int(os.environ.get('AZ_COPY_EXIT', '0')))
+if args[:3] == ['containerapp', 'revision', 'show']:
+    count = Path(os.environ['POLL_COUNT'])
+    index = int(count.read_text()) if count.exists() else 0
+    count.write_text(str(index + 1))
+    responses = json.loads(Path(os.environ['RESPONSES']).read_text())
+    response = responses[min(index, len(responses) - 1)]
+    print(response if isinstance(response, str) else json.dumps(response))
+    sys.exit(int(os.environ.get('AZ_READ_EXIT', '0')))
+if args[:2] == ['containerapp', 'show']:
+    # Deliberately healthy old app ingress: this must never be a fallback.
+    print(os.environ['APP_NAME'] + '.example.azurecontainerapps.io')
+    sys.exit(0)
+if args[:4] == ['containerapp', 'ingress', 'traffic', 'show']:
+    print(json.dumps([dict(revisionName=os.environ['CURRENT_REVISION'], weight=100)]))
+    sys.exit(0)
+if args[:4] == ['containerapp', 'ingress', 'traffic', 'set']:
+    sys.exit(0)
+raise SystemExit('Unexpected Azure operation')
+''')
+        self.write_command('sleep', '#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$SLEEPS"\n')
+        self.write_command('curl', '''#!/usr/bin/env bash
+printf '%s\\n' "${@: -1}" >> "$PROBE_URLS"
+if [[ "${@: -1}" == "https://$APP_FQDN/"* ]]; then
+    printf '200'
+else
+    printf '%s' "$HTTP_CODE"
+fi
+exit "${CURL_EXIT:-0}"
+''')
+
+    def write_command(self, name, content):
+        path = self.work / name
+        path.write_text(content)
+        path.chmod(0o755)
+
+    def run_script(self, script, **overrides):
+        return subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                              cwd=self.work, env=dict(self.env, **overrides),
+                              capture_output=True, text=True, timeout=10)
+
+    def run_deploy(self, responses=None, **overrides):
+        if responses is not None:
+            self.responses.write_text(json.dumps(responses))
+        return self.run_script(REVISION_SCRIPT, **overrides)
+
+    def text(self, path):
+        return path.read_text() if path.exists() else ''
+
+    def azure_calls(self):
+        return [json.loads(line) for line in self.text(self.calls).splitlines()]
+
+    def assert_not_deployed(self, result):
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.text(self.output), '')
+        self.assertFalse(self.urls.exists())
+        self.assertTrue(all(call[:2] != ['containerapp', 'show'] for call in self.azure_calls()))
+        self.assertTrue(all(call[:3] != ['containerapp', 'ingress', 'traffic'] for call in self.azure_calls()))
+
+    def test_running_candidate_publishes_only_exact_revision_outputs(self):
+        result = self.run_deploy(STARTUP_WAIT='15')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.text(self.output), f'revision-name={NEW}\nrevision-fqdn={NEW_FQDN}\n')
+        copy, show = self.azure_calls()
+        self.assertEqual(copy, ['containerapp', 'revision', 'copy', '--name', APP,
+                               '--resource-group', 'rg-test', '--image', self.env['IMAGE'],
+                               '--revision-suffix', 'candidate', '--output', 'none'])
+        self.assertEqual(show, ['containerapp', 'revision', 'show', '--name', APP,
+                               '--resource-group', 'rg-test', '--revision', NEW, '--output', 'json'])
+        self.assertEqual(self.text(self.sleeps), '15\n')
+
+    def test_waits_for_fqdn_after_running(self):
+        result = self.run_deploy([revision(fqdn=None), revision(fqdn=''), revision()])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.azure_calls()), 4)
+        self.assertEqual(self.text(self.sleeps), '5\n5\n')
+        self.assertIn(f'revision-fqdn={NEW_FQDN}', self.text(self.output))
+
+    def test_waits_for_running_even_with_exact_fqdn(self):
+        result = self.run_deploy([revision(state='Processing'), revision()])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.text(self.sleeps), '5\n')
+
+    def test_duration_leading_zeros_are_decimal(self):
+        result = self.run_deploy([revision(fqdn=None)], READY_TIMEOUT='008', STARTUP_WAIT='000')
+        self.assert_not_deployed(result)
+        self.assertIn('within 8s', result.stdout)
+        self.assertEqual(self.text(self.sleeps), '5\n3\n')
+
+    def test_startup_wait_leading_zeros_and_largest_timeout_are_supported(self):
+        result = self.run_deploy(READY_TIMEOUT='09223372036854775807', STARTUP_WAIT='008')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.text(self.sleeps), '8\n')
+
+    def test_invalid_durations_fail_before_any_azure_write(self):
+        sentinel = self.work / 'unexpected-command'
+        values = ['', '-1', '1.5', ' 8', '8 ', '1+1', '1e2',
+                  '9223372036854775808', '0009223372036854775808', '9' * 100,
+                  f'$(touch {sentinel})', f'value[$(touch {sentinel})]']
+        for name in ['READY_TIMEOUT', 'STARTUP_WAIT']:
+            for value in values:
+                with self.subTest(name=name, value=value):
+                    self.assert_not_deployed(self.run_deploy(**{name: value}))
+                    self.assertEqual(self.azure_calls(), [])
+                    self.assertFalse(sentinel.exists())
+        self.assertEqual(self.text(self.sleeps), '')
+
+    def test_preserves_top_level_revision_fqdn_response(self):
+        response = revision(fqdn=None)
+        response['fqdn'] = NEW_FQDN
+        result = self.run_deploy([response])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'revision-fqdn={NEW_FQDN}', self.text(self.output))
+
+    def test_missing_fqdn_times_out_without_healthy_app_fallback(self):
+        result = self.run_deploy([revision(fqdn=None)], READY_TIMEOUT='7')
+        self.assert_not_deployed(result)
+        self.assertIn('did not expose a revision-specific FQDN within 7s', result.stdout)
+        self.assertEqual(self.text(self.sleeps), '5\n2\n')
+        self.assertEqual(len(self.azure_calls()), 4)
+
+    def test_old_revision_and_app_ingress_hostnames_are_rejected(self):
+        for fqdn in [APP_FQDN, PREVIOUS + '.example.azurecontainerapps.io',
+                     NEW + '-old.example.azurecontainerapps.io']:
+            with self.subTest(fqdn=fqdn):
+                self.assert_not_deployed(self.run_deploy([revision(fqdn=fqdn)]))
+        self.assertEqual(self.text(self.sleeps), '')
+
+    def test_invalid_endpoint_cannot_publish_a_url_or_forged_output(self):
+        for fqdn in ['https://' + NEW_FQDN, NEW_FQDN + '/health', NEW_FQDN + ':443',
+                     NEW_FQDN + '\nhealthy=true', NEW + '..example.io', {'host': NEW_FQDN}]:
+            with self.subTest(fqdn=fqdn):
+                self.assert_not_deployed(self.run_deploy([revision(fqdn=fqdn)]))
+
+    def test_mismatched_or_missing_revision_identity_is_rejected(self):
+        for name in [PREVIOUS, APP, None, '']:
+            with self.subTest(name=name):
+                self.assert_not_deployed(self.run_deploy([revision(name=name)]))
+
+    def test_readiness_timeout_and_failed_state_publish_no_outputs(self):
+        for state in ['Processing', 'Failed', 'Degraded', None]:
+            with self.subTest(state=state):
+                result = self.run_deploy([revision(state=state)], READY_TIMEOUT='0')
+                self.assert_not_deployed(result)
+                self.assertIn('did not reach Running state', result.stdout)
+        self.assertEqual(self.text(self.sleeps), '')
+
+    def test_copy_and_read_failures_cannot_succeed(self):
+        for setting in ['AZ_COPY_EXIT', 'AZ_READ_EXIT']:
+            with self.subTest(setting=setting):
+                self.assert_not_deployed(self.run_deploy(**{setting: '1'}))
+
+    def test_invalid_json_fails_closed(self):
+        self.assert_not_deployed(self.run_deploy(['not json']))
+
+    def test_relative_probe_targets_candidate_before_promotion(self):
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        outputs = dict(line.split('=', 1) for line in self.text(self.output).splitlines())
+        probe = self.run_script(BY_ID['health-check']['run'], REVISION_FQDN=outputs['revision-fqdn'])
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        self.assertEqual(self.text(self.urls), f'https://{NEW_FQDN}/health\n')
+        promoted = self.run_script(BY_ID['shift-traffic']['run'])
+        self.assertEqual(promoted.returncode, 0, promoted.stderr)
+        self.assertIn(NEW + '=100', self.azure_calls()[-1])
+
+    def test_unhealthy_candidate_fails_even_when_old_ingress_is_healthy(self):
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        probe = self.run_script(BY_ID['health-check']['run'], REVISION_FQDN=NEW_FQDN, HTTP_CODE='503')
+        self.assertNotEqual(probe.returncode, 0)
+        self.assertIn('healthy=false', self.text(self.output))
+        self.assertEqual(self.text(self.urls).splitlines(), [f'https://{NEW_FQDN}/health'] * 2)
+        self.assertEqual(len(self.azure_calls()), 2)
+
+    def test_probe_connection_failure_cannot_become_success(self):
+        probe = self.run_script(BY_ID['health-check']['run'], REVISION_FQDN=NEW_FQDN,
+                                HTTP_CODE='000', CURL_EXIT='7')
+        self.assertNotEqual(probe.returncode, 0)
+        self.assertEqual(self.text(self.output), 'healthy=false\n')
+        self.assertEqual(self.azure_calls(), [])
+
+    def test_input_defaults_and_workflow_failure_gates_are_preserved(self):
+        self.assertEqual(REVISION_ACTION['inputs']['startup-wait']['default'], '15')
+        self.assertEqual(REVISION_ACTION['inputs']['health-check-timeout']['default'], '120')
+        self.assertEqual(WORKFLOW['permissions'], {'contents': 'read', 'id-token': 'write'})
+        self.assertFalse(BY_ID['deploy-container-app'].get('continue-on-error', False))
+        self.assertFalse(BY_ID['health-check'].get('continue-on-error', False))
+        self.assertEqual(BY_ID['health-check']['if'], "${{ inputs.health-check-url != '' }}")
+        self.assertEqual(BY_ID['health-check']['env']['REVISION_FQDN'],
+                         '${{ steps.deploy-container-app.outputs.revision-fqdn }}')
+        self.assertIn("steps.deploy-container-app.outcome == 'success'", BY_ID['shift-traffic']['if'])
+        self.assertIn("steps.health-check.outcome == 'success'", BY_ID['shift-traffic']['if'])
 
 
 class TrafficContractTests(unittest.TestCase):

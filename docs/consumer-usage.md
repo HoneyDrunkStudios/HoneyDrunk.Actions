@@ -1081,7 +1081,7 @@ Secret name mapping:
 | Output | Description |
 |---|---|
 | `revision-name` | Created Container App revision name. |
-| `revision-fqdn` | Revision-specific FQDN when available. |
+| `revision-fqdn` | Validated revision-specific FQDN; missing or mismatched endpoints fail deployment. |
 | `deployment-status` | `success`, `health-check-failed`, or `deploy-failed`. |
 
 ### Traffic Shift Modes
@@ -1115,7 +1115,22 @@ A canary leaves two traffic-bearing revisions intentionally. Before the next rol
 
 `deployment-status` remains `success`, `health-check-failed`, or `deploy-failed`. Success requires the whole job so far to be successful, a completed revision deployment, a successful requested health probe, and a completed traffic step. Checkout, setup, preflight, Azure-read errors, cancellation, or skipped required stages cannot report success. If cancellation prevents the final status step itself from running, its output can be absent: callers must use the job result as authoritative. Summary traffic percent is `not confirmed` when the shift step produced no confirmed outcome.
 
-These changes preserve the existing health-probe inputs and their semantics. A relative `health-check-url` is intended to target the candidate's revision-specific FQDN; empty input skips the HTTP probe. Existing absolute-URL and app-FQDN-fallback behavior is unchanged and is not evidence that a particular candidate passed an application-level probe.
+The revision action polls the exact created revision until it is Running and has
+a direct FQDN whose first DNS label is that revision's name. Missing endpoints
+are polled within the readiness budget; mismatched revision names, app ingress
+hostnames, old revision hostnames, invalid responses, and Azure-read failures
+fail closed before probing or shifting traffic. App ingress is never used as a
+fallback because it may still serve the previous revision. Apps without a
+revision-specific endpoint now fail even when no HTTP probe was requested.
+Readiness and startup durations must be nonnegative decimal integer seconds
+within signed 64-bit range. Leading zeros are normalized as decimal; invalid
+durations fail before revision creation.
+
+Existing health-probe inputs and defaults are unchanged. A relative
+`health-check-url` targets the validated candidate FQDN; empty input still skips
+the HTTP probe. Explicit absolute URLs remain caller-controlled and are not
+evidence that a particular candidate passed an application-level probe. Use a
+relative path for candidate health gating.
 
 ### Permissions
 

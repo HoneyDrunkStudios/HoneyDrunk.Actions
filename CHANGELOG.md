@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - Container App revision health target
+
+- Wait for the created revision's Running state and matching direct FQDN before downstream health checks. Fail closed on missing, stale or app-wide endpoints instead of probing old traffic through app ingress. Existing traffic guards, permissions, probe inputs and defaults are unchanged; callers without a revision-specific endpoint must resolve that prerequisite before rollout.
+
 ## Unreleased - Terraform directory provider coverage
 
 - Validate AzureRM, AzureAD, AzAPI and Microsoft Graph with exact provider-source allowlisting, transitive mock coverage and per-root subsets of the reviewed checksum lock. Live operations and authentication remain disabled.
