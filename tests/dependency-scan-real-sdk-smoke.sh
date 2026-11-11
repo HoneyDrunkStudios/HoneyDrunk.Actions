@@ -15,8 +15,8 @@ fi
   cd "$TMP_ROOT"
 
   dotnet new sln -n RealScan >/dev/null
-  dotnet new classlib -n App -f net8.0 >/dev/null
-  dotnet new classlib -n Lib -f net8.0 >/dev/null
+  dotnet new classlib -n App -f net11.0 >/dev/null
+  dotnet new classlib -n Lib -f net11.0 >/dev/null
   dotnet sln RealScan.slnx add ./App/App.csproj ./Lib/Lib.csproj >/dev/null
 
   export DEPENDENCY_SCAN_PROJECT_PATH="RealScan.slnx"

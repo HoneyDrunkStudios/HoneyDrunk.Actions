@@ -8,6 +8,10 @@ This document provides sample workflows for consuming repos to adopt the HoneyDr
 
 > Authoritative per ADR-0012 D9 (Decision: caller-workflow scaffolding is documented here). The canonical baselines below are the source of truth for invariant 39 (caller-workflow `permissions:` superset rule).
 
+## .NET 11 consumers
+
+Pass `dotnet-version: '11.0.100'` to every .NET build, test, format, API compatibility, dependency-scan and Sonar job when upgrading a consumer to .NET 11. Align the value with that repository's `global.json`. The setup action can also read an explicit `global-json-file`; its fallback and reusable workflow defaults remain .NET 10 for consumers that have not migrated. The Actions repository validates its real formatter and dependency scanner with .NET 11.
+
 ## Script coverage
 
 Mixed-language consumers of `job-sonarcloud.yml` can pass `generic-coverage-report-path: TestResults/script-coverage.xml` for measured [Sonar generic coverage](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/test-coverage/generic-test-data). Collect execution coverage with the language's test tool, convert its real line/branch counts, and include that XML in the artifact selected by `coverage-artifact-name` alongside the existing OpenCover files. The artifact downloads under the caller's `TestResults` directory. An explicitly requested missing report fails before upload; no report is synthesized, no tests are excluded, and server/new-code gates remain unchanged. For push-to-main, the caller must also produce its script report before analysis; the built-in fallback runs only .NET tests.
@@ -620,7 +624,7 @@ jobs:
       dotnet-version: '10.0.x'
       configuration: 'Release'
       project-path: './src/MyLibrary/MyLibrary.csproj'
-      api-compat-baseline: './api-baseline.txt'
+      # Leave api-compat-baseline empty: compare compiled contracts against the base git ref.
       coverage-threshold: 80
       enable-secret-scan: true
       post-pr-summary: true
@@ -1800,3 +1804,39 @@ For questions, issues, or feature requests:
 
 The credential-free Terraform validator accepts the reviewed AzureRM, AzureAD, AzAPI, and Microsoft Graph provider sources. Every provider used by a root or its local child modules must have a default mock. Aliases, external modules, and provider overrides remain rejected. Each target receives only its required providers from the shared lock, with the original versions and checksums preserved. No live plan or backend authentication runs in this workflow.
 
+
+### Compiled API compatibility
+
+The API compatibility action compares build-owned public library assemblies with
+Microsoft.DotNet.ApiCompat.Tool 11.0.100, not IL text or output-directory DLL globs.
+It builds both revisions in Release, restores dependencies, excludes test projects
+(`IsTestProject=true`) and executables, and compares every baseline project/TFM.
+Paths are relative to `working-directory`; specify `project-path` when that
+directory does not contain exactly one solution or project. Paths with spaces and
+nested working directories are supported. Reports use absolute paths and include
+the resolved baseline commit and each compared framework.
+
+The baseline ref must already exist locally (`fetch-depth: 0` in the shared job).
+No remote baseline is fetched implicitly. The action installs the baseline's
+nearest ancestor `global.json` SDK independently, then the pinned .NET 11 tool
+runtime; it does not replace either checkout's SDK policy. Restore, unavailable SDK,
+missing target/ref/assembly/reference, and tool failures fail the check even when
+`fail-on-breaking` is false. Such reports have `status: error` and
+`breaking_changes: null`, and do not emit a misleading zero output.
+
+Matching TFMs are compared independently. When an ordinary `netN.M` target was
+retired, its API is compared to the nearest newer `netN.M` target in the same
+project. The report explicitly records `framework_migrations` and status
+`api-compatible-framework-support-changed` when API checks otherwise pass, and
+emits a warning: **this does not preserve support for the retired runtime**.
+Platform-qualified or incompatible framework families are not guessed. Removing
+a project/framework without an eligible replacement is a breaking change.
+`breaking-changes` counts ApiCompat diagnostics plus removed project/framework
+contracts, rather than claiming a count of every potentially affected consumer.
+
+Legacy `baseline-path` / `api-compat-baseline` text snapshots are explicitly
+unsupported and fail with instructions to use `baseline-ref`. No text snapshot is
+produced as a purported reusable binary baseline. ApiCompat establishes public
+assembly API compatibility, not behavioral compatibility, serialization stability,
+or support on older runtimes; retain consumer contract tests for those guarantees.
+See [Microsoft's ApiCompat tool documentation](https://learn.microsoft.com/dotnet/fundamentals/apicompat/global-tool).

@@ -23,7 +23,7 @@ class FormatterTests(unittest.TestCase):
         cls.solution_dir.mkdir()
         for command in [
             ['dotnet', 'new', 'sln', '-n', 'Fixture', '-o', str(cls.solution_dir)],
-            ['dotnet', 'new', 'classlib', '-f', 'net10.0', '-o', str(cls.solution_dir / 'App')],
+            ['dotnet', 'new', 'classlib', '-f', 'net11.0', '-o', str(cls.solution_dir / 'App')],
             ['dotnet', 'sln', str(cls.solution_dir / 'Fixture.slnx'), 'add',
              str(cls.solution_dir / 'App/App.csproj')],
         ]:

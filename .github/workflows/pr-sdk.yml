@@ -62,7 +62,7 @@ on:
         default: ''
       
       api-compat-baseline:
-        description: 'Path to baseline API surface file for compatibility check'
+        description: 'Legacy text baseline path (unsupported; leave empty to compare the base git ref)'
         required: false
         type: string
         default: ''
