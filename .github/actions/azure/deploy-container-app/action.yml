@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: 'Deploy Container App Revision'
-description: 'Create an Azure Container Apps revision from an existing revision and wait until it is running'
+description: 'Create an Azure Container Apps revision and wait for Running state and its revision-specific endpoint'
 inputs:
   app-name:
     description: 'Azure Container App name'
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: '15'
   health-check-timeout:
-    description: 'Maximum seconds to wait for the revision to reach Running state'
+    description: 'Seconds to poll for Running state and a revision-specific FQDN'
     required: false
     default: '120'
 outputs:
@@ -49,6 +49,26 @@ runs:
           echo "::error::app-name, resource-group, image, and revision-suffix are required"
           exit 1
         fi
+
+        normalize_seconds() {
+          local VALUE="$1"
+          local INPUT_NAME="$2"
+          if [[ ! "$VALUE" =~ ^[0-9]+$ ]]; then
+            echo "::error::$INPUT_NAME must be nonnegative decimal seconds" >&2
+            return 1
+          fi
+          # Bash arithmetic treats leading zeros as octal. Normalize before
+          # creating a revision and reject values outside signed 64-bit range.
+          VALUE=$(printf '%s' "$VALUE" | sed -E 's/^0+//')
+          VALUE=${VALUE:-0}
+          if [ "${#VALUE}" -gt 19 ] || { [ "${#VALUE}" -eq 19 ] && [[ "$VALUE" > 9223372036854775807 ]]; }; then
+            echo "::error::$INPUT_NAME exceeds the supported integer range" >&2
+            return 1
+          fi
+          printf '%s' "$VALUE"
+        }
+        READY_TIMEOUT=$(normalize_seconds "$READY_TIMEOUT" health-check-timeout)
+        STARTUP_WAIT=$(normalize_seconds "$STARTUP_WAIT" startup-wait)
 
         # Container Apps revision suffixes must be DNS-label friendly and fit within
         # the generated revision name length limit. Keep the caller-provided trace
@@ -92,17 +112,38 @@ runs:
             --revision "$REVISION_NAME" \
             --output json)
 
+          RETURNED_NAME=$(echo "$REVISION_JSON" | jq -r '.name // empty')
+          if [ "$RETURNED_NAME" != "$REVISION_NAME" ]; then
+            echo "::error::Revision lookup did not return the requested revision '$REVISION_NAME'"
+            exit 1
+          fi
+
           RUNNING_STATE=$(echo "$REVISION_JSON" | jq -r '.properties.runningState // .properties.healthState // empty')
           REVISION_FQDN=$(echo "$REVISION_JSON" | jq -r '.properties.fqdn // .fqdn // empty')
 
-          if [ "$RUNNING_STATE" = "Running" ]; then
-            echo "Revision is Running"
+          # App ingress can still serve the previous revision in Multiple mode.
+          # Only the named candidate's direct hostname is safe for downstream probes.
+          if [ -n "$REVISION_FQDN" ] && { [[ "$REVISION_FQDN" != "$REVISION_NAME".* ]] \
+            || [[ ! "$REVISION_FQDN" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; }; then
+            echo "::error::Revision '$REVISION_NAME' returned an invalid or non-matching revision FQDN"
+            exit 1
+          fi
+
+          if [ "$RUNNING_STATE" = "Running" ] && [ -n "$REVISION_FQDN" ]; then
+            echo "Revision is Running with a revision-specific FQDN"
             break
           fi
 
-          echo "Revision state: ${RUNNING_STATE:-unknown}; retrying in ${INTERVAL}s..."
-          sleep "$INTERVAL"
-          ELAPSED=$((ELAPSED + INTERVAL))
+          if [ "$ELAPSED" -ge "$READY_TIMEOUT" ]; then
+            break
+          fi
+          WAIT=$((READY_TIMEOUT - ELAPSED))
+          if [ "$WAIT" -gt "$INTERVAL" ]; then
+            WAIT=$INTERVAL
+          fi
+          echo "Waiting for Running state and revision FQDN (state: ${RUNNING_STATE:-unknown}); retrying in ${WAIT}s..."
+          sleep "$WAIT"
+          ELAPSED=$((ELAPSED + WAIT))
         done
 
         if [ "$RUNNING_STATE" != "Running" ]; then
@@ -111,13 +152,8 @@ runs:
         fi
 
         if [ -z "$REVISION_FQDN" ]; then
-          APP_FQDN=$(az containerapp show \
-            --name "$APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --query "properties.configuration.ingress.fqdn" \
-            --output tsv)
-          REVISION_FQDN="$APP_FQDN"
-          echo "::warning::Could not resolve a revision-specific FQDN; falling back to app ingress FQDN"
+          echo "::error::Revision '$REVISION_NAME' did not expose a revision-specific FQDN within ${READY_TIMEOUT}s; refusing to use app ingress"
+          exit 1
         fi
 
         if [ "$STARTUP_WAIT" -gt 0 ]; then
