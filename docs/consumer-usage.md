@@ -1407,7 +1407,7 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/nightly-deps.yml@main
     with:
       dotnet-version: '10.0.x'
-      node-version: '20.x'
+      node-version: '22.23.5'
       check-dotnet-deps: true
       check-npm-deps: true
       create-update-prs: true

@@ -104,7 +104,7 @@ class NodeWorkspaceTests(unittest.TestCase):
         return result, artifact, report
 
     def test_inherited_defaults_and_order_remain_compatible(self):
-        inherited = {'runs-on': 'ubuntu-latest', 'working-directory': '.', 'node-version': '22',
+        inherited = {'runs-on': 'ubuntu-latest', 'working-directory': '.', 'node-version': '22.23.5',
                      'node-version-file': '', 'package-manager': 'npm',
                      'cache-dependency-path': 'package-lock.json', 'install-command': 'npm ci',
                      'build-command': 'npm run build', 'test-command': 'npm test',
@@ -115,6 +115,15 @@ class NodeWorkspaceTests(unittest.TestCase):
                                     'browser-install', 'accessibility', 'e2e'])
         self.assertEqual(DEFAULTS['timeout-minutes'], 360)
         self.assertFalse(DEFAULTS['run-typecheck'])
+
+    def test_all_node_defaults_and_smoke_fixture_use_patched_release(self):
+        for name in ('job-node-workspace', 'job-node-security-audit',
+                     'job-node-dependency-report', 'nightly-deps', 'nightly-accessibility'):
+            with self.subTest(workflow=name):
+                workflow = yaml.safe_load((ROOT / f'.github/workflows/{name}.yml').read_text(encoding='utf-8'))
+                self.assertEqual(workflow[True]['workflow_call']['inputs']['node-version']['default'], '22.23.5')
+        fixture_version = (ROOT / 'tests/fixtures/node-workspace/.nvmrc').read_text(encoding='utf-8').strip()
+        self.assertEqual(fixture_version, '22.23.5')
 
     def test_read_only_pinned_contract_and_caller_owned_concurrency(self):
         self.assertEqual(WORKFLOW['permissions'], {'contents': 'read'})
@@ -377,7 +386,7 @@ class NodeWorkspaceTests(unittest.TestCase):
             artifact.rename(target)
             (target / 'test-results').mkdir()
             (target / 'test-results/runtime.json').write_text(json.dumps({
-                'node': '22.23.3', 'npm': '10.9.2' if profile == 'npm-pinned' else '10.9.9'}), encoding='utf-8')
+                'node': '22.23.5', 'npm': '10.9.2' if profile == 'npm-pinned' else '10.9.9'}), encoding='utf-8')
             (target / 'test-results/junit.xml').write_text(
                 '<testsuites><testsuite><testcase name="executed"/></testsuite></testsuites>', encoding='utf-8')
             artifacts.append(target)
@@ -395,6 +404,16 @@ class NodeWorkspaceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('producer attempt 1, verifier attempt 2', result.stdout)
         self.assertIn('producer attempt 2, verifier attempt 2', result.stdout)
+
+    def test_verifier_rejects_unpatched_node_runtime(self):
+        artifact = self.smoke_artifacts()[0]
+        runtime_path = artifact / 'test-results/runtime.json'
+        runtime = json.loads(runtime_path.read_text(encoding='utf-8'))
+        runtime['node'] = '22.23.3'
+        runtime_path.write_text(json.dumps(runtime), encoding='utf-8')
+        result = self.execute_smoke_verifier()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('22.23.3', result.stderr)
 
     def test_verifier_rejects_ambiguous_profile_artifacts(self):
         artifacts = self.smoke_artifacts()

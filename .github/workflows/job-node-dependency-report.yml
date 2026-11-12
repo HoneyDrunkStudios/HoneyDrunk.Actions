@@ -17,7 +17,7 @@ on:
         description: Node.js version to install when node-version-file is empty.
         required: false
         type: string
-        default: '22'
+        default: '22.23.5'
       node-version-file:
         description: Optional path to a Node version file, relative to working-directory.
         required: false

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased - Node security patch
+
+- Pin Node workflows, examples and the smoke fixture to 22.23.5 for the November 11, 2026 security fixes. Nightly dependency and accessibility jobs move from EOL Node 20 to supported Node 22; caller overrides remain supported.
+- Require the exact patched runtime in hosted smoke evidence and cover stale runtime evidence with a regression test. Audit thresholds and package-manager behavior are unchanged.
+
 ## Unreleased - Container App revision health target
 
 - Wait for the created revision's Running state and matching direct FQDN before downstream health checks. Fail closed on missing, stale or app-wide endpoints instead of probing old traffic through app ingress. Existing traffic guards, permissions, probe inputs and defaults are unchanged; callers without a revision-specific endpoint must resolve that prerequisite before rollout.

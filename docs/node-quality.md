@@ -7,8 +7,16 @@ HoneyDrunk.Actions owns this CI boundary. HoneyDrunk.Pipelines is deprecated.
 
 ## Consumer contract
 
-Existing defaults remain: `runs-on: ubuntu-latest`, `working-directory: .`,
-`node-version: '22'`, `node-version-file: ''`, `package-manager: npm`,
+The default runtime is pinned to Node.js 22.23.5, the November 11, 2026
+[security release](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases).
+Node workspace, audit, dependency-report, nightly dependency and accessibility
+jobs use this patched supported line; the latter two no longer default to EOL
+Node 20. Explicit caller versions and version files still take precedence, so
+callers pinned to older Actions revisions must update their own Node selection.
+No dependency lockfile, package-manager default or audit threshold is changed.
+
+Defaults include: `runs-on: ubuntu-latest`, `working-directory: .`,
+`node-version: '22.23.5'`, `node-version-file: ''`, `package-manager: npm`,
 `cache-dependency-path: package-lock.json`, `install-command: npm ci`,
 `build-command: npm run build`, `test-command: npm test`, and
 `lint-command: npm run lint`. `run-build`, `run-test`, and `run-lint` remain true.

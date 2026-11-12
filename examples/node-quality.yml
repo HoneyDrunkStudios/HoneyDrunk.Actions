@@ -22,7 +22,7 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-workspace.yml@NODE_QUALITY_COMMIT
     with:
       working-directory: .
-      node-version: '22'
+      node-version: '22.23.5'
       install-command: npm ci
       test-command: npm run test:coverage
       run-typecheck: true
@@ -37,7 +37,7 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-workspace.yml@NODE_QUALITY_COMMIT
     with:
       working-directory: .
-      node-version: '22'
+      node-version: '22.23.5'
       # Run all fast checks again against the exact manual/tag checkout.
       test-command: npm run test:coverage
       run-typecheck: true
@@ -54,6 +54,6 @@ jobs:
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-node-security-audit.yml@NODE_QUALITY_COMMIT
     with:
       working-directory: .
-      node-version: '22'
+      node-version: '22.23.5'
       # This existing job defaults to --workspaces; a single-package app overrides it.
       audit-command: npm audit --audit-level=high --json
