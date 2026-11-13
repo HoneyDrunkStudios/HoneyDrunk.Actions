@@ -118,8 +118,18 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
   pr-validation:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
 ```
 
@@ -382,6 +392,7 @@ jobs:
     # pull-requests: write are scoped here too so additional jobs don't
     # inherit them implicitly.
     permissions:
+      actions: read
       contents: read
       checks: write
       issues: write          # lets pr-metadata-check manage out-of-band / pr-size manage large-pr
@@ -445,6 +456,7 @@ permissions:
 jobs:
   pr-validation:
     permissions:
+      actions: read
       contents: read
       checks: write
       issues: write          # lets pr-metadata-check manage out-of-band / pr-size manage large-pr
@@ -609,6 +621,7 @@ permissions:
 jobs:
   pr-sdk-validation:
     permissions:
+      actions: read
       contents: read
       checks: write
       pull-requests: write
@@ -634,6 +647,7 @@ permissions:
 jobs:
   pr-sdk-validation:
     permissions:
+      actions: read
       contents: read
       checks: write
       pull-requests: write
@@ -1670,6 +1684,13 @@ permissions:
 jobs:
   # PR validation
   pr-validation:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     if: github.event_name == 'pull_request'
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     with:
@@ -1752,11 +1773,25 @@ permissions:
 
 jobs:
   pr-validation-linux:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
       runs-on: 'ubuntu-latest'
 
   pr-validation-windows:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
       runs-on: 'windows-latest'
@@ -1812,6 +1847,13 @@ jobs:
    # New
    jobs:
      pr-validation:
+       permissions:
+         actions: read
+         contents: read
+         checks: write
+         pull-requests: write
+         security-events: write
+         issues: write
        uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
    ```
 

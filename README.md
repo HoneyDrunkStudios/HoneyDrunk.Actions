@@ -121,6 +121,8 @@ permissions:
 jobs:
   pr-validation:
     permissions:
+      actions: read
+      issues: write
       contents: read
       checks: write
       pull-requests: write
@@ -147,6 +149,8 @@ permissions:
 jobs:
   pr-sdk-validation:
     permissions:
+      actions: read
+      issues: write
       contents: read
       checks: write
       pull-requests: write
