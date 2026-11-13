@@ -28,8 +28,8 @@ The canonical permissions baselines below are minimum sets. Granting more than r
 
 | Reusable workflow | Minimum caller `permissions:` |
 |---|---|
-| `pr-core.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
-| `pr-sdk.yml` | `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
+| `pr-core.yml` (this isolated revision) | `actions: read`, `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
+| `pr-sdk.yml` (this isolated revision) | `actions: read`, `contents: read`, `pull-requests: write`, `checks: write`, `security-events: write`, `issues: write` |
 | `job-node-workspace.yml` | `contents: read` |
 | `job-rust-workspace.yml` | `contents: read` |
 | `job-node-dependency-report.yml` | `contents: read` |
@@ -75,6 +75,26 @@ For workflows not explicitly listed in ADR-0012 D5, the baseline is derived from
 
 ---
 
+## Private CodeQL permission rollout
+
+This isolated revision requires `actions: read` on the caller job that invokes
+`pr-core.yml` or `pr-sdk.yml`, in addition to its existing permissions. CodeQL needs read access
+to workflow-run metadata on private repositories. The nested CodeQL workflow is
+relative, so it resolves at the same commit as its orchestrator. Pin both the consumer's
+`uses` reference and `actions-ref` input to the reviewed full commit SHA.
+
+Do not merge this permission change onto a shared moving ref until every caller
+of PR Core and CodeQL, including nested PR SDK callers and active PR branches,
+has the required permission through its entire chain. Until then, keep this
+revision on its isolated branch and adopt it only in explicitly approved callers.
+Unchanged consumers must continue using the existing shared revision.
+
+GitHub Code Security must separately be enabled for private repositories. Keep
+advanced CodeQL setup: enabling default setup conflicts with custom SARIF uploads.
+This workflow does not activate repository features, purchase licenses, change
+branch protection, or relax findings thresholds. Verify analysis, SARIF processing,
+and the Code Scanning API gate on the consumer's exact head after adoption.
+
 ## PR Core Workflow
 
 **Purpose:** Fast PR validation for most repos. Required check that provides quick feedback.
@@ -98,8 +118,18 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
   pr-validation:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
 ```
 
@@ -362,6 +392,7 @@ jobs:
     # pull-requests: write are scoped here too so additional jobs don't
     # inherit them implicitly.
     permissions:
+      actions: read
       contents: read
       checks: write
       issues: write          # lets pr-metadata-check manage out-of-band / pr-size manage large-pr
@@ -425,6 +456,7 @@ permissions:
 jobs:
   pr-validation:
     permissions:
+      actions: read
       contents: read
       checks: write
       issues: write          # lets pr-metadata-check manage out-of-band / pr-size manage large-pr
@@ -589,6 +621,7 @@ permissions:
 jobs:
   pr-sdk-validation:
     permissions:
+      actions: read
       contents: read
       checks: write
       pull-requests: write
@@ -614,6 +647,7 @@ permissions:
 jobs:
   pr-sdk-validation:
     permissions:
+      actions: read
       contents: read
       checks: write
       pull-requests: write
@@ -1650,6 +1684,13 @@ permissions:
 jobs:
   # PR validation
   pr-validation:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     if: github.event_name == 'pull_request'
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-sdk.yml@main
     with:
@@ -1732,11 +1773,25 @@ permissions:
 
 jobs:
   pr-validation-linux:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
       runs-on: 'ubuntu-latest'
 
   pr-validation-windows:
+    permissions:
+      actions: read
+      contents: read
+      checks: write
+      pull-requests: write
+      security-events: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
       runs-on: 'windows-latest'
@@ -1792,6 +1847,13 @@ jobs:
    # New
    jobs:
      pr-validation:
+       permissions:
+         actions: read
+         contents: read
+         checks: write
+         pull-requests: write
+         security-events: write
+         issues: write
        uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
    ```
 

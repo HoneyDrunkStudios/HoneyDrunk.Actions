@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - Isolated private CodeQL permissions
+
+- Add minimal Actions read access through the PR Core/PR SDK/CodeQL chains, with same-revision nested resolution. Shared-ref rollout remains held until every caller is coordinated and exact-head consumer canaries pass. Security findings gates are unchanged.
+
 ## Unreleased - Container App revision health target
 
 - Wait for the created revision's Running state and matching direct FQDN before downstream health checks. Fail closed on missing, stale or app-wide endpoints instead of probing old traffic through app ingress. Existing traffic guards, permissions, probe inputs and defaults are unchanged; callers without a revision-specific endpoint must resolve that prerequisite before rollout.
@@ -83,4 +87,3 @@
 ### Removed
 
 - `job-review-request.yml`: removed the deprecated ADR-0044/OpenClaw compatibility inputs (`openclaw-webhook-url`, `upload-fallback-artifact`, `post-fallback-comment`, `artifact-name`) and the no-op `openclaw-webhook-secret` workflow-call secret. The reusable workflow now exposes only the ADR-0086 local-worker queue contract plus `github-token`; the org secret itself is not removed here.
-
