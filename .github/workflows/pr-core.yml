@@ -268,7 +268,7 @@ jobs:
   codeql:
     name: CodeQL
     if: ${{ inputs.enable-codeql }}
-    # Keep the CodeQL permission fix at the same reviewed revision as PR Core.
+    # Resolve CodeQL at the same reviewed revision as this orchestrator.
     uses: ./.github/workflows/job-codeql.yml
     with:
       dotnet-version: ${{ inputs.dotnet-version }}

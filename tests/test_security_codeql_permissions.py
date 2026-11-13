@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PrivateCodeqlPermissionsTests(unittest.TestCase):
     def setUp(self):
+        self.sdk = yaml.safe_load((ROOT / '.github/workflows/pr-sdk.yml').read_text(encoding='utf-8'))
         self.core = yaml.safe_load((ROOT / '.github/workflows/pr-core.yml').read_text(encoding='utf-8'))
         self.codeql = yaml.safe_load((ROOT / '.github/workflows/job-codeql.yml').read_text(encoding='utf-8'))
 
@@ -19,6 +20,16 @@ class PrivateCodeqlPermissionsTests(unittest.TestCase):
         checkout = next(step for step in self.codeql['jobs']['codeql']['steps']
                         if step['name'] == 'Checkout HoneyDrunk.Actions')
         self.assertEqual(checkout['with']['ref'], '${{ inputs.actions-ref }}')
+
+    def test_sdk_preserves_the_same_permission_and_revision_chain(self):
+        job = self.sdk['jobs']['codeql']
+        self.assertEqual(job['uses'], './.github/workflows/job-codeql.yml')
+        self.assertEqual(job['with']['actions-ref'], '${{ inputs.actions-ref }}')
+        self.assertEqual(job['permissions'], self.core['jobs']['codeql']['permissions'])
+        self.assertNotIn('actions', self.sdk['permissions'])
+        for name, other in self.sdk['jobs'].items():
+            if name != 'codeql':
+                self.assertNotIn('actions', other.get('permissions', {}))
 
     def test_actions_read_is_scoped_to_codeql(self):
         required = {'actions': 'read', 'contents': 'read', 'security-events': 'write'}
